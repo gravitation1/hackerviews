@@ -1,0 +1,11 @@
+.build/
+build/
+build-ios/
+build-cloud/
+build-cloud-ios/
+DerivedData/
+node_modules/
+.DS_Store
+*.xcuserstate
+xcuserdata/
+Config/Signing.local.xcconfig

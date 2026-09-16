@@ -1,0 +1,140 @@
+# Quiet HN
+
+A native **Mac and iPhone** companion for Hacker News. Read and participate on the actual HN website, while privately blocking users and their discussion branches and preserving the reasons with citations.
+
+## Open and run
+
+Open **QuietHN.xcodeproj** in Xcode. Select the **QuietHN** scheme and either **My Mac** or an iPhone simulator, then Run. There are no runtime package dependencies.
+
+The local scheme works without iCloud provisioning. To install on a physical iPhone, choose your development team in Signing & Capabilities, use a bundle identifier you own, connect your phone, and Run. HN login happens inside the app, separately on each device.
+
+Requirements: macOS 14+, iOS 17+, and an Xcode version with the relevant SDK. Developed and compiled using Xcode 27 / Swift 6.
+
+### Built Mac app
+
+After the command-line build below, the app is at `build/Build/Products/Debug/QuietHN.app`. Development builds are not notarized distribution releases.
+
+```sh
+xcodebuild -project QuietHN.xcodeproj -scheme QuietHN \
+  -destination 'platform=macOS,arch=arm64' -derivedDataPath build \
+  CODE_SIGNING_ALLOWED=NO build
+open build/Build/Products/Debug/QuietHN.app
+```
+
+## Using it
+
+- **Read:** HN's real pages, login, upvote/downvote controls (where your account is eligible), replying, and submissions. External articles open in your default browser.
+- **Filters:** a Mac table with Order, Name, Matches, Effect, Status, and Details columns. Search names, matches, notes, and citations; narrow by status, effect, or match type. Column sorting never changes execution priority. Drag the Order handle only in the full execution-order view. Select rows with Command/Shift-click or Select all shown (Command-A), then activate, pause, change effect, move to top/bottom, or delete in bulk. Undo deletion restores the removed rules and positions without overwriting edits to other rules. Double-click a row to open its filter editor. Single-click selects rows; there is no side panel. iPhone uses compact selectable rows with the same search and bulk actions.
+- **Fade:** choose Light (25%), Medium (50%), or Strong (75%) from the Effect menu, bulk actions, or filter editor. This overrides vote-based text coloring and dims matching titles/comments locally. It does not cast votes or fade other authors’ replies. First-match priority still applies.
+- **Matching:** assign multiple users to a shared filter and optionally combine karma, creation date, and age conditions with ANY/ALL. Assigned users OR matching conditions qualify. Each condition has its own comparison direction. Empty filters match nobody. Changes save immediately.
+- **⋯:** opens the author’s private notes and offers to save the captured contribution as a reference. Add or edit their filters from this editor. Notes and citations save immediately; Done closes without a discard prompt.
+- **Saved references:** keep the original permalink, author, source text, context, capture date, and your annotation. Add multiple examples to a record. Later edits or deletions on HN do not change saved snapshots.
+- **Tabs:** use the plus button / ⌘T to open another discussion, and ⌘L to paste an HN link. ⌘R reloads. Back and forward retain HN's normal navigation.
+- **Settings:** export/import JSON backups, inspect sync status, or recover a damaged local journal from the previous successful save.
+
+Opening an original citation in your external browser deliberately leaves the filtered app. Ordinary Firefox/Safari tabs are unaffected.
+
+## Exact filtering behavior
+
+1. Hide a blocked author's submitted stories, including their metadata and list spacer.
+2. Hide their comments and all descendants, preserving ancestors and sibling branches.
+3. Evaluate each author and check ancestry through the official HN API, including the story author. This covers direct comment links, reply pages, flat comment lists, and branches continued on another page.
+4. Keep the browser surface hidden until filtering has finished. Dynamically inserted content and restored pages are checked again.
+5. If one branch's ancestry cannot be verified, hide that branch and keep verified siblings. A direct link whose ancestry cannot be verified stays hidden with a retry action.
+6. Cache observed authors and parent links. Deleted records without previously known authors are unresolved. Quotations or paraphrases in unrelated branches cannot reliably be attributed and are not filtered.
+
+The app does not remove your HN account's participation restrictions or alter other people's view of HN. The original forms and links perform HN actions; the public API is used for account profiles and ancestry checks.
+
+## Enable private iCloud synchronization
+
+iCloud requires Apple provisioning. The code is implemented, but an unsigned local build cannot activate it. A paid Apple Developer membership with CloudKit capability is needed for the Cloud scheme.
+
+1. Create `Config/Signing.local.xcconfig` (gitignored):
+
+   ```xcconfig
+   DEVELOPMENT_TEAM = YOURTEAMID
+   QUIET_HN_BUNDLE_ID = com.yourname.QuietHN
+   QUIET_HN_CLOUD_CONTAINER = iCloud.com.yourname.QuietHN
+   ```
+
+2. In your Apple developer account / Xcode Signing & Capabilities, enable **iCloud → CloudKit**, register that container, and associate it with the app identifier. Use the **same container and bundle identifier** for the Mac and iPhone builds.
+3. Select the **QuietHN Cloud** scheme. Sign in to the same iCloud account on both devices and run this scheme on each.
+4. The first development sync creates a private `QuietHN` record zone and `PersonRevision` records with a `payload` field. No query indexes are required: synchronization enumerates zone changes. Confirm that Settings reports a successful sync on both devices.
+5. Before TestFlight/App Store distribution, deploy the CloudKit schema to production in CloudKit Console, and verify a production-signed build. Development and production databases are separate.
+
+Sync runs after edits, on launch/activation, and once per minute while the app is active. Failed sync leaves local records intact and reports the error. There is no background push requirement. Large individual records exceeding the CloudKit payload limit remain local and exportable, with an explicit sync error.
+
+### Conflict behavior
+
+Every save creates an immutable revision. Devices exchange revisions; the newest timestamp wins, with a stable UUID tie-breaker. All earlier and concurrent revisions remain in **Edit history**, including their notes and citations. Restore any prior version to make it current. This is not automatic text merging: concurrent edits can require reviewing history.
+
+Private notes do not go into HN's DOM or the ancestry API. HN cookies stay in WebKit's on-device website data store. iCloud sync stores only the private record journal. Backups are ordinary JSON containing your private notes and source snapshots; keep them somewhere appropriate.
+
+## Tests
+
+```sh
+# Pure Swift records / ancestry regression tests
+swift test
+
+# DOM filtering tests; jsdom is a development-only dependency
+npm ci --ignore-scripts
+npm test
+
+# Native WebKit integration against public HN, with ephemeral cookies and
+# temporary test records. No login, votes, comments, or submissions.
+zsh scripts/native-smoke.sh
+
+# iPhone simulator build
+xcodebuild -project QuietHN.xcodeproj -scheme QuietHN -sdk iphonesimulator \
+  -destination 'generic/platform=iOS Simulator' -derivedDataPath build-ios \
+  CODE_SIGNING_ALLOWED=NO build
+```
+
+The native smoke suite verifies live HN loading, isolated-world message handling, retained vote links, citation capture, block/unblock behavior, local persistence, history, and availability of the login form. Authenticated voting/comment submission and real two-device iCloud behavior require testing with your accounts; the tests never send participation actions.
+
+## Structure
+
+```text
+QuietHN/Core/          Codable journal, validation, merge, ancestry rules
+QuietHN/Browser/       WebKit host, isolated message bridge, API ancestry cache
+QuietHN/Resources/     Page filter and annotation controls
+QuietHN/Views/         SwiftUI browsing, records, citations, history, backups
+QuietHN/Sync/          Private CloudKit revision exchange
+Config/               Platform entitlements, Info.plist, optional signing config
+Tests/                Swift, DOM, and native WebKit integration tests
+```
+
+`scripts/generate_project.py` regenerates the checked-in Xcode project from the Swift source tree without installing XcodeGen. Put signing overrides in the local xcconfig so regeneration preserves them.
+
+## Remaining release verification
+
+- Select your Apple team and provision CloudKit; test edits, offline changes, and conflicts between your actual Mac and iPhone.
+- Test authenticated upvote/downvote/reply/submit with your own HN account.
+- Visually review both interfaces, including accessibility, text scaling, keyboard use, and the iPhone keyboard. Computer Use permission was unavailable during this build session.
+- Sign and distribute the app through your chosen Apple development/TestFlight/App Store workflow. This repository is a development app, not a published App Store release.
+
+HN can change its markup; regression tests and the native smoke test should be rerun when that happens. The page is held on processing failures instead of silently disabling filters.
+
+### Ordered filter semantics
+
+For each author, filters are evaluated in list order and stop at the first match. Disabled filters and conditions that do not match are skipped. An earlier Highlight or Show normally rule can exempt that author from a later Block rule. When an ancestor’s effect is Block, its entire reply branch remains hidden; highlighting a descendant does not resurrect a blocked branch. Highlights apply only to the matching author’s contributions.
+
+Unknown earlier conditions are not skipped in favor of later rules. If active block rules exist, unresolved account/ancestry checks keep affected content hidden. With only non-blocking rules, unresolved content stays visible without a highlight. Profiles persist in an atomic disk cache across launches. Cached creation dates do not expire; karma is usable for 15 minutes and refreshed only when needed to resolve a rule. The cache is bounded to 20,000 accounts, trimming to 15,000 recent entries when full. Age is calculated in rolling 24-hour days, and dates use the selected local midnight. Reload/retry re-evaluates rules; reordering and valid edits update open pages immediately.
+
+Existing settings migrate into the list with block rules before highlight rules to preserve prior behavior. Notes/citations remain independent. Rule IDs and list order are saved in the revision journal, recovery files, backups, and optional CloudKit payloads. Legacy backups remain readable; once an ordered list exists, legacy person block/preference flags are no longer the active policy. Physical-device provisioning and live iCloud verification remain deferred.
+
+Deletion undo is available within the current Filters view session. Switching views or reopening the app does not retain the UI undo stack; durable backup/revision history remains intact.
+
+Newly created filters take priority 1 in both the account panel and the general filter editor. Existing filters retain their position when edited. Active/Paused text is a one-click status control without a pause/play glyph.
+
+User profiles display the current effect and first matching filter name/priority. Blocked profiles remain readable for review. Unknown results show a retry action rather than an assumed effect. Cached creation dates can satisfy age/date rules offline without fetching stale karma. Contributions appear progressively as their author and ancestry checks finish. Thread/reply pages wait for the focused item’s check before revealing the page; unchecked contributions remain hidden.
+
+### Shared filter membership
+
+Filters now start clean with an empty **Blocked** filter; prior filter declarations are not carried forward. Existing user notes, citations, and their history stay available. Assign users from the account panel or the filter’s detail pane/editor. A user may belong to several filters; the first matching active filter wins, including matches from conditions. Removing an assignment or deleting a filter preserves user records. Naming a new filter saves it even before members are assigned. An untouched empty editor creates nothing.
+
+Opening the account panel creates no record or reference. Notes save when edited. Profile banner actions open notes without capturing the profile. Reference excerpts and optional annotations live under Details; existing saved references are preserved.
+
+Profile pages show editable private Notes and Saved references below the filter banner. Notes save after a short pause or on leaving the field. References can be added, annotated, opened, and removed inline. The profile’s Edit filters button opens a filter-only panel; contribution capture panels still offer notes and deliberate reference saving.
+
+The profile’s **Your notes** list combines account notes and source annotations. Notes are fully visible in reading mode, with source links and Edit/Remove actions. Only saved excerpts collapse. Add note defaults to the current profile and can target another source URL. Inline edits autosave; each new note uses a stable ID to avoid duplicate entries.
