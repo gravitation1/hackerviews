@@ -77,7 +77,7 @@ import WebKit
         restored.start()
         precondition(restored.tabs.count == 2)
         precondition(restored.selectedID == restored.tabs[0].id)
-        precondition(restored.tabs[0].restoreScrollY == 820)
+        precondition(restored.tabs[0].displayedPage.restoreScrollY == 820)
         precondition(restored.tabs[1].scrollY == 600)
         precondition(restored.tabs[1].title == "Saved discussion")
         precondition(restored.tabs[1].url?.query == "id=456")

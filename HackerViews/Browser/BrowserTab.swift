@@ -24,6 +24,15 @@ enum PageState: Equatable {
 @MainActor
 final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDelegate, WKUIDelegate {
     let id = UUID()
+    @Published private(set) var activePage: BrowserTab?
+    private let retainsPages: Bool
+    private weak var historyOwner: BrowserTab?
+    private var retainedPages: [Int: BrowserTab] = [:]
+    private var pageSubscription: AnyCancellable?
+    private var reactivationPosition: (Double, [String: Any]?)?
+    private var restoringRetainedViewport = false
+    var displayedPage: BrowserTab { activePage ?? self }
+
     @Published var title = "Hacker News"
     @Published var threadTitle: String?
     @Published var url: URL?
@@ -69,7 +78,7 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
     }
     private(set) var history: [HistoryEntry] = []
     private(set) var historyIndex = -1
-    var scrollY: Double = 0
+    var scrollY: Double = 0 { didSet { if retainsPages { activePage?.scrollY = scrollY } } }
     var restoreScrollY: Double?
     private var refreshAnchor: [String: Any]?
     var onSessionChange: (() -> Void)?
@@ -84,9 +93,11 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
     private var timeout: Task<Void, Never>?
     private static let world = WKContentWorld.world(name: "HackerViews")
 
-    private(set) var hasCreatedWebView = false
-    lazy var webView: WKWebView = {
-        hasCreatedWebView = true
+    private var createdWebView = false
+    var hasCreatedWebView: Bool { activePage?.hasCreatedWebView ?? createdWebView }
+    var webView: WKWebView { activePage?.webView ?? ownedWebView }
+    private lazy var ownedWebView: WKWebView = {
+        createdWebView = true
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = persistentSession ? .default() : .nonPersistent()
         configuration.userContentController.add(WeakMessageHandler(self), contentWorld: Self.world, name: "hackerViews")
@@ -109,9 +120,11 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
         return view
     }()
 
-    init(store: RecordStore, service: HNService, persistentSession: Bool = true) {
+    init(store: RecordStore, service: HNService, persistentSession: Bool = true, retainsPages: Bool = false) {
         self.store = store; self.service = service; self.persistentSession = persistentSession
+        self.retainsPages = retainsPages
         super.init()
+        guard !retainsPages else { return }
         subscription = store.$archive.map(\.policy).removeDuplicates().dropFirst().sink { [weak self] policy in
             guard let self, self.pendingRestoredURL == nil else { return }
             self.installScripts(in: self.webView, policy: policy)
@@ -139,6 +152,14 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
     }
     func load(_ url: URL) {
         guard Self.isHN(url) else { return }
+        if retainsPages {
+            captureActivePosition()
+            pendingRestoredURL = nil
+            recordNavigation(url)
+            retainedPages = retainedPages.filter { $0.key <= historyIndex }
+            activateHistoryPage(reload: true)
+            return
+        }
         pendingRestoredURL = nil
         pendingFormSubmission = false
         recordNavigation(url)
@@ -202,6 +223,9 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
         onSessionChange?()
     }
     func saveReadingPosition(y: Double, anchor: [String: Any]?) {
+        if let activePage { activePage.saveReadingPosition(y: y, anchor: anchor); return }
+        if restoringRetainedViewport { return }
+        if let historyOwner, historyOwner.activePage !== self { return }
         guard y.isFinite, y >= 0 else { return }
         scrollY = y
         if history.indices.contains(historyIndex) {
@@ -225,10 +249,11 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
         canGoBack = historyIndex > 0
         canGoForward = historyIndex >= 0 && historyIndex + 1 < history.count
     }
-    func back() { travel(to: historyIndex - 1) }
-    func forward() { travel(to: historyIndex + 1) }
+    func back() { if let historyOwner { historyOwner.back() } else { travel(to: historyIndex - 1) } }
+    func forward() { if let historyOwner { historyOwner.forward() } else { travel(to: historyIndex + 1) } }
     private func travel(to index: Int) {
         guard history.indices.contains(index) else { return }
+        if retainsPages { captureActivePosition() }
         pendingRestoredURL = nil
         pendingFormSubmission = false
         if history.indices.contains(historyIndex) { history[historyIndex].scrollY = scrollY }
@@ -239,16 +264,100 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
         url = history[index].url
         updateHistoryButtons()
         onSessionChange?()
+        if retainsPages { activateHistoryPage(); return }
         if Self.topicID(history[index].url) != nil { loadTopic(history[index].url) }
         else { lazyURL = nil; webView.load(URLRequest(url: history[index].url)) }
     }
+    private func captureActivePosition() {
+        guard let page = activePage, !page.restoringRetainedViewport, history.indices.contains(historyIndex) else { return }
+        let index = historyIndex
+        history[index].scrollY = page.scrollY
+        page.webView.callAsyncJavaScript("return window.HackerViews?.readingPosition() ?? {y: window.scrollY}",
+            arguments: [:], in: nil, in: Self.world) { [weak self, weak page] result in
+                guard let self, let page, self.retainedPages[index] === page,
+                      self.history.indices.contains(index), case .success(let value) = result,
+                      let position = value as? [String: Any], let y = position["y"] as? Double,
+                      y.isFinite, y >= 0 else { return }
+                self.history[index].scrollY = y
+                self.history[index].anchor = try? JSONSerialization.data(withJSONObject: position)
+                page.scrollY = y
+                if page.history.indices.contains(page.historyIndex) {
+                    page.history[page.historyIndex].scrollY = y
+                    page.history[page.historyIndex].anchor = self.history[index].anchor
+                }
+                page.reactivationPosition = (y, position)
+                if self.activePage === page { page.restoreRetainedViewport() }
+                self.onSessionChange?()
+            }
+    }
+
+    private func activateHistoryPage(reload: Bool = false) {
+        let index = historyIndex
+        guard history.indices.contains(index) else { return }
+        let entry = history[index]
+        let page: BrowserTab
+        if !reload, let retained = retainedPages[index] {
+            page = retained
+            page.reactivationPosition = (entry.scrollY, entry.anchor.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] })
+        } else {
+            page = BrowserTab(store: store, service: service, persistentSession: persistentSession)
+            page.title = title
+            page.historyOwner = self
+            page.restoreScrollY = entry.scrollY
+            page.refreshAnchor = entry.anchor.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+            page.onRecord = { [weak self] in self?.onRecord?($0) }
+            page.onOpenTab = { [weak self] url, select in self?.onOpenTab?(url, select) }
+            page.onSessionChange = { [weak self, weak page] in
+                guard let self, let page, self.activePage === page else { return }
+                self.synchronizePage(page)
+                self.onSessionChange?()
+            }
+            retainedPages[index] = page
+            page.load(entry.url)
+        }
+        activePage = page
+        restoreScrollY = nil
+        refreshAnchor = nil
+        synchronizePage(page)
+        pageSubscription = page.objectWillChange.sink { [weak self, weak page] in
+            Task { @MainActor in
+                guard let self, let page, self.activePage === page else { return }
+                self.synchronizePage(page)
+            }
+        }
+    }
+
+    private func synchronizePage(_ page: BrowserTab) {
+        guard history.indices.contains(historyIndex) else { return }
+        title = page.title; threadTitle = page.threadTitle; state = page.state
+        hiddenCount = page.hiddenCount; unresolvedCount = page.unresolvedCount
+        if let pageURL = page.url { url = pageURL; history[historyIndex].url = pageURL }
+        scrollY = page.scrollY
+        history[historyIndex].scrollY = page.scrollY
+        if let position = page.savedHistory.last?.anchor { history[historyIndex].anchor = position }
+        if page.canGoBack != canGoBack { page.canGoBack = canGoBack }
+        if page.canGoForward != canGoForward { page.canGoForward = canGoForward }
+    }
+
+    func restoreRetainedViewport() {
+        guard let (y, anchor) = reactivationPosition else { return }
+        reactivationPosition = nil
+        restoringRetainedViewport = true
+        webView.callAsyncJavaScript("await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))); if (window.HackerViews) window.HackerViews.restoreReadingPosition(anchor, y); else window.scrollTo(0, y)",
+            arguments: ["anchor": anchor ?? [:], "y": y], in: nil, in: Self.world) { [weak self] _ in
+                self?.restoringRetainedViewport = false
+            }
+    }
+
     func scrollToTop() {
+        if let activePage { activePage.scrollToTop(); return }
         restoreScrollY = nil
         refreshAnchor = nil
         webView.callAsyncJavaScript("window.scrollTo({top: 0, left: 0, behavior: 'instant'})",
                                    arguments: [:], in: nil, in: Self.world, completionHandler: nil)
     }
     func reload() {
+        if let activePage { activePage.reload(); return }
         let epoch = navigationID
         webView.callAsyncJavaScript("return window.HackerViews?.readingPosition() ?? {y: window.scrollY}",
                                    arguments: [:], in: nil, in: Self.world) { [weak self] result in
@@ -660,6 +769,21 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
                 return
             }
             #endif
+            if let historyOwner, navigationAction.targetFrame?.isMainFrame == true,
+               navigationAction.navigationType == .linkActivated {
+                var destination = URLComponents(url: target, resolvingAgainstBaseURL: false)
+                var current = url.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false) }
+                destination?.fragment = nil; current?.fragment = nil
+                if destination?.url == current?.url, target.fragment != nil {
+                    decisionHandler(.allow)
+                    return
+                }
+                if destination?.url != current?.url {
+                    decisionHandler(.cancel)
+                    historyOwner.load(target)
+                    return
+                }
+            }
             if navigationAction.navigationType == .backForward,
                let index = history.indices.first(where: { $0 != historyIndex && history[$0].url == target }) {
                 if history.indices.contains(historyIndex) { history[historyIndex].scrollY = scrollY }
@@ -679,8 +803,8 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
                 loadTopic(target)
             } else if navigationAction.targetFrame?.isMainFrame == true,
                       state == .ready, webView.bounds.width > 0, webView.bounds.height > 0 {
-                // Our topic shell is rebuilt on Back: retain the contribution and
-                // its viewport offset, not just a pixel offset into a partial tree.
+                // Canonical form/redirect navigation may replace this page.
+                // Capture its contribution offset before allowing that transition.
                 let capture = UUID()
                 captureID = capture
                 webView.callAsyncJavaScript("return window.HackerViews?.readingPosition() ?? {y: window.scrollY}",
@@ -726,13 +850,13 @@ private final class WeakMessageHandler: NSObject, WKScriptMessageHandler {
 #if os(macOS)
 struct WebSurface: NSViewRepresentable {
     let tab: BrowserTab
-    func makeNSView(context: Context) -> WKWebView { tab.webView }
+    func makeNSView(context: Context) -> WKWebView { tab.restoreRetainedViewport(); return tab.webView }
     func updateNSView(_ view: WKWebView, context: Context) {}
 }
 #else
 struct WebSurface: UIViewRepresentable {
     let tab: BrowserTab
-    func makeUIView(context: Context) -> WKWebView { tab.webView }
+    func makeUIView(context: Context) -> WKWebView { tab.restoreRetainedViewport(); return tab.webView }
     func updateUIView(_ view: WKWebView, context: Context) {}
 }
 #endif

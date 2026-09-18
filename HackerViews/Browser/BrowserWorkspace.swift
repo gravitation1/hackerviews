@@ -75,7 +75,7 @@ final class BrowserWorkspace: ObservableObject {
         if let data = try? JSONEncoder().encode(session) { defaults.set(data, forKey: sessionKey) }
     }
     private func makeTab() -> BrowserTab {
-        let tab = BrowserTab(store: store, service: service)
+        let tab = BrowserTab(store: store, service: service, retainsPages: true)
         tab.onRecord = { [weak self] in self?.draft = $0 }
         tab.onOpenTab = { [weak self] url, select in self?.open(url, select: select) }
         tab.onSessionChange = { [weak self] in self?.saveSession() }

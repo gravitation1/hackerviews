@@ -170,3 +170,5 @@ Ancestor-only filter checks reuse cached author, parent and item type beyond the
 CloudKit keeps a second archive copy with its change token; unchanged change pages avoid rewriting that checkpoint. Its process-local account identity cache is invalidated on account-change notifications.
 
 Mac reader commands: Command-W closes the selected tab when several are open, otherwise it closes the window while preserving the reading session. Shift-Command-W closes the window when multiple reader tabs are open. The History menu provides Back (Command-[) and Forward (Command-]) for the selected tab.
+
+During a running session, reader history retains loaded pages in memory. Back/Forward reuse their web views and restore the saved comment offset instead of rebuilding the topic or fetching the home page again. Explicit Refresh still reloads. Closing a tab or replacing its forward-history branch releases those retained pages; after quitting the app, session restoration loads pages on demand from the saved reading anchors.

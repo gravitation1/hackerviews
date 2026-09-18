@@ -20,7 +20,7 @@ struct BrowserView: View {
                 }
                 Divider()
             }
-            if let tab = workspace.selected { BrowserPage(tab: tab).id(tab.id) }
+            if let tab = workspace.selected { RetainedBrowserPage(tab: tab) }
         }
         #if os(iOS)
         .navigationTitle("HackerViews")
@@ -67,6 +67,11 @@ struct BrowserView: View {
         } message: { Text("Paste a story, comment, or profile link. Your filters apply before the page appears.") }
         .alert("Use an HTTPS link to news.ycombinator.com", isPresented: $linkError) { Button("OK", role: .cancel) {} }
     }
+}
+
+private struct RetainedBrowserPage: View {
+    @ObservedObject var tab: BrowserTab
+    var body: some View { BrowserPage(tab: tab.displayedPage).id(tab.displayedPage.id) }
 }
 
 private struct TabChip: View {
