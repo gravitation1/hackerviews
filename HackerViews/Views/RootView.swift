@@ -32,6 +32,14 @@ struct RootView: View {
             }
             #endif
         }
+        .safeAreaInset(edge: .bottom) {
+            if store.recoveryNotice != nil {
+                HStack {
+                    Text("Recovery was incomplete. Some edits may be missing.")
+                    Button("Review in Settings") { section = "settings" }
+                }.font(.caption).padding(8)
+            }
+        }
         .sheet(item: $workspace.draft) { draft in
             RecordEditor(store: store, draft: draft)
         }

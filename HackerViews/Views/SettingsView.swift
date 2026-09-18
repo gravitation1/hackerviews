@@ -22,6 +22,11 @@ struct SettingsView: View {
     @State private var importSummary = ""
     var body: some View {
         Form {
+            if let notice = store.recoveryNotice {
+                Section("Recovery needs review") {
+                    Text(notice).textSelection(.enabled).foregroundStyle(.orange)
+                }
+            }
             #if os(macOS)
             Section("External links") {
                 Toggle("Prefer opening external links in a private browser window", isOn: $preferPrivateExternalLinks)

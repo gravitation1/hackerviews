@@ -4,6 +4,7 @@ import SwiftUI
 final class RecordStore: ObservableObject {
     @Published private(set) var archive = RecordArchive()
     @Published var error: String?
+    @Published private(set) var recoveryNotice: String?
     @Published private(set) var syncStatus = "Saved on this device"
     @Published private(set) var isSyncing = false
     @Published private(set) var storageAvailable = true
@@ -19,6 +20,7 @@ final class RecordStore: ObservableObject {
         let folder = directory ?? URL.applicationSupportDirectory.appendingPathComponent("HackerViews", isDirectory: true)
         fileURL = folder.appendingPathComponent("records.json")
         journal = RecordJournal(file: fileURL)
+        recoveryNotice = try? String(contentsOf: folder.appendingPathComponent("recovery-notice.txt"), encoding: .utf8)
         do {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             if FileManager.default.fileExists(atPath: fileURL.path) {
@@ -109,10 +111,11 @@ final class RecordStore: ObservableObject {
     func importBackup(_ data: Data) {
         do {
             guard data.count <= 50_000_000 else { throw ArchiveError.tooLarge }
-            let incoming = try JSONDecoder().decode(RecordArchive.self, from: data)
+            var incoming = try JSONDecoder().decode(RecordArchive.self, from: data)
             if readFailed {
                 try incoming.validate()
-                try recover(incoming)
+                let unreadable = try journal.replay(into: &incoming, allowUnreadable: true)
+                try recover(incoming, unreadable: unreadable)
                 Task { await synchronize() }
                 return
             }
@@ -127,13 +130,13 @@ final class RecordStore: ObservableObject {
         do {
             let data = try Data(contentsOf: fileURL.appendingPathExtension("previous"))
             var recovery = try JSONDecoder().decode(RecordArchive.self, from: data)
-            try journal.replay(into: &recovery)
+            let unreadable = try journal.replay(into: &recovery, allowUnreadable: true)
             try recovery.validate()
-            try recover(recovery)
+            try recover(recovery, unreadable: unreadable)
         } catch { self.error = "Recovery failed. Import a valid backup instead. \(error.localizedDescription)" }
     }
 
-    private func recover(_ recovery: RecordArchive) throws {
+    private func recover(_ recovery: RecordArchive, unreadable: [URL] = []) throws {
         journal.flush()
         let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(recovery)
@@ -142,7 +145,17 @@ final class RecordStore: ObservableObject {
             try original.write(to: fileURL.appendingPathExtension("unreadable-\(UUID())"), options: .atomic)
         }
         try data.write(to: fileURL, options: .atomic)
-        try journal.retireDeltas()
+        let preserved = try journal.retireDeltas()
+        if !unreadable.isEmpty {
+            let files = unreadable.map { original -> String in
+                let url = preserved?.appendingPathComponent(original.lastPathComponent) ?? original
+                let date = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+                return url.path + " (last modified " + (date?.formatted() ?? "unknown") + ")"
+            }.joined(separator: "\n")
+            let notice = "Recovery was incomplete. Edits in these unreadable transactions may be missing; affected records or filters may reflect an earlier revision. The original files are preserved:\n" + files
+            try notice.write(to: fileURL.deletingLastPathComponent().appendingPathComponent("recovery-notice.txt"), atomically: true, encoding: .utf8)
+            recoveryNotice = notice
+        }
         readFailed = false; archive = recovery; storageAvailable = true; error = nil
     }
 
@@ -200,12 +213,19 @@ private final class RecordJournal: @unchecked Sendable {
         self.file = file
         directory = file.deletingLastPathComponent().appendingPathComponent("record-transactions")
     }
-    func replay(into archive: inout RecordArchive) throws {
-        guard FileManager.default.fileExists(atPath: directory.path) else { return }
+    @discardableResult
+    func replay(into archive: inout RecordArchive, allowUnreadable: Bool = false) throws -> [URL] {
+        guard FileManager.default.fileExists(atPath: directory.path) else { return [] }
+        var unreadable: [URL] = []
         for url in try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
-            where url.pathExtension == "json" {
-            try archive.merge(JSONDecoder().decode(RecordArchive.self, from: Data(contentsOf: url)))
+            .sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) where url.pathExtension == "json" {
+            do { try archive.merge(JSONDecoder().decode(RecordArchive.self, from: Data(contentsOf: url))) }
+            catch {
+                guard allowUnreadable else { throw error }
+                unreadable.append(url)
+            }
         }
+        return unreadable
     }
     func append(_ value: RecordArchive, previous: RecordArchive) throws {
         let known = Set(previous.revisions.map(\.id))
@@ -256,10 +276,10 @@ private final class RecordJournal: @unchecked Sendable {
         checkpointBody = nil
         queue.sync { body?() }
     }
-    func retireDeltas() throws {
-        if FileManager.default.fileExists(atPath: directory.path) {
-            try FileManager.default.moveItem(at: directory,
-                to: directory.appendingPathExtension("recovered-" + UUID().uuidString))
-        }
+    func retireDeltas() throws -> URL? {
+        guard FileManager.default.fileExists(atPath: directory.path) else { return nil }
+        let preserved = directory.appendingPathExtension("recovered-" + UUID().uuidString)
+        try FileManager.default.moveItem(at: directory, to: preserved)
+        return preserved
     }
 }
