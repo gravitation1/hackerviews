@@ -89,6 +89,14 @@ final class BrowserWorkspace: ObservableObject {
         if select || selectedID == nil { selectedID = tab.id }
         saveSession()
     }
+    /// The close command leaves the last tab intact so closing the window keeps
+    /// its reading session available for restoration.
+    @discardableResult
+    func closeSelectedTab() -> Bool {
+        guard tabs.count > 1, let selected else { return false }
+        close(selected)
+        return true
+    }
     func close(_ tab: BrowserTab) {
         let index = tabs.firstIndex { $0.id == tab.id } ?? 0
         tabs.removeAll { $0.id == tab.id }

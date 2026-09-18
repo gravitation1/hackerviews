@@ -26,6 +26,7 @@ struct BrowserView: View {
         .navigationTitle("HackerViews")
         #else
         .navigationTitle("")
+        .focusedSceneObject(workspace)
         #endif
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -213,6 +214,7 @@ private struct BrowserPage: View {
         }
         #if os(macOS)
         .navigationTitle(tab.url.flatMap(BrowserTab.topicID) != nil ? (tab.threadTitle ?? "") : "")
+        .focusedSceneObject(tab)
         .focusedSceneValue(\.pageFind, PageFindActions(
             show: showFind,
             next: { showFind(); search() },
@@ -337,6 +339,34 @@ extension FocusedValues {
     var pageFind: PageFindActions? {
         get { self[PageFindKey.self] }
         set { self[PageFindKey.self] = newValue }
+    }
+}
+
+struct ReaderNavigationCommands: Commands {
+    @FocusedObject private var workspace: BrowserWorkspace?
+    @FocusedObject private var tab: BrowserTab?
+    private var hasSheet: Bool { NSApp.keyWindow?.attachedSheet != nil || NSApp.keyWindow?.sheetParent != nil }
+    private var closesTab: Bool { !hasSheet && (workspace?.tabs.count ?? 0) > 1 }
+    var body: some Commands {
+        CommandGroup(replacing: .saveItem) {
+            Button(closesTab ? "Close Tab" : "Close Window") {
+                if closesTab { _ = workspace?.closeSelectedTab() }
+                else { NSApp.sendAction(#selector(NSWindow.performClose(_:)), to: nil, from: nil) }
+            }
+            .keyboardShortcut("w", modifiers: .command)
+            if closesTab {
+                Button("Close Window") { NSApp.sendAction(#selector(NSWindow.performClose(_:)), to: nil, from: nil) }
+                    .keyboardShortcut("w", modifiers: [.command, .shift])
+            }
+        }
+        CommandMenu("History") {
+            Button("Back") { if !hasSheet { tab?.back() } }
+                .keyboardShortcut("[", modifiers: .command)
+                .disabled(hasSheet || tab?.canGoBack != true)
+            Button("Forward") { if !hasSheet { tab?.forward() } }
+                .keyboardShortcut("]", modifiers: .command)
+                .disabled(hasSheet || tab?.canGoForward != true)
+        }
     }
 }
 

@@ -122,6 +122,14 @@ import WebKit
         precondition(recovery.selectedID == active, "Background links must preserve the active tab")
         recovery.open(URL(string: "https://news.ycombinator.com/user?id=bob")!, select: true)
         precondition(recovery.selectedID == recovery.tabs.last?.id)
+        let neighbor = recovery.tabs[1].id
+        precondition(recovery.closeSelectedTab())
+        precondition(recovery.tabs.count == 2 && recovery.selectedID == neighbor)
+        precondition(recovery.closeSelectedTab())
+        let lastID = recovery.selectedID
+        precondition(!recovery.closeSelectedTab())
+        precondition(recovery.tabs.count == 1 && recovery.selectedID == lastID)
+        print("PASS close-tab command selects its neighbor and preserves the last tab for window restoration")
         print("PASS foreground/background tab selection")
         print("PASS session: restored back/forward history and per-entry scroll, branching, tabs, invalid-data recovery; no persisted reveal")
     }

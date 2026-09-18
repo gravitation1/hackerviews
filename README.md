@@ -168,3 +168,5 @@ Cloud sync persists an account/container-scoped checkpoint containing the change
 Ancestor-only filter checks reuse cached author, parent and item type beyond the 60-second content freshness window. Content-based filters and displayed items still use normal refreshes. Note edits coalesce for five seconds idle, with earlier saves on blur, dismissal or leaving the active app; normal Mac quit also saves. An abrupt force quit can lose the current draft.
 
 CloudKit keeps a second archive copy with its change token; unchanged change pages avoid rewriting that checkpoint. Its process-local account identity cache is invalidated on account-change notifications.
+
+Mac reader commands: Command-W closes the selected tab when several are open, otherwise it closes the window while preserving the reading session. Shift-Command-W closes the window when multiple reader tabs are open. The History menu provides Back (Command-[) and Forward (Command-]) for the selected tab.

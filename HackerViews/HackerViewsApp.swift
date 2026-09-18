@@ -14,7 +14,7 @@ struct HackerViewsApp: App {
         #if os(macOS)
         .defaultSize(width: 1180, height: 820)
         .windowToolbarStyle(.unifiedCompact)
-        .commands { PageFindCommands() }
+        .commands { PageFindCommands(); ReaderNavigationCommands() }
         #endif
     }
 }
