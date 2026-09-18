@@ -5,6 +5,7 @@ struct FilterEditor: View {
     let id: String
     @Environment(\.dismiss) private var dismiss
     @State private var rule: FilterRule
+    @State private var membershipBase: Set<String>
     @State private var karma: String
     @State private var days: String
     @State private var useKarma: Bool
@@ -28,6 +29,7 @@ struct FilterEditor: View {
         _showAuthors = State(initialValue: !value.assignedUsers.isEmpty)
         _advancedGrouping = State(initialValue: value.conditions.match != (value.combine ?? .any))
         _rule = State(initialValue: value)
+        _membershipBase = State(initialValue: value.assignedUsers)
         _karma = State(initialValue: String(value.conditions.karmaBelow ?? 100))
         _days = State(initialValue: String(value.conditions.youngerThanDays ?? 30))
         _useKarma = State(initialValue: value.conditions.karmaBelow != nil)
@@ -178,7 +180,7 @@ struct FilterEditor: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(isNew ? "Create" : "Done") {
-                        saveFailed = !store.saveRules(RuleListEdits.updating(value, in: store.archive.rules))
+                        saveChanges()
                         if !saveFailed { dismiss() }
                     }.disabled(!canSave).keyboardShortcut(.defaultAction)
                 }
@@ -189,18 +191,20 @@ struct FilterEditor: View {
                 saveTask = Task { @MainActor in
                     do { try await Task.sleep(for: .seconds(1)) } catch { return }
                     guard valid, store.archive.rules.contains(where: { $0.id == id }) else { return }
-                    saveFailed = !store.saveRules(RuleListEdits.updating(self.value, in: store.archive.rules))
+                    saveChanges()
                 }
             }
             .onDisappear {
                 saveTask?.cancel()
                 if !isNew, valid, store.archive.rules.contains(where: { $0.id == id }) {
-                    saveFailed = !store.saveRules(RuleListEdits.updating(value, in: store.archive.rules))
+                    saveChanges()
                 }
             }
             .onChange(of: store.archive.rules) { _, rules in
                 if !isNew, let stored = rules.first(where: { $0.id == id }) {
-                    rule.assignedUsers = stored.assignedUsers
+                    rule.assignedUsers = RuleListEdits.mergingMembers(base: membershipBase,
+                        edited: rule.assignedUsers, stored: stored.assignedUsers)
+                    membershipBase = stored.assignedUsers
                 }
             }
             .sheet(item: $record) { RecordEditor(store: store, draft: $0) }
@@ -208,6 +212,19 @@ struct FilterEditor: View {
         #if os(macOS)
         .frame(width: 640, height: 720)
         #endif
+    }
+    private func saveChanges() {
+        var updated = value
+        // Rebase at commit too: the store may publish before SwiftUI delivers onChange.
+        if let stored = store.archive.rules.first(where: { $0.id == id }) {
+            updated.assignedUsers = RuleListEdits.mergingMembers(base: membershipBase,
+                edited: updated.assignedUsers, stored: stored.assignedUsers)
+        }
+        saveFailed = !store.saveRules(RuleListEdits.updating(updated, in: store.archive.rules))
+        if !saveFailed {
+            membershipBase = updated.assignedUsers
+            rule.assignedUsers = updated.assignedUsers
+        }
     }
     private var accountConditionCount: Int { [useKarma, useAge, useDate].filter { $0 }.count }
     private var conditionCount: Int { accountConditionCount + (showAuthors ? 1 : 0) + (rule.content == nil ? 0 : 1) }

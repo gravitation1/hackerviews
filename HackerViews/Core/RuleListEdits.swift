@@ -1,6 +1,12 @@
 import Foundation
 
 public enum RuleListEdits {
+    /// Apply this editor's unsaved membership changes to the latest stored set.
+    /// Unedited members follow external changes; local edits win conflicts.
+    public static func mergingMembers(base: Set<String>, edited: Set<String>, stored: Set<String>) -> Set<String> {
+        stored.subtracting(base.subtracting(edited)).union(edited.subtracting(base))
+    }
+
     public static func updating(_ rule: FilterRule, in rules: [FilterRule]) -> [FilterRule] {
         guard rule.isValid else { return rules }
         var result = rules

@@ -440,3 +440,19 @@ import Testing
     person.note = "Profile note"
     #expect(person.savedNotePreview == "Profile note")
 }
+
+
+@Test func pendingMembershipEditsSurviveExternalChanges() {
+    let base: Set<String> = ["alice", "bob", "carol"]
+    // Remove Alice and add Dave locally while another editor removes Bob and adds Eve.
+    let edited: Set<String> = ["bob", "carol", "dave"]
+    let stored: Set<String> = ["alice", "carol", "eve"]
+    let merged = RuleListEdits.mergingMembers(base: base, edited: edited, stored: stored)
+    #expect(merged == ["carol", "dave", "eve"])
+    // A second store publication must not lose the original pending removal.
+    #expect(RuleListEdits.mergingMembers(base: stored, edited: merged,
+        stored: stored.union(["frank"])) == ["carol", "dave", "eve", "frank"])
+    #expect(RuleListEdits.mergingMembers(base: base, edited: base, stored: stored) == stored)
+    // Acknowledging a successful save clears the local delta.
+    #expect(RuleListEdits.mergingMembers(base: merged, edited: merged, stored: ["carol"]) == ["carol"])
+}
