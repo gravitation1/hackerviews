@@ -969,3 +969,37 @@ test('story headers show source domain and jobs omit fabricated points and autho
     p.dom.window.close();
   }
 });
+
+test('profile note editors coalesce for five seconds and flush on blur, pagehide and Done', async () => {
+  for (const kind of ['profileSaveNote', 'profileRefNote', 'profileUpsertNote']) {
+    const p = await page('<table><tr><td><a class="hnuser" href="user?id=alice">alice</a></td></tr></table>', {blocked: [], url:'https://news.ycombinator.com/user?id=alice'});
+    const w = p.dom.window;
+    w.HackerViews.profileRecord('alice', {note:kind === 'profileSaveNote' ? 'Original' : '', references:kind === 'profileRefNote' ? [{id:'ref1',url:'https://example.com',annotation:'Original'}] : []});
+    if (kind === 'profileUpsertNote') p.doc.querySelector('#qhn-profile-record > header button').click();
+    else p.doc.querySelector('.qhn-note footer button').click();
+    const input = p.doc.querySelector('.qhn-note textarea');
+    let scheduled, nextID = 0;
+    const timers = new Map();
+    w.setTimeout = (fn, delay) => { scheduled = {id:++nextID,fn,delay}; timers.set(scheduled.id,scheduled); return scheduled.id; };
+    w.clearTimeout = id => timers.delete(id);
+    const saves = () => p.messages.filter(m => m.kind === kind);
+    for (const text of ['First', 'Latest draft']) { input.value=text; input.dispatchEvent(new w.Event('input')); }
+    assert.equal(scheduled.delay,5000);
+    assert.equal(timers.size,1);
+    assert.equal(saves().length,0);
+    scheduled.fn();
+    assert.equal(saves().length,1);
+    assert.equal(saves()[0].text,'Latest draft');
+    w.HackerViews.profileSaveStatus(true);
+    for (const event of ['blur','pagehide','done']) {
+      input.value=event; input.dispatchEvent(new w.Event('input'));
+      if (event === 'done') p.doc.querySelector('.qhn-note-editor > button').click();
+      else (event === 'blur' ? input : w).dispatchEvent(new w.Event(event));
+      assert.equal(saves().at(-1).text,event);
+      assert.equal(timers.size,0);
+      w.HackerViews.profileSaveStatus(true);
+    }
+    assert.equal(saves().length,4);
+    w.close();
+  }
+});

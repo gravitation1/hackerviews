@@ -660,9 +660,9 @@
       } else { awaiting = true; post(entry.profile ? {kind: 'profileSaveNote', text: input.value} : {kind: 'profileRefNote', id: entry.id, text: input.value}); }
       dirty = false;
     }
-    function change() { dirty = true; clearTimeout(timer); timer = setTimeout(save, 500); profileSaveStatus(null); }
+    function change() { dirty = true; clearTimeout(timer); timer = setTimeout(save, 5000); profileSaveStatus(null); }
     input.oninput = change; source.oninput = change;
-    input.onblur = save;
+    input.onblur = save; source.onblur = save;
     const done = document.createElement('button'); done.type = 'button'; done.textContent = 'Done';
     function finishEditing() {
       editingNote = false; noteAcknowledgement = null; editor.remove();
