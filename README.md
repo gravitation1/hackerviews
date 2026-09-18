@@ -164,3 +164,7 @@ Simple author/direct-item rules on list pages use available DOM metadata without
 Explicit recovery (Restore previous or importing a backup while storage is damaged) replays readable pending transactions and preserves unreadable ones in a named recovery directory. A persistent banner and Settings notice identify potentially missing edits and preserved files. Normal startup still stops on unreadable transactions.
 
 Cloud sync persists an account/container-scoped checkpoint containing the change token and downloaded archive together. Subsequent syncs fetch changes and send unknown revisions in batches of 100. Unreadable remote records are preserved in the checkpoint and reported in Settings; valid records continue syncing. Expired server tokens trigger a fresh enumeration. Existing immutable CloudKit revision records are retained.
+
+Ancestor-only filter checks reuse cached author, parent and item type beyond the 60-second content freshness window. Content-based filters and displayed items still use normal refreshes. Note edits coalesce for five seconds idle, with earlier saves on blur, dismissal or leaving the active app; normal Mac quit also saves. An abrupt force quit can lose the current draft.
+
+CloudKit keeps a second archive copy with its change token; unchanged change pages avoid rewriting that checkpoint. Its process-local account identity cache is invalidated on account-change notifications.

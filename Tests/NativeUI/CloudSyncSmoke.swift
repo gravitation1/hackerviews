@@ -8,6 +8,15 @@ import Foundation
             record["payload"] = try JSONEncoder().encode(revision) as CKRecordValue
             return record
         }
+        let identity = CloudAccountIdentityCache()
+        let (generation, empty) = identity.snapshot("test")
+        precondition(empty == nil)
+        precondition(identity.remember("alice", container: "test", generation: generation))
+        precondition(identity.snapshot("test").1 == "alice")
+        NotificationCenter.default.post(name: .CKAccountChanged, object: nil)
+        precondition(identity.snapshot("test").1 == nil)
+        precondition(!identity.remember("stale", container: "test", generation: generation))
+        print("PASS account-change notification invalidates cached and in-flight identities")
         let first = PersonRevision(username: "alice", isBlocked: true, note: "Keep this", citations: [])
         let second = PersonRevision(username: "bob", isBlocked: false, note: "Later page", citations: [])
         var state = CloudSyncCheckpoint()

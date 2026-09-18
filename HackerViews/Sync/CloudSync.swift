@@ -38,17 +38,53 @@ struct CloudSyncCheckpoint: Codable {
     }
 }
 
+/// Synchronous invalidation prevents a queued actor task from reusing an old
+/// account identity after CloudKit posts its account-change notification.
+final class CloudAccountIdentityCache: @unchecked Sendable {
+    private let lock = NSLock()
+    private var generation = 0
+    private var identities: [String: String] = [:]
+    private var observer: NSObjectProtocol?
+    init() {
+        observer = NotificationCenter.default.addObserver(forName: .CKAccountChanged, object: nil, queue: nil) { [weak self] _ in
+            self?.invalidate()
+        }
+    }
+    deinit { if let observer { NotificationCenter.default.removeObserver(observer) } }
+    func invalidate() {
+        lock.lock(); defer { lock.unlock() }
+        generation += 1; identities.removeAll()
+    }
+    func snapshot(_ container: String) -> (Int, String?) {
+        lock.lock(); defer { lock.unlock() }
+        return (generation, identities[container])
+    }
+    func remember(_ name: String, container: String, generation expected: Int) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard generation == expected else { return false }
+        identities[container] = name
+        return true
+    }
+}
+
 /// Private, append-only CloudKit records. No HN credentials enter this service.
 actor CloudSync {
     static var isConfigured: Bool { Bundle.main.object(forInfoDictionaryKey: "HackerViewsCloudEnabled") as? String == "YES" }
     private(set) var warning: String?
+    private let identities = CloudAccountIdentityCache()
 
     func exchange(_ local: RecordArchive) async throws -> RecordArchive {
         guard Self.isConfigured else { return RecordArchive() }
         let identifier = Bundle.main.object(forInfoDictionaryKey: "HackerViewsCloudContainer") as? String ?? "iCloud.com.local.HackerViews"
         let container = CKContainer(identifier: identifier)
-        guard try await container.accountStatus() == .available else { throw SyncError.noAccount }
-        let account = try await container.userRecordID().recordName
+        guard try await container.accountStatus() == .available else { identities.invalidate(); throw SyncError.noAccount }
+        let (generation, cachedAccount) = identities.snapshot(identifier)
+        let account: String
+        if let cachedAccount { account = cachedAccount }
+        else {
+            account = try await container.userRecordID().recordName
+            guard identities.remember(account, container: identifier, generation: generation) else { throw SyncError.accountChanged }
+        }
         let scope = SHA256.hash(data: Data((identifier + "\n" + account + "\nHackerViews").utf8))
             .map { String(format: "%02x", $0) }.joined()
         let directory = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
@@ -65,13 +101,13 @@ actor CloudSync {
         let zoneID = CKRecordZone.ID(zoneName: "HackerViews", ownerName: CKCurrentUserDefaultName)
         _ = try await database.save(CKRecordZone(zoneID: zoneID))
         do {
-            try await fetchChanges(database: database, zone: zoneID, state: &state, file: file)
+            try await fetchChanges(database: database, zone: zoneID, state: &state, file: file, identifier: identifier, generation: generation)
         } catch let error as CKError where error.code == .changeTokenExpired {
             // A complete scan establishes a new baseline; keep prior quarantined data.
             let preserved = state.quarantined
             state = CloudSyncCheckpoint()
             state.quarantined = preserved
-            try await fetchChanges(database: database, zone: zoneID, state: &state, file: file)
+            try await fetchChanges(database: database, zone: zoneID, state: &state, file: file, identifier: identifier, generation: generation)
         }
         warning = state.quarantined.isEmpty ? nil :
             "iCloud sync skipped \(state.quarantined.count) unreadable record(s). Originals are preserved in \(file.path). Some remote edits may be missing."
@@ -88,38 +124,50 @@ actor CloudSync {
                 record["payload"] = revision.2 as CKRecordValue
                 return record
             }
+            try checkAccount(identifier, generation: generation)
             let result = try await database.modifyRecords(saving: records, deleting: [], savePolicy: .ifServerRecordUnchanged, atomically: true)
+            try checkAccount(identifier, generation: generation)
             for (_, outcome) in result.saveResults { try state.ingest(outcome.get()) }
             try JSONEncoder().encode(state).write(to: file, options: .atomic)
         }
         return state.archive
     }
 
+    private func checkAccount(_ identifier: String, generation: Int) throws {
+        guard identities.snapshot(identifier).0 == generation else { throw SyncError.accountChanged }
+    }
+
     private func fetchChanges(database: CKDatabase, zone: CKRecordZone.ID,
-                              state: inout CloudSyncCheckpoint, file: URL) async throws {
+                              state: inout CloudSyncCheckpoint, file: URL, identifier: String, generation: Int) async throws {
         var token = try state.token.map {
             try NSKeyedUnarchiver.unarchivedObject(ofClass: CKServerChangeToken.self, from: $0)
         } ?? nil
         var more = true
         while more {
+            try checkAccount(identifier, generation: generation)
             let result = try await database.recordZoneChanges(inZoneWith: zone, since: token)
+            try checkAccount(identifier, generation: generation)
             for (_, outcome) in result.modificationResultsByID {
                 // Transport failures are retried; only unreadable record content is quarantined.
                 try state.ingest(outcome.get().record)
             }
             for deletion in result.deletions { state.known.remove(deletion.recordID.recordName) }
+            let tokenChanged = token?.isEqual(result.changeToken) != true
             token = result.changeToken
-            state.token = try token.map { try NSKeyedArchiver.archivedData(withRootObject: $0, requiringSecureCoding: true) }
-            try JSONEncoder().encode(state).write(to: file, options: .atomic)
+            if tokenChanged || !result.modificationResultsByID.isEmpty || !result.deletions.isEmpty {
+                state.token = try token.map { try NSKeyedArchiver.archivedData(withRootObject: $0, requiringSecureCoding: true) }
+                try JSONEncoder().encode(state).write(to: file, options: .atomic)
+            }
             more = result.moreComing
         }
     }
 }
 
 private enum SyncError: LocalizedError {
-    case noAccount, tooLarge
+    case noAccount, tooLarge, accountChanged
     var errorDescription: String? {
         switch self {
+        case .accountChanged: "The iCloud account changed during sync. The next sync will retry with the current account."
         case .noAccount: "Sign in to iCloud in System Settings to synchronize your records."
         case .tooLarge: "A record is too large for iCloud. It remains saved locally and exportable."
         }
