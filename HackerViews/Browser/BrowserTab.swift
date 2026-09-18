@@ -34,7 +34,7 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
     private var lazyURL: URL?
     private var shellNavigation = false
     private var canonicalTopicURL: URL?
-    private var submittingReply = false
+    private var pendingFormSubmission = false
     private var networkWaiters: [Int: Task<Void, Never>] = [:]
     private var networkLeases = Set<Int>()
     private var lazyTasks: [Int: Task<Void, Never>] = [:]
@@ -140,6 +140,7 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
     func load(_ url: URL) {
         guard Self.isHN(url) else { return }
         pendingRestoredURL = nil
+        pendingFormSubmission = false
         recordNavigation(url)
         if Self.topicID(url) != nil { loadTopic(url) }
         else { lazyURL = nil; webView.load(URLRequest(url: url)) }
@@ -229,6 +230,7 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
     private func travel(to index: Int) {
         guard history.indices.contains(index) else { return }
         pendingRestoredURL = nil
+        pendingFormSubmission = false
         if history.indices.contains(historyIndex) { history[historyIndex].scrollY = scrollY }
         historyIndex = index
         scrollY = history[index].scrollY
@@ -592,14 +594,16 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         if let target = webView.url { recordNavigation(target) }
     }
-    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { updateNavigation() }
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) { pendingFormSubmission = false; updateNavigation() }
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { fail(error) }
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { fail(error) }
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        pendingFormSubmission = false
         state = .failed("The browser process stopped. Reload to continue.")
     }
     private func fail(_ error: Error) {
         if (error as NSError).code == NSURLErrorCancelled { return }
+        pendingFormSubmission = false
         timeout?.cancel(); state = .failed(error.localizedDescription)
     }
     private func updateNavigation() {
@@ -611,19 +615,27 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
         guard isMainFrame, Self.isHN(target) else { return false }
         if target == canonicalTopicURL {
             canonicalTopicURL = nil
+            pendingFormSubmission = false
             return true
         }
-        if type == .formSubmitted {
-            submittingReply = true
-        } else if submittingReply && Self.topicID(target) != nil {
-            // Accepted form redirects contain fresh changes before the API catches up.
-            submittingReply = false
-            lazyURL = nil
-            return true
-        } else if type == .linkActivated {
-            submittingReply = false
+        switch type {
+        case .formSubmitted:
+            if pendingFormSubmission, Self.topicID(target) != nil {
+                pendingFormSubmission = false
+                lazyURL = nil
+                return true
+            }
+            pendingFormSubmission = true
+            return false
+        case .other:
+            let keep = pendingFormSubmission && Self.topicID(target) != nil
+            pendingFormSubmission = false
+            if keep { lazyURL = nil }
+            return keep
+        default:
+            pendingFormSubmission = false
+            return false
         }
-        return false
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,

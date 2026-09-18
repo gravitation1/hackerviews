@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import WebKit
 
 @main struct SessionSmoke {
     @MainActor static func main() {
@@ -33,6 +34,26 @@ import AppKit
             _ = navigation.preservesCanonicalNavigation(to: URL(string: "https://news.ycombinator.com/" + path)!, type: .formSubmitted, isMainFrame: true)
             precondition(navigation.preservesCanonicalNavigation(to: topicURL, type: .other, isMainFrame: true))
         }
+        for (post, redirect) in [("login", "news"), ("r", "newest")] {
+            _ = navigation.preservesCanonicalNavigation(to: URL(string: "https://news.ycombinator.com/" + post)!, type: .formSubmitted, isMainFrame: true)
+            precondition(!navigation.preservesCanonicalNavigation(to: URL(string: "https://news.ycombinator.com/" + redirect)!, type: .other, isMainFrame: true))
+            precondition(!navigation.preservesCanonicalNavigation(to: topicURL, type: .linkActivated, isMainFrame: true))
+        }
+        _ = navigation.preservesCanonicalNavigation(to: commentURL, type: .formSubmitted, isMainFrame: true)
+        precondition(navigation.preservesCanonicalNavigation(to: topicURL, type: .formSubmitted, isMainFrame: true))
+        precondition(!navigation.preservesCanonicalNavigation(to: topicURL, type: .linkActivated, isMainFrame: true))
+        for action in [WKNavigationType.linkActivated, .reload, .backForward] {
+            _ = navigation.preservesCanonicalNavigation(to: commentURL, type: .formSubmitted, isMainFrame: true)
+            precondition(!navigation.preservesCanonicalNavigation(to: topicURL, type: action, isMainFrame: true))
+            precondition(!navigation.preservesCanonicalNavigation(to: topicURL, type: .other, isMainFrame: true))
+        }
+        _ = navigation.preservesCanonicalNavigation(to: commentURL, type: .formSubmitted, isMainFrame: true)
+        navigation.webView(navigation.webView, didFailProvisionalNavigation: nil, withError: URLError(.timedOut))
+        precondition(!navigation.preservesCanonicalNavigation(to: topicURL, type: .other, isMainFrame: true))
+        _ = navigation.preservesCanonicalNavigation(to: commentURL, type: .formSubmitted, isMainFrame: true)
+        navigation.webView(navigation.webView, didFinish: nil)
+        precondition(!navigation.preservesCanonicalNavigation(to: topicURL, type: .other, isMainFrame: true))
+        print("PASS submission state consumed by redirects, clicks, reload/back, completion and failure")
         print("PASS edit/delete submission redirects preserve fresh canonical content")
         print("PASS reply submission redirects preserve canonical content only for that navigation")
         let first = BrowserWorkspace(store: store, defaults: defaults)
