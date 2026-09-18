@@ -126,7 +126,8 @@ final class RecordStore: ObservableObject {
     func restoreRecoveryCopy() {
         do {
             let data = try Data(contentsOf: fileURL.appendingPathExtension("previous"))
-            let recovery = try JSONDecoder().decode(RecordArchive.self, from: data)
+            var recovery = try JSONDecoder().decode(RecordArchive.self, from: data)
+            try journal.replay(into: &recovery)
             try recovery.validate()
             try recover(recovery)
         } catch { self.error = "Recovery failed. Import a valid backup instead. \(error.localizedDescription)" }
@@ -194,6 +195,7 @@ private final class RecordJournal: @unchecked Sendable {
     private let queue = DispatchQueue(label: "HackerViews.record-checkpoints", qos: .utility)
     private var checkpoint: DispatchWorkItem?
     private var checkpointBody: (@Sendable () -> Void)?
+    private var checkpointDeadline: DispatchTime?
     init(file: URL) {
         self.file = file
         directory = file.deletingLastPathComponent().appendingPathComponent("record-transactions")
@@ -214,7 +216,9 @@ private final class RecordJournal: @unchecked Sendable {
         let manager = FileManager.default
         // Establish a readable base before the first durable transaction.
         if !manager.fileExists(atPath: file.path) {
-            try JSONEncoder().encode(previous).write(to: file, options: .atomic)
+            let base = try JSONEncoder().encode(previous)
+            try base.write(to: file, options: .atomic)
+            try base.write(to: file.appendingPathExtension("previous"), options: .atomic)
         }
         try manager.createDirectory(at: directory, withIntermediateDirectories: true)
         let transaction = directory.appendingPathComponent(UUID().uuidString + ".json")
@@ -240,7 +244,11 @@ private final class RecordJournal: @unchecked Sendable {
         checkpointBody = body
         let work = DispatchWorkItem(block: body)
         checkpoint = work
-        queue.asyncAfter(deadline: .now() + 1, execute: work)
+        let now = DispatchTime.now()
+        if checkpointDeadline == nil || checkpointDeadline! <= now { checkpointDeadline = now + 1 }
+        // Continuous editing still checkpoints once per second, rather than
+        // indefinitely postponing compaction until the user stops typing.
+        queue.asyncAfter(deadline: checkpointDeadline!, execute: work)
     }
     func flush() {
         checkpoint?.cancel()
