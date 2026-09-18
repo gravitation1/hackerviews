@@ -125,8 +125,19 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
 
     }
 
+    private(set) var pendingRestoredURL: URL?
+    func prepareRestoredPage(_ target: URL) {
+        guard Self.isHN(target) else { return }
+        recordNavigation(target)
+        pendingRestoredURL = target
+    }
+    func activateRestoredPage() {
+        guard let target = pendingRestoredURL else { return }
+        load(target)
+    }
     func load(_ url: URL) {
         guard Self.isHN(url) else { return }
+        pendingRestoredURL = nil
         recordNavigation(url)
         if Self.topicID(url) != nil { loadTopic(url) }
         else { lazyURL = nil; webView.load(URLRequest(url: url)) }
@@ -215,6 +226,7 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
     func forward() { travel(to: historyIndex + 1) }
     private func travel(to index: Int) {
         guard history.indices.contains(index) else { return }
+        pendingRestoredURL = nil
         if history.indices.contains(historyIndex) { history[historyIndex].scrollY = scrollY }
         historyIndex = index
         scrollY = history[index].scrollY

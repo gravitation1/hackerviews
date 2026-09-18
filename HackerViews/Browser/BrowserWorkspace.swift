@@ -3,7 +3,12 @@ import SwiftUI
 @MainActor
 final class BrowserWorkspace: ObservableObject {
     @Published var tabs: [BrowserTab] = []
-    @Published var selectedID: UUID? { didSet { saveSession() } }
+    @Published var selectedID: UUID? {
+        didSet {
+            if !restoring { selected?.activateRestoredPage() }
+            saveSession()
+        }
+    }
     private struct SavedTab: Codable {
         var url: URL
         var title: String
@@ -46,10 +51,11 @@ final class BrowserWorkspace: ObservableObject {
                     tab.restoreHistory(history, index: index)
                 }
                 tabs.append(tab)
-                tab.load(saved.url)
+                tab.prepareRestoredPage(saved.url)
             }
             if !tabs.isEmpty { selectedID = tabs[min(max(0, session.selected), tabs.count - 1)].id }
             restoring = false
+            selected?.activateRestoredPage()
         }
         if tabs.isEmpty { open(URL(string: "https://news.ycombinator.com/")!) }
     }
