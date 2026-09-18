@@ -40,6 +40,14 @@ final class RecordStore: ObservableObject {
         if cloudEnabled { syncStatus = "iCloud sync pending" }
     }
 
+    func acknowledgeRecoveryNotice() {
+        let notice = fileURL.deletingLastPathComponent().appendingPathComponent("recovery-notice.txt")
+        do {
+            if FileManager.default.fileExists(atPath: notice.path) { try FileManager.default.removeItem(at: notice) }
+            recoveryNotice = nil
+        } catch { self.error = "Couldn’t dismiss the recovery notice: \(error.localizedDescription)" }
+    }
+
     func current(_ username: String) -> PersonRevision? { people.first { $0.username == username } }
 
     @discardableResult

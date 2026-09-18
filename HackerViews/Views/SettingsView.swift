@@ -25,6 +25,7 @@ struct SettingsView: View {
             if let notice = store.recoveryNotice {
                 Section("Recovery needs review") {
                     Text(notice).textSelection(.enabled).foregroundStyle(.orange)
+                    Button("I’ve reviewed this") { store.acknowledgeRecoveryNotice() }
                 }
             }
             #if os(macOS)
