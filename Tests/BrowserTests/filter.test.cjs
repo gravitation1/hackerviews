@@ -1003,3 +1003,35 @@ test('profile note editors coalesce for five seconds and flush on blur, pagehide
     w.close();
   }
 });
+
+test('refresh restores nested collapsed threads before rendering and preserves later expansion', async()=>{
+  const items={1:{id:1,type:'story',title:'Topic',kids:[2,5]},2:{id:2,type:'comment',parent:1,by:'a',text:'Parent',kids:[3]},3:{id:3,type:'comment',parent:2,by:'b',text:'Child',kids:[4]},4:{id:4,type:'comment',parent:3,by:'c',text:'Grandchild'},5:{id:5,type:'comment',parent:1,by:'d',text:'Sibling'}};
+  async function populate(p) {
+    const seen=new Set();
+    for(let turn=0;turn<10;turn++) {
+      for(const request of p.messages.filter(m=>m.kind==='lazyItems' && !seen.has(m.token))) {
+        seen.add(request.token);
+        p.dom.window.HackerViews.lazyResult(request.token,request.ids.map(id=>({id,effect:'visible',item:items[id]})));
+      }
+      await new Promise(r=>setTimeout(r,5));
+    }
+  }
+  const first=await lazyPage();await populate(first);
+  first.doc.querySelector('[id="3"] .hv-collapse').click();first.doc.querySelector('[id="2"] .hv-collapse').click();
+  const state=first.dom.window.HackerViews.refreshState();
+  assert.deepEqual([...state.collapsed].sort(),[2,3]);
+  first.dom.window.close();
+  const restored=await lazyPage(state);
+  restored.dom.window.scrollTo=()=>{};
+  assert.deepEqual([...restored.dom.window.HackerViews.refreshState().collapsed].sort(),[2,3]);
+  await populate(restored);
+  for(const id of [2,3]) {
+    assert.equal(restored.doc.querySelector(`[id="${id}"] .hv-collapse`).getAttribute('aria-expanded'),'false');
+    assert.equal(restored.doc.querySelector(`[id="${id}"] .comment`).hidden,true);
+  }
+  restored.doc.querySelector('[id="2"] .hv-collapse').click();
+  assert.deepEqual([...restored.dom.window.HackerViews.refreshState().collapsed],[3]);
+  assert.equal(restored.doc.querySelector('[id="3"] .comment').hidden,true);
+  assert.equal(restored.doc.querySelector('[id="5"] .comment').hidden,false);
+  restored.dom.window.close();
+});

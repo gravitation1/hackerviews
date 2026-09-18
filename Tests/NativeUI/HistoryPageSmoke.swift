@@ -74,6 +74,16 @@ actor HistoryRequests {
             precondition(abs(rapidTop - top) < 2, "Rapid navigation must not overwrite the destination anchor")
             let finalCount = await requests.count
             precondition(finalCount == requestCount, "History must not request comments again")
+            _ = try! await threadView.evaluateJavaScript("document.getElementById('125').querySelector('.hv-collapse').click(); document.getElementById('130')?.querySelector('.hv-collapse').click()")
+            tab.reload()
+            for _ in 0..<100 {
+                let ready = (try? await threadView.evaluateJavaScript("document.getElementById('130')?.querySelector('.hv-collapse')?.getAttribute('aria-expanded') === 'false'")) as? Bool ?? false
+                if ready { break }
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+            let collapsed = try! await threadView.evaluateJavaScript("[125,130].every(id=>document.getElementById(String(id))?.querySelector('.hv-collapse')?.getAttribute('aria-expanded') === 'false')") as! Bool
+            precondition(collapsed, "Refresh must restore collapsed comment bodies")
+            print("PASS real WebKit: refresh preserves multiple collapsed comments")
             print("PASS real WebKit: repeated and rapid thread/home round trips retain documents, comment offset, home position and request count; inactive reports are ignored")
             try? FileManager.default.removeItem(at: directory)
             exit(0)

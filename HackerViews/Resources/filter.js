@@ -61,7 +61,15 @@
     return {y:window.scrollY,id:row?Number(row.id):0,top:row?.getBoundingClientRect().top||0,
       ancestors:node?[...node.ancestors]:[]};
   }
+  function refreshState() {
+    const collapsed = lazyThread ? [...lazyCollapsed] : [...document.querySelectorAll('tr.comtr.coll')].map(row=>Number(row.id));
+    return {...readingPosition(), collapsed};
+  }
   function restoreReadingPosition(anchor,y) {
+    if (!lazyThread) for (const id of anchor.collapsed || []) {
+      const row=document.getElementById(String(id));
+      if(row && !row.classList.contains('coll'))row.querySelector('.togg')?.click();
+    }
     const row=document.getElementById(String(anchor.id));
     if(row?.getClientRects().length)window.scrollTo(0,window.scrollY+row.getBoundingClientRect().top-(anchor.top||0));
     else window.scrollTo(0,y);
@@ -817,6 +825,7 @@
   let lazyRestoreY = 0;
   let lazyJump = null;
   const lazyNodes = new Map();
+  const lazyCollapsed = new Set();
   const lazyGroups = new Map();
   let lazyObserver;
   function safeBody(html) {
@@ -898,7 +907,7 @@
       if(lazyNodes.has(id))return lazyNodes.get(id);
       const host=document.createElement('div');host.className='hv-node';group.sentinel.before(host);
       const own=document.createElement('div');own.className='hv-own';host.append(own);lazyStatus(own,'Loading comments…');
-      const node={id,host,group,depth:group.depth,ancestors:group.ancestors};lazyNodes.set(id,node);return node;
+      const node={id,host,group,depth:group.depth,ancestors:group.ancestors,collapsed:lazyCollapsed.has(id)};lazyNodes.set(id,node);return node;
     });
     if(group.offset===group.ids.length) {lazyObserver?.unobserve(group.sentinel);group.sentinel.remove();lazyGroups.delete(group.sentinel);}
     lazyRequestNodes(nodes);
@@ -1213,7 +1222,7 @@
       const toggle=document.createElement('button');toggle.className='hv-collapse';
       const updateToggle=()=>{toggle.textContent=node.collapsed?'[+]':'[-]';toggle.setAttribute('aria-expanded',String(!node.collapsed));toggle.setAttribute('aria-label',node.collapsed?'Expand thread':'Collapse thread');toggle.title=node.collapsed?'Expand thread':'Collapse thread';};
       updateToggle();
-      toggle.onclick=()=>{node.collapsed=!node.collapsed;body.hidden=node.collapsed;votes.style.visibility=node.collapsed?'hidden':''; if(node.children)node.children.host.hidden=node.collapsed;
+      toggle.onclick=()=>{node.collapsed=!node.collapsed;if(node.collapsed)lazyCollapsed.add(node.id);else lazyCollapsed.delete(node.id);body.hidden=node.collapsed;votes.style.visibility=node.collapsed?'hidden':''; if(node.children)node.children.host.hidden=node.collapsed;
         updateToggle();lazyPump();};heading.append(toggle);
       const body=document.createElement('div');body.className='comment';body.hidden=!!node.collapsed;
       const text=document.createElement('span');text.className='commtext';text.append(safeBody(item.deleted?'[deleted]':item.text || ''));body.append(text);
@@ -1385,6 +1394,7 @@
     lazyThread=true;lazyRestoreY=Number(document.body.dataset.hvScroll)||0;
     try {
       const anchor=JSON.parse(atob(document.body.dataset.hvAnchor||''));
+      for(const id of anchor.collapsed || [])if(Number.isSafeInteger(id) && id>0)lazyCollapsed.add(id);
       if(Number.isSafeInteger(anchor.id) && anchor.id>0 && Array.isArray(anchor.ancestors))lazyRestoreAnchor=anchor;
     } catch(_) {}
     if(typeof IntersectionObserver!=='undefined')lazyObserver=new IntersectionObserver(entries=>{
@@ -1509,7 +1519,7 @@
   }
 
   window.HackerViews = {
-    lazyResult, localResult, readingPosition, restoreReadingPosition,
+    lazyResult, localResult, readingPosition, refreshState, restoreReadingPosition,
     networkGranted(token) { const resolve=networkWaiters.get(token);networkWaiters.delete(token);resolve?.(); },
     originalPoster(name, threadRootID) {
       originalPoster = name; paintOP();

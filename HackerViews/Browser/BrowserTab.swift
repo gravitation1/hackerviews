@@ -359,7 +359,7 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
     func reload() {
         if let activePage { activePage.reload(); return }
         let epoch = navigationID
-        webView.callAsyncJavaScript("return window.HackerViews?.readingPosition() ?? {y: window.scrollY}",
+        webView.callAsyncJavaScript("return window.HackerViews?.refreshState() ?? window.HackerViews?.readingPosition() ?? {y: window.scrollY}",
                                    arguments: [:], in: nil, in: Self.world) { [weak self] result in
             guard let self, navigationID == epoch else { return }
             if case .success(let value) = result, let anchor = value as? [String: Any],
