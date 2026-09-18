@@ -235,7 +235,7 @@ struct RecordEditor: View {
                 Text("First active match wins. Assignments leave your notes unchanged.")
             }
         }
-        .task(id: store.archive.filterRevisions?.max { $0.modifiedAt < $1.modifiedAt }?.id) {
+        .task(id: store.archive.effectiveFilterRevision?.id) {
             effectiveMatch = nil
             if let id = contributionID {
                 let result = await accountService.decisions(ids: [id], rules: store.archive.rules)

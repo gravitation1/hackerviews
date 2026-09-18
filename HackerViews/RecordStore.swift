@@ -97,7 +97,7 @@ final class RecordStore: ObservableObject {
         var candidate = archive
         var revision = AccountFilterRevision(filters: highlighting ? archive.accountFilters : filters)
         revision.highlights = highlighting ? filters : archive.highlightFilters
-        revision.orderedRules = archive.filterRevisions?.max { $0.modifiedAt < $1.modifiedAt }?.orderedRules
+        revision.orderedRules = archive.effectiveFilterRevision?.orderedRules
         let latest = candidate.filterRevisions?.map(\.modifiedAt).max() ?? .distantPast
         revision.modifiedAt = max(Date(), latest.addingTimeInterval(0.001))
         candidate.filterRevisions = (candidate.filterRevisions ?? []) + [revision]

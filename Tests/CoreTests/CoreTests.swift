@@ -491,13 +491,13 @@ import Testing
     var archive = RecordArchive(); archive.filterRevisions = [first]
     let key = archive.effectiveFilterRevision?.id
     archive.filterRevisions?.append(older)
-    precondition(archive.effectiveFilterRevision?.id == key)
+    #expect(archive.effectiveFilterRevision?.id == key)
     var tied = first; tied.id = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
     tied.orderedRules = []
     archive.filterRevisions?.append(tied)
-    precondition(archive.effectiveFilterRevision?.id == tied.id && archive.rules.isEmpty)
+    #expect(archive.effectiveFilterRevision?.id == tied.id && archive.rules.isEmpty)
     var legacy = first; legacy.id = UUID(); legacy.membershipVersion = nil
     legacy.modifiedAt = Date(timeIntervalSince1970: 200)
     archive.filterRevisions?.append(legacy)
-    precondition(archive.effectiveFilterRevision?.id == tied.id)
+    #expect(archive.effectiveFilterRevision?.id == tied.id)
 }
