@@ -1045,7 +1045,7 @@ test('upvote state survives a fresh reader document without resurrecting hidden 
     w.IntersectionObserver=class {constructor(callback){this.callback=callback;}observe(target){this.callback([{target,isIntersecting:true}]);}unobserve(){}};
     w.fetch=async(url,options)=>{
       requests.push({url,options});
-      if(new URL(url).pathname==='/vote'){voted=true;return {ok:true};}
+      if(new URL(url).pathname==='/vote'){voted=new URL(url).searchParams.get('how')!=='un';return {ok:true};}
       return {ok:true,text:async()=>`<table><tr class="athing comtr" id="1"><td class="votelinks">
         <a id="up_1" class="${voted?'nosee':''}" href="vote?id=1&how=up&auth=fixture">up</a>
         <a id="down_1" style="${voted?'visibility:hidden':''}" href="vote?id=1&how=down&auth=fixture">down</a>
@@ -1061,11 +1061,24 @@ test('upvote state survives a fresh reader document without resurrecting hidden 
   await new Promise(r=>setTimeout(r,10));
   assert.ok([...first.doc.querySelectorAll('.hv-vote')].every(button=>button.hidden));
   assert.match(first.doc.querySelector('.hv-vote-status').textContent,/Upvoted/);
+  first.doc.querySelector('.hv-undo-vote').click();
+  await new Promise(r=>setTimeout(r,10));
+  assert.equal(first.doc.querySelector('.hv-vote-status'),null);
+  assert.ok([...first.doc.querySelectorAll('.hv-vote')].every(button=>!button.hidden && !button.disabled));
+  first.doc.querySelector('.hv-vote').click();
+  await new Promise(r=>setTimeout(r,10));
   first.dom.window.close();
   const refreshed=await open();
   assert.ok([...refreshed.doc.querySelectorAll('.hv-vote')].every(button=>button.hidden));
   assert.match(refreshed.doc.querySelector('.hv-vote-status').textContent,/Upvoted/);
-  assert.equal(requests.filter(r=>new URL(r.url).pathname==='/vote').length,1);
+  const undo=refreshed.doc.querySelector('.hv-undo-vote');
+  assert.equal(undo.getAttribute('aria-label'),'Undo upvote');
+  undo.click();undo.click();
+  await new Promise(r=>setTimeout(r,10));
+  assert.equal(refreshed.doc.querySelector('.hv-vote-status'),null);
+  assert.ok([...refreshed.doc.querySelectorAll('.hv-vote')].every(button=>!button.hidden && !button.disabled));
+  assert.equal(requests.filter(r=>new URL(r.url).pathname==='/vote').length,4);
+  assert.deepEqual(requests.filter(r=>new URL(r.url).pathname==='/vote').map(r=>new URL(r.url).searchParams.get('how')),['up','un','up','un']);
   assert.ok(requests.every(r=>r.options.cache==='no-store'));
   refreshed.dom.window.close();
 });
@@ -1078,6 +1091,31 @@ test('hidden authenticated vote links are unavailable even without an undo link'
   p.dom.window.HackerViews.lazyResult(request.token,[{id:1,effect:'visible',item:{id:1,type:'comment',by:'author',text:'Comment'}}]);
   await new Promise(r=>setTimeout(r,20));
   assert.ok([...p.doc.querySelectorAll('.hv-vote')].every(button=>button.hidden));
+  assert.equal(p.doc.querySelector('.hv-vote-status'),null);
+  p.dom.window.close();
+});
+
+test('failed undo stays retryable and restored controls respect current eligibility',async()=>{
+  const p=await lazyPage();let voted=true,fail=true,undoRequests=0;
+  p.dom.window.IntersectionObserver=class {constructor(callback){this.callback=callback;}observe(target){this.callback([{target,isIntersecting:true}]);}unobserve(){}};
+  p.dom.window.fetch=async url=>{
+    if(new URL(url).pathname==='/vote'){undoRequests++;if(fail)return {ok:false};voted=false;return {ok:true};}
+    return {ok:true,text:async()=>`<table><tr class="athing" id="1"><td class="votelinks"><a class="${voted?'nosee':''}" href="vote?id=1&how=up&auth=fixture">up</a></td><td>${voted?'<a id="un_1" href="vote?id=1&how=un&auth=fixture">undown</a>':''}</td></tr></table>`};
+  };
+  const request=p.messages.filter(m=>m.kind==='lazyItems').at(-1);
+  p.dom.window.HackerViews.lazyResult(request.token,[{id:1,effect:'visible',item:{id:1,type:'comment',by:'author',text:'Comment'}}]);
+  await new Promise(r=>setTimeout(r,20));
+  assert.equal(p.doc.querySelector('.hv-undo-vote').getAttribute('aria-label'),'Undo downvote');
+  p.doc.querySelector('.hv-undo-vote').click();
+  await new Promise(r=>setTimeout(r,10));
+  assert.match(p.doc.querySelector('.hv-undo-vote').textContent,/retry undo/);
+  assert.equal(p.doc.querySelector('.hv-undo-vote').disabled,false);
+  assert.ok([...p.doc.querySelectorAll('.hv-vote')].every(b=>b.hidden));
+  fail=false;p.doc.querySelector('.hv-undo-vote').click();
+  await new Promise(r=>setTimeout(r,10));
+  assert.equal(undoRequests,2);
+  const [up,down]=p.doc.querySelectorAll('.hv-vote');
+  assert.equal(up.hidden,false);assert.equal(up.disabled,false);assert.equal(down.hidden,true);
   assert.equal(p.doc.querySelector('.hv-vote-status'),null);
   p.dom.window.close();
 });

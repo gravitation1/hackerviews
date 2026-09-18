@@ -191,6 +191,7 @@
        the scroll geometry as WebKit skips and reactivates nested comments. */
     body[data-hv-topic] { overflow-anchor: none; }
     .hv-own > button { cursor: pointer; color: var(--qhn-text); background: var(--qhn-hover); border: 1px solid var(--qhn-line); border-radius: 5px; min-height: 32px; }
+    .hv-undo-vote { font: inherit; color: inherit; background: transparent; border: 0; padding: 0; min-height: 0; cursor: pointer; text-decoration: underline; }
     .hv-own .hv-collapse { position: relative; font: inherit; color: var(--qhn-muted); background: transparent; border: 0; min-height: 0; padding: 0 3px; }
     .hv-collapse::before { content: ''; position: absolute; inset: -7px -3px; border-radius: 4px; }
     .hv-own .hv-collapse:hover, .hv-own .hv-collapse:focus-visible { color: var(--qhn-text); background: var(--qhn-hover); outline: 1px solid var(--qhn-line); }
@@ -1042,19 +1043,26 @@
     }
   }
   const voteActions = new Map();
+  const pendingVotes = new Set();
   const voteControls = new Map();
   const votePages = new Set();
   let votePage = location.href, voteFetching = false;
   let voteObserver;
   function updateVoteControls(id) {
     const actions=voteActions.get(id);
-    for(const {button,direction} of voteControls.get(id)||[])button.hidden=!!actions?.voted || !actions?.[direction];
+    for(const {button,direction} of voteControls.get(id)||[]){button.hidden=!!actions?.voted || !actions?.[direction];button.disabled=pendingVotes.has(id);}
     const heading=lazyNodes.get(id)?.host.querySelector(':scope > .hv-own .comhead, :scope > .hv-own .subtext');
     if(heading) {
       let status=heading.querySelector('.hv-vote-status');
       if(actions?.voted) {
         if(!status){status=document.createElement('span');status.className='hv-vote-status';heading.append(status);}
-        status.textContent=actions.voted==='up'?' · Upvoted':' · Downvoted';
+        const label=actions.voted==='up'?'Upvoted':'Downvoted';
+        status.replaceChildren(document.createTextNode(' · '));
+        if(actions.undo) {
+          const undo=document.createElement('button');undo.type='button';undo.className='hv-undo-vote';undo.textContent=label;
+          undo.title=actions.voted==='up'?'Undo upvote':'Undo downvote';if(actions.undoFailed){undo.textContent=label+' — retry undo';undo.title='Retry '+undo.title.toLowerCase();}undo.setAttribute('aria-label',undo.title);
+          undo.disabled=pendingVotes.has(id);undo.onclick=()=>undoVote(id);status.append(undo);
+        } else status.append(label);
       } else status?.remove();
     }
   }
@@ -1064,6 +1072,49 @@
          node.style.display==='none' || node.style.visibility==='hidden')return true;
     }
     return false;
+  }
+  function readVoteActions(doc,row,target) {
+    const id=Number(row.id);
+    const actions={};
+    for(const a of row.querySelectorAll('.votelinks a[href]')) {
+      if(a.closest('tr.athing')!==row || voteLinkHidden(a))continue;
+      const url=new URL(a.getAttribute('href'),target),direction=url.searchParams.get('how');
+      if(url.origin===location.origin && url.pathname==='/vote' && url.searchParams.get('id')===String(id) && url.searchParams.get('auth') && ['up','down'].includes(direction))actions[direction]=url.href;
+    }
+    const undo=doc.getElementById('un_'+id);
+    if(undo && !voteLinkHidden(undo)) {
+      const url=new URL(undo.getAttribute('href')||'',target);
+      const label=undo.textContent.trim().toLowerCase();
+      if(url.origin===location.origin && url.pathname==='/vote' && url.searchParams.get('id')===String(id) && url.searchParams.get('how')==='un' && url.searchParams.get('auth')) {
+        if(label==='unvote')actions.voted='up';
+        else if(label==='undown')actions.voted='down';
+        if(actions.voted)actions.undo=url.href;
+      }
+    }
+    return actions;
+  }
+  async function undoVote(id) {
+    const previous=voteActions.get(id);
+    if(!previous?.undo || pendingVotes.has(id))return;
+    pendingVotes.add(id);updateVoteControls(id);
+    try {
+      const url=new URL(previous.undo);url.searchParams.set('js','t');
+      const response=await pooledFetch(url.href,{credentials:'same-origin',cache:'no-store'});
+      if(!response.ok)throw new Error();
+      voteActions.set(id,{});updateVoteControls(id);
+      // Ask HN which actions are now eligible; never infer downvote eligibility.
+      const target=new URL('/item?id='+id,location.origin).href;
+      const page=await pooledFetch(target,{credentials:'same-origin',cache:'no-store'});
+      if(page.ok) {
+        const doc=new DOMParser().parseFromString(await page.text(),'text/html');
+        const row=doc.querySelector('tr.athing[id="'+id+'"]');
+        if(row)voteActions.set(id,readVoteActions(doc,row,target));
+      }
+    } catch (_) {
+      if(voteActions.get(id)===previous)previous.undoFailed=true;
+      // If the undo request failed, retain the voted state and allow retry.
+      // If only the subsequent eligibility fetch failed, leave unknown actions hidden.
+    } finally {pendingVotes.delete(id);updateVoteControls(id);}
   }
   async function loadVoteActions() {
     if(localPaused || voteFetching || !votePage || typeof fetch!=='function')return;
@@ -1094,21 +1145,7 @@
       rememberCanonicalItems(doc,target);
       for(const row of doc.querySelectorAll('tr.athing[id]')) {
         const id=Number(row.id);if(!Number.isSafeInteger(id))continue;
-        const actions={};
-        for(const a of row.querySelectorAll('.votelinks a[href]')) {
-          if(a.closest('tr.athing')!==row || voteLinkHidden(a))continue;
-          const url=new URL(a.getAttribute('href'),target),direction=url.searchParams.get('how');
-          if(url.origin===location.origin && url.pathname==='/vote' && url.searchParams.get('id')===String(id) && url.searchParams.get('auth') && ['up','down'].includes(direction))actions[direction]=url.href;
-        }
-        const undo=doc.getElementById('un_'+id);
-        if(undo && !voteLinkHidden(undo)) {
-          const url=new URL(undo.getAttribute('href')||'',target);
-          const label=undo.textContent.trim().toLowerCase();
-          if(url.origin===location.origin && url.pathname==='/vote' && url.searchParams.get('id')===String(id) && url.searchParams.get('how')==='un' && url.searchParams.get('auth')) {
-            if(label==='unvote')actions.voted='up';
-            else if(label==='undown')actions.voted='down';
-          }
-        }
+        const actions=readVoteActions(doc,row,target);
         voteActions.set(id,actions);updateVoteControls(id);
       }
       votePages.add(target);
@@ -1144,14 +1181,16 @@
     return button;
   }
   async function lazyVote(item, button, direction) {
-    const action=voteActions.get(item.id)?.[direction];if(!action)return;
-    for(const control of voteControls.get(item.id)||[])control.button.disabled=true;
+    const action=voteActions.get(item.id)?.[direction];if(!action || pendingVotes.has(item.id))return;
+    pendingVotes.add(item.id);updateVoteControls(item.id);
     try {
       const url=new URL(action);url.searchParams.set('js','t');
       const voted=await pooledFetch(url.href,{credentials:'same-origin',cache:'no-store'});
       if(!voted.ok)throw new Error();
-      voteActions.set(item.id,{voted:direction});updateVoteControls(item.id);
-    } catch (_) {button.title='Retry vote';button.setAttribute('aria-label','Retry vote');for(const control of voteControls.get(item.id)||[])control.button.disabled=false;}
+      url.searchParams.set('how','un');
+      voteActions.set(item.id,{voted:direction,undo:url.href});updateVoteControls(item.id);
+    } catch (_) {button.title='Retry vote';button.setAttribute('aria-label','Retry vote');}
+    finally {pendingVotes.delete(item.id);updateVoteControls(item.id);}
   }
   function lazyNavigation(node, item, heading) {
     const nav=document.createElement('span');nav.className='hv-comment-nav';
