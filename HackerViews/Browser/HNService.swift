@@ -200,6 +200,18 @@ actor HNService {
         }
     }
 
+    // Only author, type and parent are reused beyond the content TTL. Rules
+    // inspecting text still need the normal mutable-content refresh.
+    func ancestorItem(_ id: Int, rules: [FilterRule]) async throws -> HNItem? {
+        loadCachesIfNeeded()
+        if !rules.contains(where: { $0.isActive && $0.content != nil }),
+           let item = cache[id]?.item, item.by != nil, let type = item.type,
+           type != "comment" || item.parent != nil {
+            return HNItem(id: item.id, by: item.by, parent: item.parent, type: type)
+        }
+        return try await item(id)
+    }
+
     func accountMatch(_ name: String, rules: [FilterRule], now: Date = Date()) async -> AccountRuleMatch {
         loadCachesIfNeeded()
         let varies = rules.contains { $0.isActive && ($0.content != nil || ($0.scope != nil && $0.scope != .both) || !($0.itemIDs ?? []).isEmpty) }
@@ -359,7 +371,7 @@ actor HNService {
                 ReaderTrace.event("check.ancestor", ["id": id, "parent": parentID])
                 let parent: HNItem
                 do {
-                    guard let fetched = try await self.item(parentID) else { return (id, "unresolved", "A parent contribution is unavailable; can’t check blocked ancestors.") }
+                    guard let fetched = try await self.ancestorItem(parentID, rules: rules) else { return (id, "unresolved", "A parent contribution is unavailable; can’t check blocked ancestors.") }
                     parent = fetched
                 } catch { return (id, "unresolved", Self.failureDescription(error, subject: "a parent contribution")) }
                 let (ancestorRule, ancestorEffect, ancestorIssue) = await itemMatch(parent, rules: rules, now: now)

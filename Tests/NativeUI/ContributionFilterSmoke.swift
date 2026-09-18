@@ -42,6 +42,22 @@ import Foundation
         print("PASS offline non-blocking rules stay visible; mixed policies preserve blocking and priority")
         actor RequestCounter { var count = 0; func hit() { count += 1 } }
         let baselineCounter = RequestCounter(), domCounter = RequestCounter()
+        let ttlFolder = folder.appendingPathComponent("ttl")
+        try FileManager.default.createDirectory(at: ttlFolder, withIntermediateDirectories: true)
+        try JSONEncoder().encode(["1": Entry(item: post, fetched: Date(timeIntervalSinceNow: -3600))])
+            .write(to: ttlFolder.appendingPathComponent("HackerViews-contributions-v3.json"))
+        let ttlCounter = RequestCounter()
+        let ttlService = HNService(directory: ttlFolder, itemLoader: { _ in
+            await ttlCounter.hit()
+            return HNItem(id: 1, by: "alice", parent: nil, type: "story", title: "Edited title")
+        })
+        let ancestry = try await ttlService.ancestorItem(1, rules: [])
+        let beforeRefresh = await ttlCounter.count
+        precondition(ancestry?.by == "alice" && ancestry?.title == nil && beforeRefresh == 0)
+        let refreshed = try await ttlService.item(1)
+        let afterRefresh = await ttlCounter.count
+        precondition(refreshed?.title == "Edited title" && afterRefresh == 1)
+        print("PASS stale ancestry avoids requests while displayed content still refreshes")
         let feedItems = Dictionary(uniqueKeysWithValues: (100...129).map { ($0, HNItem(id: $0, by: "alice", parent: nil, type: "story")) })
         var authorRule = FilterRule(); authorRule.assignedUsers = ["alice"]
         let baselineFeed = HNService(directory: folder.appendingPathComponent("feed-api"), itemLoader: { id in
