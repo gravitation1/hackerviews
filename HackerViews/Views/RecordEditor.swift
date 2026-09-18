@@ -461,7 +461,7 @@ private struct FlagContributionView: View {
         return rules
     }
     private var previewKey: String {
-        String(userTarget) + filterID + String(describing: newFilter) + String(describing: store.archive.filterRevisions)
+        String(userTarget) + filterID + String(describing: newFilter) + (store.archive.effectiveFilterRevision?.id.uuidString ?? "default")
     }
     var body: some View {
         NavigationStack {

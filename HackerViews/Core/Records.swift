@@ -51,12 +51,12 @@ public struct RecordArchive: Codable, Sendable {
             $0.modifiedAt == $1.modifiedAt ? $0.id.uuidString < $1.id.uuidString : $0.modifiedAt < $1.modifiedAt
         }?.highlights ?? AccountFilters()
     }
-    public var rules: [FilterRule] {
-        let latest = filterRevisions?.filter { $0.membershipVersion == 1 }.max {
+    public var effectiveFilterRevision: AccountFilterRevision? {
+        filterRevisions?.filter { $0.membershipVersion == 1 }.max {
             $0.modifiedAt == $1.modifiedAt ? $0.id.uuidString < $1.id.uuidString : $0.modifiedAt < $1.modifiedAt
         }
-        return latest?.orderedRules ?? [.blockedDefault]
     }
+    public var rules: [FilterRule] { effectiveFilterRevision?.orderedRules ?? [.blockedDefault] }
 
     public var preferredUsers: Set<String> { Set(current.filter { $0.isPreferred == true }.map(\.username)) }
     public var policy: FilterPolicy { FilterPolicy(blocked: blockedUsers, accounts: accountFilters, preferred: preferredUsers, highlights: highlightFilters, rules: rules) }
