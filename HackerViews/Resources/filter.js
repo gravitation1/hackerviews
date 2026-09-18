@@ -1365,7 +1365,11 @@
     const ids = [...new Set([...(pageID ? [pageID] : []), ...candidates])];
     if (!ids.length) return finish(token, {});
     pending.pageID = pageID;
-    post({kind: 'ancestors', ids, token});
+    const items=[...tree.rows,...tree.stories].map(row=>{
+      const comment=row.matches('tr.comtr') || !!row.querySelector('.commtext');
+      return {id:idOf(row),by:authorOf(comment?row:row.nextElementSibling),type:comment?'comment':'story'};
+    }).filter(item=>item.id && item.by);
+    post({kind: 'ancestors', ids, token, items});
     // List pages can show their chrome and in-place progress immediately.
     // Unchecked contributions stay hidden until their decisions arrive.
     if(!pageID && ordered)finish(token, {}, false, {}, true);

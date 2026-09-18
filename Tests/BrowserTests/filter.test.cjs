@@ -915,3 +915,13 @@ test('scroll reports persist the visible comment and offset, not only page pixel
   assert.equal(report.anchor.top,-25);
   p.dom.window.close();
 });
+
+
+test('list checks include DOM authors and contribution types for native fast filtering',async()=>{
+  const p=await page(`<table>${story(10,'alice')}${row(11,'bob')}</table>`,{blocked:[]});
+  p.dom.window.HackerViews.setOrdered(true);
+  const request=p.messages.filter(m=>m.kind==='ancestors').at(-1);
+  assert.deepEqual(JSON.parse(JSON.stringify(request.items)).sort((a,b)=>a.id-b.id),[
+    {id:10,by:'alice',type:'story'},{id:11,by:'bob',type:'comment'}]);
+  p.dom.window.close();
+});

@@ -224,7 +224,7 @@ actor HNService {
         var effects: [String: String]
         var labels: [String: String]
     }
-    func decisions(ids: [Int], rules: [FilterRule], progress: (@Sendable (ItemEffects) async -> Void)? = nil) async -> ItemEffects {
+    func decisions(ids: [Int], rules: [FilterRule], knownItems: [Int: HNItem] = [:], progress: (@Sendable (ItemEffects) async -> Void)? = nil) async -> ItemEffects {
         let now = Date()
         let checksBranches = rules.contains { $0.isActive && $0.effect == .block }
         var result: [String: String] = [:]
@@ -234,7 +234,12 @@ actor HNService {
             await withTaskGroup(of: (Int, String, String?).self) { group in
                 for id in ids[start..<min(start + 8, ids.count)] {
                     group.addTask {
-                        await self.contributionDecision(id, rules: rules, now: now, checksBranches: checksBranches)
+                        if let item = knownItems[id], item.by != nil,
+                           !rules.contains(where: { $0.isActive && ($0.conditions.isActive || $0.content != nil) }),
+                           item.type != "comment" || !rules.contains(where: { $0.isActive && $0.effect == .block && $0.includesReplies }) {
+                            return await self.domDecision(item, rules: rules, now: now)
+                        }
+                        return await self.contributionDecision(id, rules: rules, now: now, checksBranches: checksBranches)
                     }
                 }
                 for await (id, effect, label) in group {
@@ -287,6 +292,12 @@ actor HNService {
     private func itemMatch(_ item: HNItem, rules: [FilterRule], now: Date) async -> (FilterRule?, String, String?) {
         let traceStart = Date()
         defer { ReaderTrace.event("filter.end", ["id": item.id, "ms": Date().timeIntervalSince(traceStart)*1000]) }
+        func unresolved(_ rule: FilterRule, _ issue: String) -> (FilterRule?, String, String?) {
+            // With no blocking rules, missing styling information cannot justify
+            // hiding content. Mixed policies keep their conservative priority semantics.
+            guard rules.contains(where: { $0.isActive && $0.effect == .block }) else { return (nil, "visible", nil) }
+            return (rule, "unresolved", issue)
+        }
         let eligible = rules.filter { $0.isActive && $0.applies(to: item) }
         if let direct = eligible.first(where: { $0.itemIDs?.contains(item.id) == true }) { return (direct, direct.result, nil) }
         for rule in eligible {
@@ -299,7 +310,7 @@ actor HNService {
             if decision == .unresolved, rule.conditions.isActive, let name = item.by {
                 let account: HNAccount?
                 do { account = try await profile(name, needsKarma: rule.conditions.karmaBelow != nil, needsCreated: rule.conditions.createdSince != nil || rule.conditions.youngerThanDays != nil) }
-                catch { return (rule, "unresolved", Self.failureDescription(error, subject: "the account for \(name)")) }
+                catch { return unresolved(rule, Self.failureDescription(error, subject: "the account for \(name)")) }
                 decision = rule.matches(item: item, karma: account?.karma, created: account?.created.map { Date(timeIntervalSince1970: $0) } ?? cached?.creationDate, now: now)
             }
             if decision == .blocked { return (rule, rule.result, nil) }
@@ -308,7 +319,7 @@ actor HNService {
                 if item.by == nil { reason = "Hacker News omitted the author; can’t evaluate filter ‘\(rule.name)’." }
                 else if rule.conditions.isActive { reason = "Account details needed by filter ‘\(rule.name)’ are unavailable." }
                 else { reason = "The content pattern in filter ‘\(rule.name)’ couldn’t be evaluated." }
-                return (rule, "unresolved", reason)
+                return unresolved(rule, reason)
             }
         }
         return (nil, "visible", nil)
@@ -346,6 +357,16 @@ actor HNService {
                 cursor = parent.parent
             }
         }
+        return formattedDecision(item, rule: rule, effect: effect, issue: issue)
+    }
+
+    private func domDecision(_ item: HNItem, rules: [FilterRule], now: Date) async -> (Int, String, String?) {
+        ReaderTrace.event("check.dom", ["id": item.id])
+        let (rule, effect, issue) = await itemMatch(item, rules: rules, now: now)
+        return formattedDecision(item, rule: rule, effect: effect, issue: issue)
+    }
+    private func formattedDecision(_ item: HNItem, rule: FilterRule?, effect: String, issue: String?) -> (Int, String, String?) {
+        let id = item.id
         let label = rule.map { rule in
             let name = rule.name.isEmpty ? "Unnamed filter" : rule.name
             if rule.itemIDs?.contains(id) == true { return name + " · Assigned directly" }

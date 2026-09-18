@@ -24,6 +24,46 @@ import Foundation
         precondition(HNService.shared === HNService.shared)
         print("PASS cache initialization is deferred and concurrent readers share it")
         let service = HNService(directory: folder, itemLoader: { id in [1: post, 2: comment, 3: reply][id] })
+        let stylingOffline = HNService(directory: folder.appendingPathComponent("styling-offline"),
+            profileLoader: { _ in throw URLError(.notConnectedToInternet) }, itemLoader: { _ in post })
+        for effect in [FilterRule.Effect.highlight, .fade, .allow] {
+            var styling = FilterRule(); styling.effect = effect; styling.conditions.karmaBelow = 100
+            let visible = await stylingOffline.decisions(ids: [1], rules: [styling])
+            precondition(visible.effects["1"] == "visible", "Unknown styling must not hide readable content")
+            var block = FilterRule(); block.assignedUsers = ["alice"]
+            let mixed = await stylingOffline.decisions(ids: [1], rules: [styling, block])
+            precondition(mixed.effects["1"] == "unresolved", "Unknown earlier styling cannot bypass a possible block")
+            let blocked = await stylingOffline.decisions(ids: [1], rules: [block, styling])
+            precondition(blocked.effects["1"] == "blocked", "Known earlier block must still win")
+            block.enabled = false
+            let disabled = await stylingOffline.decisions(ids: [1], rules: [styling, block])
+            precondition(disabled.effects["1"] == "visible")
+        }
+        print("PASS offline non-blocking rules stay visible; mixed policies preserve blocking and priority")
+        actor RequestCounter { var count = 0; func hit() { count += 1 } }
+        let baselineCounter = RequestCounter(), domCounter = RequestCounter()
+        let feedItems = Dictionary(uniqueKeysWithValues: (100...129).map { ($0, HNItem(id: $0, by: "alice", parent: nil, type: "story")) })
+        var authorRule = FilterRule(); authorRule.assignedUsers = ["alice"]
+        let baselineFeed = HNService(directory: folder.appendingPathComponent("feed-api"), itemLoader: { id in
+            await baselineCounter.hit(); return feedItems[id]
+        })
+        let domFeed = HNService(directory: folder.appendingPathComponent("feed-dom"), itemLoader: { id in
+            await domCounter.hit(); return feedItems[id]
+        })
+        let feedIDs = Array(100...129)
+        let baselineResult = await baselineFeed.decisions(ids: feedIDs, rules: [authorRule])
+        let domResult = await domFeed.decisions(ids: feedIDs, rules: [authorRule], knownItems: feedItems)
+        precondition(baselineResult.effects == domResult.effects && baselineResult.labels == domResult.labels)
+        let beforeRequests = await baselineCounter.count, afterRequests = await domCounter.count
+        precondition(beforeRequests == 30 && afterRequests == 0)
+        let guardedComment = HNItem(id: 2, by: "alice", parent: nil, type: "comment")
+        let ancestryService = HNService(directory: folder.appendingPathComponent("dom-ancestry"), itemLoader: { id in
+            await domCounter.hit(); return [1: post, 2: comment][id]
+        })
+        _ = await ancestryService.decisions(ids: [2], rules: [authorRule], knownItems: [2: guardedComment])
+        let ancestryRequests = await domCounter.count
+        precondition(ancestryRequests > 0, "DOM data must not bypass required ancestor checks")
+        print("PASS 30-row author-filter fixture: \(beforeRequests) item requests before, \(afterRequests) after; identical effects")
         var broad = FilterRule(); broad.name = "Alice"; broad.assignedUsers = ["alice"]; broad.hideReplies = false
         var result = await service.decisions(ids: [1,2,3], rules: [broad])
         precondition(result.effects["1"] == "hidden-item" && result.effects["2"] == "hidden-item" && result.effects["3"] == "visible")

@@ -515,11 +515,21 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
                 state = .failed("This page contains too many contributions to check at once. Open a smaller discussion branch.")
                 return
             }
+            let requestedIDs = Set(ids)
+            var knownItems: [Int: HNItem] = [:]
+            if let items = body["items"] as? [[String: Any]], items.count <= 10000 {
+                for item in items {
+                    guard let id = item["id"] as? Int, requestedIDs.contains(id),
+                          let author = item["by"] as? String, RecordArchive.validUsername(author),
+                          let type = item["type"] as? String, ["story", "comment"].contains(type) else { continue }
+                    knownItems[id] = HNItem(id: id, by: author, parent: nil, type: type)
+                }
+            }
             let epoch = navigationID
             let policy = store.archive.policy
             Task { [weak self] in
                 guard let self else { return }
-                let decisions = await service.decisions(ids: ids, rules: policy.rules) { [weak self] partial in
+                let decisions = await service.decisions(ids: ids, rules: policy.rules, knownItems: knownItems) { [weak self] partial in
                     await self?.showPartial(partial, token: token, epoch: epoch, policy: policy)
                 }
                 guard navigationID == epoch, store.archive.policy == policy else { return }
