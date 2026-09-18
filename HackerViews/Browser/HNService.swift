@@ -307,22 +307,31 @@ actor HNService {
             // known matches/direct assignments, but missing deleted metadata cannot
             // establish a match. Surviving replies still check all known ancestors.
             if item.deleted == true && decision == .unresolved { continue }
+            var lookupFailure: String?
             if decision == .unresolved, rule.conditions.isActive, let name = item.by {
                 let account: HNAccount?
                 do { account = try await profile(name, needsKarma: rule.conditions.karmaBelow != nil, needsCreated: rule.conditions.createdSince != nil || rule.conditions.youngerThanDays != nil) }
-                catch { account = nil }
+                catch { account = nil; lookupFailure = Self.failureDescription(error, subject: "account details for filter ‘\(rule.name)’") }
                 decision = rule.matches(item: item, karma: account?.karma, created: account?.created.map { Date(timeIntervalSince1970: $0) } ?? cached?.creationDate, now: now)
             }
             if decision == .blocked {
-                if let pending { var uncertain = pending.0; uncertain.hideReplies = true; return (uncertain, "unresolved", pending.1) }
+                if let pending {
+                    guard rule.effect == .block else { return (nil, "visible", nil) }
+                    var uncertain = pending.0; uncertain.hideReplies = true
+                    return (uncertain, "unresolved", pending.1)
+                }
                 return (rule, rule.result, nil)
             }
             if decision == .unresolved {
                 let reason: String
                 if item.by == nil { reason = "Hacker News omitted the author; can’t evaluate filter ‘\(rule.name)’." }
-                else if rule.conditions.isActive { reason = "Account details needed by filter ‘\(rule.name)’ are unavailable." }
+                else if rule.conditions.isActive { reason = lookupFailure ?? "Account details needed by filter ‘\(rule.name)’ are unavailable." }
                 else { reason = "The content pattern in filter ‘\(rule.name)’ couldn’t be evaluated." }
-                if let pending { var uncertain = pending.0; uncertain.hideReplies = true; return (uncertain, "unresolved", pending.1) }
+                if let pending {
+                    guard rule.effect == .block else { continue }
+                    var uncertain = pending.0; uncertain.hideReplies = true
+                    return (uncertain, "unresolved", pending.1)
+                }
                 if rule.effect == .block { return (rule, "unresolved", reason) }
                 pending = (rule, reason)
             }

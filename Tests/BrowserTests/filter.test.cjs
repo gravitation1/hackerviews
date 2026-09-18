@@ -166,6 +166,9 @@ test('profiles show matching effect and priority while remaining readable when b
   assert.equal(p.doc.documentElement.hasAttribute('data-qhn-pending'),false);
   p.dom.window.HackerViews.resolveProfile(current.token,{effect:'unresolved',label:'Couldn’t verify effect',priority:1,ruleName:'Karma'});
   assert.equal(panel.querySelector('button').textContent,'Retry');
+  p.dom.window.HackerViews.resolveProfile(current.token,{effect:'visible',label:'Shown without unverified styling',priority:0});
+  assert.match(panel.textContent,/Some filter conditions could not be verified/);
+  assert.doesNotMatch(panel.textContent,/No enabled filter matches/);
   assert.equal(p.doc.querySelectorAll('#qhn-profile-effect').length,1);
   p.dom.window.close();
 });

@@ -754,6 +754,8 @@
       ? 'Post/comment scope, content patterns, and direct assignments are evaluated for each contribution.'
       : result.effect === 'unresolved'
       ? `Could not verify filter ${result.priority}: ${result.ruleName}. Retry when connected.`
+      : result.label === 'Shown without unverified styling'
+      ? 'Some filter conditions could not be verified. Contributions remain visible without filter styling.'
       : matched ? `Filter ${result.priority}: ${result.ruleName}. ${result.effect === 'blocked' ? 'Contributions are blocked. The filter’s Hide replies too setting controls descendants.' : 'First matching filter for this account.'}`
       : 'No enabled filter matches this account. Contributions are shown normally.';
     if (result.effect?.startsWith('highlight:') && /^#[0-9a-f]{6}$/i.test(result.effect.slice(10))) {

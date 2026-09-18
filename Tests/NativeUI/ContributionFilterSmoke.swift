@@ -72,7 +72,7 @@ import Foundation
         var aliceBlock = FilterRule(); aliceBlock.assignedUsers = ["alice"]
         var secondUnknown = FilterRule(); secondUnknown.effect = .fade; secondUnknown.conditions.youngerThanDays = 5
         var bobBlock = FilterRule(); bobBlock.assignedUsers = ["bob"]
-        for (tail, expected) in [(aliceBlock, "visible"), (bobBlock, "unresolved"), (secondUnknown, "unresolved")] {
+        for (tail, expected) in [(aliceBlock, "visible"), (bobBlock, "unresolved"), (secondUnknown, "visible")] {
             let policy = [unknownStyle, tail]
             let live = await mixedOffline.decisions(ids: [200,201], rules: policy)
             let cached = await mixedOffline.cachedDecisions(ids: [200,201], rules: policy)
@@ -81,6 +81,27 @@ import Foundation
             let account = await mixedOffline.accountMatch("bob", rules: policy)
             precondition(account.effect == expected)
         }
+        var knownStyle = FilterRule(); knownStyle.effect = .highlight; knownStyle.assignedUsers = ["bob"]
+        var knownAllow = knownStyle; knownAllow.effect = .allow
+        var unknownBlock = unknownStyle; unknownBlock.effect = .block
+        for (policy, expected) in [
+            ([secondUnknown, knownStyle], "visible"),
+            ([unknownStyle, secondUnknown], "visible"),
+            ([secondUnknown, knownAllow], "visible"),
+            ([knownStyle, secondUnknown], knownStyle.result),
+            ([unknownStyle, secondUnknown, bobBlock], "unresolved"),
+            ([unknownStyle, unknownBlock], "unresolved"),
+            ([unknownStyle, knownAllow, bobBlock], "visible")
+        ] {
+            let live = await mixedOffline.decisions(ids: [200,201], rules: policy)
+            let cached = await mixedOffline.cachedDecisions(ids: [200,201], rules: policy)
+            precondition(live.effects["200"] == expected && live.effects["201"] == expected)
+            precondition(cached.effects == live.effects)
+            let profile = await mixedOffline.accountMatch("bob", rules: policy)
+            precondition(profile.effect == expected)
+            if expected == "unresolved" { precondition(live.labels["200"]?.contains("offline") == true) }
+        }
+        print("PASS styling-only uncertainty stays visible; reachable blocks remain unresolved; offline cause retained")
         var scoped = FilterRule(); scoped.scope = .posts; scoped.assignedUsers = ["other"]
         let account = await mixedOffline.accountMatch("bob", rules: [scoped,bobBlock])
         precondition(account.effect == "blocked" && account.priority == 2 && account.contributionCaveat)
