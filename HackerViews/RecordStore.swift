@@ -175,7 +175,7 @@ final class RecordStore: ObservableObject {
                 try candidate.merge(remote)
                 try persist(candidate)
             } while count != archive.revisionCount
-            syncStatus = "Synced with iCloud · \(Date().formatted(date: .omitted, time: .shortened))"
+            syncStatus = await sync.warning ?? "Synced with iCloud · \(Date().formatted(date: .omitted, time: .shortened))"
         } catch {
             syncStatus = "Saved locally · Sync unavailable: \(error.localizedDescription)"
         }

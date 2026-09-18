@@ -1,65 +1,118 @@
 import CloudKit
+import CryptoKit
 import Foundation
+
+/// The token and everything downloaded through it are one atomic checkpoint.
+/// Quarantined records retain their original CloudKit archive for recovery.
+struct CloudSyncCheckpoint: Codable {
+    var token: Data?
+    var archive = RecordArchive()
+    var known = Set<String>()
+    var quarantined: [String: Data] = [:]
+
+    mutating func ingest(_ record: CKRecord) throws {
+        let name = record.recordID.recordName
+        do {
+            guard let data = record["payload"] as? Data else { throw ArchiveError.invalidRecord }
+            var incoming = RecordArchive()
+            switch record.recordType {
+            case "PersonRevision":
+                let revision = try JSONDecoder().decode(PersonRevision.self, from: data)
+                guard revision.id.uuidString == name else { throw ArchiveError.invalidRecord }
+                incoming.revisions = [revision]
+            case "AccountFilterRevision":
+                let revision = try JSONDecoder().decode(AccountFilterRevision.self, from: data)
+                guard revision.id.uuidString == name else { throw ArchiveError.invalidRecord }
+                incoming.filterRevisions = [revision]
+            default: throw ArchiveError.unsupportedVersion
+            }
+            var candidate = archive
+            try candidate.merge(incoming)
+            archive = candidate
+            quarantined.removeValue(forKey: name)
+        } catch {
+            // Failure to preserve the original is fatal: never advance past lost data.
+            quarantined[name] = try NSKeyedArchiver.archivedData(withRootObject: record, requiringSecureCoding: true)
+        }
+        known.insert(name)
+    }
+}
 
 /// Private, append-only CloudKit records. No HN credentials enter this service.
 actor CloudSync {
     static var isConfigured: Bool { Bundle.main.object(forInfoDictionaryKey: "HackerViewsCloudEnabled") as? String == "YES" }
+    private(set) var warning: String?
 
     func exchange(_ local: RecordArchive) async throws -> RecordArchive {
         guard Self.isConfigured else { return RecordArchive() }
         let identifier = Bundle.main.object(forInfoDictionaryKey: "HackerViewsCloudContainer") as? String ?? "iCloud.com.local.HackerViews"
         let container = CKContainer(identifier: identifier)
         guard try await container.accountStatus() == .available else { throw SyncError.noAccount }
+        let account = try await container.userRecordID().recordName
+        let scope = SHA256.hash(data: Data((identifier + "\n" + account + "\nHackerViews").utf8))
+            .map { String(format: "%02x", $0) }.joined()
+        let directory = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask,
+                                                   appropriateFor: nil, create: true)
+            .appendingPathComponent("HackerViews/cloud-sync", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let file = directory.appendingPathComponent(scope + ".json")
+        var state = CloudSyncCheckpoint()
+        if FileManager.default.fileExists(atPath: file.path) {
+            state = try JSONDecoder().decode(CloudSyncCheckpoint.self, from: Data(contentsOf: file))
+            try state.archive.validate()
+        }
         let database = container.privateCloudDatabase
-        // A custom zone supports change enumeration without a queryable schema index.
         let zoneID = CKRecordZone.ID(zoneName: "HackerViews", ownerName: CKCurrentUserDefaultName)
         _ = try await database.save(CKRecordZone(zoneID: zoneID))
-        let remote = try await fetchAll(database: database, zone: zoneID)
-        let known = Set(remote.revisions.map(\.id))
-        let knownFilters = Set((remote.filterRevisions ?? []).map(\.id))
-        let pending: [(UUID, String, Data)] = try local.revisions.filter { !known.contains($0.id) }.map {
+        do {
+            try await fetchChanges(database: database, zone: zoneID, state: &state, file: file)
+        } catch let error as CKError where error.code == .changeTokenExpired {
+            // A complete scan establishes a new baseline; keep prior quarantined data.
+            let preserved = state.quarantined
+            state = CloudSyncCheckpoint()
+            state.quarantined = preserved
+            try await fetchChanges(database: database, zone: zoneID, state: &state, file: file)
+        }
+        warning = state.quarantined.isEmpty ? nil :
+            "iCloud sync skipped \(state.quarantined.count) unreadable record(s). Originals are preserved in \(file.path). Some remote edits may be missing."
+        let pending: [(UUID, String, Data)] = try local.revisions.filter { !state.known.contains($0.id.uuidString) }.map {
             ($0.id, "PersonRevision", try JSONEncoder().encode($0))
-        } + (local.filterRevisions ?? []).filter { !knownFilters.contains($0.id) }.map {
+        } + (local.filterRevisions ?? []).filter { !state.known.contains($0.id.uuidString) }.map {
             ($0.id, "AccountFilterRevision", try JSONEncoder().encode($0))
         }
         for start in stride(from: 0, to: pending.count, by: 100) {
             let batch = pending[start..<min(start + 100, pending.count)]
             let records = try batch.map { revision in
                 let record = CKRecord(recordType: revision.1, recordID: .init(recordName: revision.0.uuidString, zoneID: zoneID))
-                let payload = revision.2
-                guard payload.count < 900_000 else { throw SyncError.tooLarge }
-                record["payload"] = payload as CKRecordValue
+                guard revision.2.count < 900_000 else { throw SyncError.tooLarge }
+                record["payload"] = revision.2 as CKRecordValue
                 return record
             }
-            let result = try await database.modifyRecords(saving: records, deleting: [], savePolicy: .allKeys, atomically: true)
-            for (_, outcome) in result.saveResults { _ = try outcome.get() }
+            let result = try await database.modifyRecords(saving: records, deleting: [], savePolicy: .ifServerRecordUnchanged, atomically: true)
+            for (_, outcome) in result.saveResults { try state.ingest(outcome.get()) }
+            try JSONEncoder().encode(state).write(to: file, options: .atomic)
         }
-        return remote
+        return state.archive
     }
 
-    private func fetchAll(database: CKDatabase, zone: CKRecordZone.ID) async throws -> RecordArchive {
-        var token: CKServerChangeToken?
-        var revisions: [PersonRevision] = []
-        var filters: [AccountFilterRevision] = []
+    private func fetchChanges(database: CKDatabase, zone: CKRecordZone.ID,
+                              state: inout CloudSyncCheckpoint, file: URL) async throws {
+        var token = try state.token.map {
+            try NSKeyedUnarchiver.unarchivedObject(ofClass: CKServerChangeToken.self, from: $0)
+        } ?? nil
         var more = true
         while more {
             let result = try await database.recordZoneChanges(inZoneWith: zone, since: token)
             for (_, outcome) in result.modificationResultsByID {
-                let modification = try outcome.get()
-                guard let data = modification.record["payload"] as? Data else { throw ArchiveError.invalidRecord }
-                switch modification.record.recordType {
-                case "PersonRevision": revisions.append(try JSONDecoder().decode(PersonRevision.self, from: data))
-                case "AccountFilterRevision": filters.append(try JSONDecoder().decode(AccountFilterRevision.self, from: data))
-                default: throw ArchiveError.unsupportedVersion
-                }
+                // Transport failures are retried; only unreadable record content is quarantined.
+                try state.ingest(outcome.get().record)
             }
+            for deletion in result.deletions { state.known.remove(deletion.recordID.recordName) }
             token = result.changeToken
+            state.token = try token.map { try NSKeyedArchiver.archivedData(withRootObject: $0, requiringSecureCoding: true) }
+            try JSONEncoder().encode(state).write(to: file, options: .atomic)
             more = result.moreComing
         }
-        var archive = RecordArchive(revisions: revisions)
-        archive.filterRevisions = filters
-        try archive.validate()
-        return archive
     }
 }
 
