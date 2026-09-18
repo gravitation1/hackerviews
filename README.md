@@ -154,3 +154,9 @@ Regex uses Foundation's [progress callbacks](https://developer.apple.com/documen
 ### Durable record transactions
 
 Record edits first save a small immutable transaction in `record-transactions` next to `records.json`. A utility queue coalesces these into a full snapshot and keeps the previous completed snapshot as `records.json.previous`. Startup replays any transactions left by a quit or interrupted checkpoint; copy the entire application-support directory when making a filesystem backup. In-app exports still contain the complete archive. New person revisions reference all known branch tips instead of repeating their full ancestry; existing revisions remain unchanged.
+
+### Reader parity
+
+Topic comments use API data, with authenticated HN HTML supplying available edit/delete, flag/hide/favorite actions and community fading. Moderated text is withheld until that HTML includes it, respecting HN's current presentation for the signed-in account. Polls use the canonical HN page, including its native options and voting. The redirect immediately after submitting a reply also uses HN HTML to avoid API lag, with the reply link retaining the parent-comment anchor. No posting or voting is performed automatically.
+
+Simple author/direct-item rules on list pages use available DOM metadata without item requests. Content/account conditions and required ancestor checks still use the service. If no active blocking rule exists, an unresolved styling/allow condition leaves the contribution visible without applying an uncertain effect; mixed blocking policies remain conservative.

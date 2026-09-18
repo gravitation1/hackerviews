@@ -508,7 +508,7 @@ test('lazy renderer ignores obsolete results and preserves native reply destinat
   api.lazyResult(request.token-1,[{id:1,effect:'visible',item:{id:1,title:'Stale'}}]);
   assert.equal(p.doc.body.textContent.includes('Stale'),false);
   api.lazyResult(request.token,[{id:1,effect:'visible',item:{id:1,type:'comment',by:'author',parent:99,text:'Target',kids:[]}}]);
-  assert.equal(p.doc.querySelector('.reply a').href,'https://news.ycombinator.com/reply?id=1&goto=item%3Fid%3D1');
+  assert.equal(p.doc.querySelector('.reply a').href,'https://news.ycombinator.com/reply?id=1&goto=item%3Fid%3D1%231');
   assert.equal(p.doc.querySelector('.commtext').textContent,'Target');
   p.dom.window.close();
 });
@@ -849,14 +849,14 @@ test('nested replies and story comments return to their containing topic',async(
   const p=await lazyPage();const api=p.dom.window.HackerViews;
   let request=p.messages.filter(m=>m.kind==='lazyItems').at(-1);
   api.lazyResult(request.token,[{id:1,effect:'visible',item:{id:1,type:'story',title:'Topic',kids:[2]}}]);
-  assert.equal(new URL(p.doc.querySelector('.reply a').href).searchParams.get('goto'),'item?id=1');
+  assert.equal(new URL(p.doc.querySelector('.reply a').href).searchParams.get('goto'),'item?id=1#1');
   await new Promise(r=>setTimeout(r,5));
   request=p.messages.filter(m=>m.kind==='lazyItems').at(-1);
   api.lazyResult(request.token,[{id:2,effect:'visible',item:{id:2,type:'comment',by:'reader',parent:1,text:'Reply target'}}]);
   const link=p.doc.getElementById('2').querySelector('.reply a');
   const url=new URL(link.href);
   assert.equal(url.searchParams.get('id'),'2');
-  assert.equal(url.searchParams.get('goto'),'item?id=1');
+  assert.equal(url.searchParams.get('goto'),'item?id=1#2');
   p.dom.window.close();
 });
 
@@ -924,4 +924,45 @@ test('list checks include DOM authors and contribution types for native fast fil
   assert.deepEqual(JSON.parse(JSON.stringify(request.items)).sort((a,b)=>a.id-b.id),[
     {id:10,by:'alice',type:'story'},{id:11,by:'bob',type:'comment'}]);
   p.dom.window.close();
+});
+
+
+test('lazy metadata restores authenticated actions, relative age, domain and community fading',async()=>{
+  const p=await lazyPage();const api=p.dom.window.HackerViews;
+  p.dom.window.IntersectionObserver=class {constructor(callback){this.callback=callback;}observe(target){this.callback([{target,isIntersecting:true}]);}unobserve(){}};
+  p.dom.window.fetch=async()=>({ok:true,text:async()=>`<table><tr class="athing comtr" id="1"><td><span class="comhead"><a href="edit?id=1">edit</a><a href="delete-confirm?id=1">delete</a><a href="https://evil.test/flag?id=1">flag</a></span><span class="commtext c5a">Comment</span></td></tr></table>`});
+  let request=p.messages.filter(m=>m.kind==='lazyItems').at(-1);
+  api.lazyResult(request.token,[{id:1,effect:'visible',item:{id:1,type:'comment',by:'reader',text:'Comment',time:Date.now()/1000-7200}}]);
+  await new Promise(r=>setTimeout(r,20));
+  assert.match(p.doc.querySelector('.comhead').textContent,/2 hours ago/);
+  assert.ok(p.doc.querySelector('a[href="https://news.ycombinator.com/edit?id=1"]'));
+  assert.ok(p.doc.querySelector('a[href="https://news.ycombinator.com/delete-confirm?id=1"]'));
+  assert.equal(p.doc.querySelector('a[href^="https://evil.test"]'),null);
+  assert.ok(Number(p.doc.querySelector('.commtext').style.opacity)<1);
+  p.dom.window.close();
+});
+
+test('dead content stays hidden unless authenticated HN HTML includes its text',async()=>{
+  for(const showDead of [false,true]) {
+    const p=await lazyPage();const api=p.dom.window.HackerViews;
+    p.dom.window.fetch=async()=>({ok:true,text:async()=>showDead?`<table><tr class="athing comtr" id="1"><td><span class="commtext">Moderated text</span></td></tr></table>`:'<table></table>'});
+    const request=p.messages.filter(m=>m.kind==='lazyItems').at(-1);
+    api.lazyResult(request.token,[{id:1,effect:'visible',item:{id:1,type:'comment',by:'reader',dead:true,text:'Moderated text'}}]);
+    assert.equal(p.doc.querySelector('.commtext'),null,'No initial flash of moderated content');
+    await new Promise(r=>setTimeout(r,20));
+    assert.equal(!!p.doc.querySelector('.commtext'),showDead);
+    p.dom.window.close();
+  }
+});
+
+
+test('story headers show source domain and jobs omit fabricated points and author',async()=>{
+  for(const job of [false,true]) {
+    const p=await lazyPage();const api=p.dom.window.HackerViews;
+    const request=p.messages.filter(m=>m.kind==='lazyItems').at(-1);
+    api.lazyResult(request.token,[{id:1,effect:'visible',item:{id:1,type:job?'job':'story',by:job?undefined:'author',title:'Topic',url:'https://example.com/article',time:Date.now()/1000-60}}]);
+    assert.equal(p.doc.querySelector('.sitebit').textContent,' (example.com)');
+    if(job){assert.equal(p.doc.querySelector('.subtext').textContent.includes('points by'),false);assert.equal(p.doc.querySelector('.subtext').textContent.includes('[deleted]'),false);}
+    p.dom.window.close();
+  }
 });

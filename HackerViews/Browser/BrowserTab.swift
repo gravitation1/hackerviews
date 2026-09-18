@@ -33,6 +33,8 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
     @Published private(set) var navigationSnapshot: NavigationImage?
     private var lazyURL: URL?
     private var shellNavigation = false
+    private var canonicalTopicURL: URL?
+    private var submittingReply = false
     private var networkWaiters: [Int: Task<Void, Never>] = [:]
     private var networkLeases = Set<Int>()
     private var lazyTasks: [Int: Task<Void, Never>] = [:]
@@ -369,6 +371,13 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
                             entry["reason"] = decisions.labels[String(itemID)] ?? "This contribution’s filter check could not finish."
                         } else if let item = try? await service.item(itemID), let data = try? JSONEncoder().encode(item), let object = try? JSONSerialization.jsonObject(with: data) {
                             entry["item"] = object
+                            if item.type == "poll", let target = lazyURL, Self.topicID(target) == itemID {
+                                // HN owns poll options, vote eligibility and submission.
+                                canonicalTopicURL = target
+                                lazyURL = nil
+                                webView.load(URLRequest(url: target))
+                                return
+                            }
                             if item.type != "comment", lazyURL.flatMap(Self.topicID) == itemID {
                                 threadTitle = item.title
                             }
@@ -584,6 +593,25 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
         onSessionChange?()
     }
 
+    func preservesCanonicalNavigation(to target: URL, type: WKNavigationType, isMainFrame: Bool) -> Bool {
+        guard isMainFrame, Self.isHN(target) else { return false }
+        if target == canonicalTopicURL {
+            canonicalTopicURL = nil
+            return true
+        }
+        if type == .formSubmitted && target.path == "/comment" {
+            submittingReply = true
+        } else if submittingReply && Self.topicID(target) != nil {
+            // HN's accepted POST redirect contains the fresh reply before the API.
+            submittingReply = false
+            lazyURL = nil
+            return true
+        } else if type == .linkActivated {
+            submittingReply = false
+        }
+        return false
+    }
+
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
                  decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void) {
         guard let target = navigationAction.request.url else { decisionHandler(.cancel); return }
@@ -593,6 +621,11 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
             return
         }
         if Self.isHN(target) {
+            if preservesCanonicalNavigation(to: target, type: navigationAction.navigationType,
+                                            isMainFrame: navigationAction.targetFrame?.isMainFrame == true) {
+                decisionHandler(.allow)
+                return
+            }
             #if os(macOS)
             if navigationAction.navigationType == .linkActivated,
                navigationAction.modifierFlags.contains(.command) {

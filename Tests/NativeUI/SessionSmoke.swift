@@ -20,6 +20,16 @@ import AppKit
             try? FileManager.default.removeItem(at: directory)
         }
         let store = RecordStore(directory: directory)
+        let navigation = BrowserTab(store: store, service: HNService.shared, persistentSession: false)
+        let commentURL = URL(string: "https://news.ycombinator.com/comment")!
+        let topicURL = URL(string: "https://news.ycombinator.com/item?id=123#456")!
+        precondition(!navigation.preservesCanonicalNavigation(to: commentURL, type: .formSubmitted, isMainFrame: true))
+        precondition(navigation.preservesCanonicalNavigation(to: topicURL, type: .other, isMainFrame: true), "Reply redirect must retain fresh HN HTML")
+        precondition(!navigation.preservesCanonicalNavigation(to: topicURL, type: .linkActivated, isMainFrame: true), "Later topic visits resume normal routing")
+        _ = navigation.preservesCanonicalNavigation(to: commentURL, type: .formSubmitted, isMainFrame: true)
+        _ = navigation.preservesCanonicalNavigation(to: URL(string: "https://news.ycombinator.com/newest")!, type: .linkActivated, isMainFrame: true)
+        precondition(!navigation.preservesCanonicalNavigation(to: topicURL, type: .other, isMainFrame: true), "Leaving an unsuccessful form clears submission routing")
+        print("PASS reply submission redirects preserve canonical content only for that navigation")
         let first = BrowserWorkspace(store: store, defaults: defaults)
         first.start()
         let home = first.tabs[0]
