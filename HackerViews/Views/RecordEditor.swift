@@ -193,6 +193,9 @@ struct RecordEditor: View {
                         } else {
                             Text(match.effect == "varies" ? "Post/comment scope, content patterns, and direct assignments are evaluated for each contribution." : "No active filter matches this account.").foregroundStyle(.secondary)
                         }
+                        if match.contributionCaveat {
+                            Text("Content, scope, and per-item rules may change the effect on individual contributions.").font(.caption).foregroundStyle(.secondary)
+                        }
                     }.padding(.vertical, 4)
                 } else { Text("Checking applied effect…").foregroundStyle(.secondary) }
             }
@@ -472,7 +475,7 @@ private struct FlagContributionView: View {
                                 .textFieldStyle(.roundedBorder).labelsHidden()
                                 .accessibilityLabel("New filter name")
                             HStack { Text("Effect"); Spacer(); FilterEffectPicker(rule: $newFilter) }
-                            Text("Added at the end of your filter list. You can change priority and conditions in Filters.")
+                            Text("Added at the top of your filter list. New filters here start with Highlight; choose Block to hide matching contributions. You can change priority and conditions in Filters.")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                     }

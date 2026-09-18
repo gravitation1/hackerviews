@@ -462,7 +462,7 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
                 let match = await service.accountMatch(name, rules: policy.rules)
                 guard navigationID == epoch, store.archive.policy == policy else { return }
                 let result: [String: Any] = ["effect": match.effect, "label": match.label,
-                    "ruleName": match.ruleName ?? "", "priority": match.priority ?? 0]
+                    "ruleName": match.ruleName ?? "", "priority": match.priority ?? 0, "contributionCaveat": match.contributionCaveat]
                 webView.callAsyncJavaScript("window.HackerViews?.resolveProfile(token, result)",
                     arguments: ["token": token, "result": result], in: nil, in: Self.world, completionHandler: nil)
             }
@@ -599,7 +599,7 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
             canonicalTopicURL = nil
             return true
         }
-        if type == .formSubmitted && target.path == "/comment" {
+        if type == .formSubmitted && ["/comment", "/edit", "/delete", "/delete-confirm"].contains(target.path) {
             submittingReply = true
         } else if submittingReply && Self.topicID(target) != nil {
             // HN's accepted POST redirect contains the fresh reply before the API.

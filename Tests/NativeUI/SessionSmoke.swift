@@ -29,6 +29,11 @@ import AppKit
         _ = navigation.preservesCanonicalNavigation(to: commentURL, type: .formSubmitted, isMainFrame: true)
         _ = navigation.preservesCanonicalNavigation(to: URL(string: "https://news.ycombinator.com/newest")!, type: .linkActivated, isMainFrame: true)
         precondition(!navigation.preservesCanonicalNavigation(to: topicURL, type: .other, isMainFrame: true), "Leaving an unsuccessful form clears submission routing")
+        for path in ["edit", "delete", "delete-confirm"] {
+            _ = navigation.preservesCanonicalNavigation(to: URL(string: "https://news.ycombinator.com/" + path)!, type: .formSubmitted, isMainFrame: true)
+            precondition(navigation.preservesCanonicalNavigation(to: topicURL, type: .other, isMainFrame: true))
+        }
+        print("PASS edit/delete submission redirects preserve fresh canonical content")
         print("PASS reply submission redirects preserve canonical content only for that navigation")
         let first = BrowserWorkspace(store: store, defaults: defaults)
         first.start()

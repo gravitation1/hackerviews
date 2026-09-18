@@ -202,18 +202,23 @@ actor HNService {
 
     func accountMatch(_ name: String, rules: [FilterRule], now: Date = Date()) async -> AccountRuleMatch {
         loadCachesIfNeeded()
-        if rules.contains(where: { $0.isActive && ($0.content != nil || ($0.scope != nil && $0.scope != .both) || !($0.itemIDs ?? []).isEmpty) }) {
-            return AccountRuleMatch(effect: "varies", label: "Effects vary by contribution", ruleName: nil, priority: nil)
+        let varies = rules.contains { $0.isActive && ($0.content != nil || ($0.scope != nil && $0.scope != .both) || !($0.itemIDs ?? []).isEmpty) }
+        let accountRules = rules.map { rule -> FilterRule in
+            var copy = rule
+            if copy.content != nil || (copy.scope != nil && copy.scope != .both) { copy.enabled = false }
+            copy.itemIDs = nil
+            return copy
         }
+        let (rule, effect, _) = await itemMatch(HNItem(id: -1, by: name, parent: nil, type: "story"), rules: accountRules, now: now)
         let cached = users[name]
-        let initial = RuleEvaluation.match(for: name, rules: rules,
+        var match = RuleEvaluation.match(for: name, rules: accountRules,
             karma: Self.cacheOnly ? cached?.account.karma : cached?.karma(at: now), created: cached?.creationDate, now: now)
-        guard initial.effect == "unresolved" else { return initial }
-        do {
-            let user = try await profile(name, needsKarma: rules.contains { $0.isActive && $0.conditions.isActive && $0.conditions.karmaBelow != nil }, needsCreated: rules.contains { $0.isActive && $0.conditions.isActive && ($0.conditions.createdSince != nil || $0.conditions.youngerThanDays != nil) })
-            return RuleEvaluation.match(for: name, rules: rules, karma: user?.karma,
-                created: user?.created.flatMap { $0.isFinite ? Date(timeIntervalSince1970: $0) : nil } ?? cached?.creationDate, now: now)
-        } catch { return initial }
+        if match.effect != effect {
+            match = AccountRuleMatch(effect: effect, label: effect == "unresolved" ? "Couldn’t verify effect" : "Shown without unverified styling",
+                ruleName: rule?.name, priority: rule.flatMap { rule in rules.firstIndex(where: { $0.id == rule.id }).map { $0 + 1 } })
+        }
+        match.contributionCaveat = varies
+        return match
     }
 
     private func effect(_ name: String, rules: [FilterRule], now: Date) async -> String {
@@ -292,12 +297,7 @@ actor HNService {
     private func itemMatch(_ item: HNItem, rules: [FilterRule], now: Date) async -> (FilterRule?, String, String?) {
         let traceStart = Date()
         defer { ReaderTrace.event("filter.end", ["id": item.id, "ms": Date().timeIntervalSince(traceStart)*1000]) }
-        func unresolved(_ rule: FilterRule, _ issue: String) -> (FilterRule?, String, String?) {
-            // With no blocking rules, missing styling information cannot justify
-            // hiding content. Mixed policies keep their conservative priority semantics.
-            guard rules.contains(where: { $0.isActive && $0.effect == .block }) else { return (nil, "visible", nil) }
-            return (rule, "unresolved", issue)
-        }
+        var pending: (FilterRule, String)?
         let eligible = rules.filter { $0.isActive && $0.applies(to: item) }
         if let direct = eligible.first(where: { $0.itemIDs?.contains(item.id) == true }) { return (direct, direct.result, nil) }
         for rule in eligible {
@@ -310,16 +310,21 @@ actor HNService {
             if decision == .unresolved, rule.conditions.isActive, let name = item.by {
                 let account: HNAccount?
                 do { account = try await profile(name, needsKarma: rule.conditions.karmaBelow != nil, needsCreated: rule.conditions.createdSince != nil || rule.conditions.youngerThanDays != nil) }
-                catch { return unresolved(rule, Self.failureDescription(error, subject: "the account for \(name)")) }
+                catch { account = nil }
                 decision = rule.matches(item: item, karma: account?.karma, created: account?.created.map { Date(timeIntervalSince1970: $0) } ?? cached?.creationDate, now: now)
             }
-            if decision == .blocked { return (rule, rule.result, nil) }
+            if decision == .blocked {
+                if let pending { var uncertain = pending.0; uncertain.hideReplies = true; return (uncertain, "unresolved", pending.1) }
+                return (rule, rule.result, nil)
+            }
             if decision == .unresolved {
                 let reason: String
                 if item.by == nil { reason = "Hacker News omitted the author; can’t evaluate filter ‘\(rule.name)’." }
                 else if rule.conditions.isActive { reason = "Account details needed by filter ‘\(rule.name)’ are unavailable." }
                 else { reason = "The content pattern in filter ‘\(rule.name)’ couldn’t be evaluated." }
-                return unresolved(rule, reason)
+                if let pending { var uncertain = pending.0; uncertain.hideReplies = true; return (uncertain, "unresolved", pending.1) }
+                if rule.effect == .block { return (rule, "unresolved", reason) }
+                pending = (rule, reason)
             }
         }
         return (nil, "visible", nil)

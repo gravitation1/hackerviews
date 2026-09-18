@@ -20,5 +20,6 @@ public struct AccountRuleMatch: Sendable {
     public var label: String
     public var ruleName: String?
     public var priority: Int?
+    public var contributionCaveat = false
     public var matchedConditions: AccountFilters? = nil
 }

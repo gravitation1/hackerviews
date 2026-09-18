@@ -760,7 +760,9 @@
       panel.style.setProperty('--qhn-profile-color', result.effect.slice(10));
     } else if (result.effect === 'blocked') panel.style.setProperty('--qhn-profile-color', 'var(--qhn-accent)');
     const copy = document.createElement('div'); copy.className = 'qhn-profile-copy';
-    copy.append(heading, detail); panel.appendChild(copy);
+    copy.append(heading, detail);
+    if(result.contributionCaveat){const caveat=document.createElement('p');caveat.textContent='Content, scope, and per-item rules may change the effect on individual contributions.';copy.append(caveat);}
+    panel.appendChild(copy);
     if (result.effect === 'unresolved') {
       const retry = document.createElement('button'); retry.textContent = 'Retry'; retry.onclick = () => process(); copy.appendChild(retry);
     }

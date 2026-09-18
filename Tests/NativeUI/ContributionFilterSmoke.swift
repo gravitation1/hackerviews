@@ -64,6 +64,27 @@ import Foundation
         let ancestryRequests = await domCounter.count
         precondition(ancestryRequests > 0, "DOM data must not bypass required ancestor checks")
         print("PASS 30-row author-filter fixture: \(beforeRequests) item requests before, \(afterRequests) after; identical effects")
+        let bobStory = HNItem(id: 200, by: "bob", parent: nil, type: "story")
+        let bobReply = HNItem(id: 201, by: "bob", parent: 200, type: "comment")
+        let mixedOffline = HNService(directory: folder.appendingPathComponent("mixed-offline"),
+            profileLoader: { _ in throw URLError(.notConnectedToInternet) }, itemLoader: { id in id == 200 ? bobStory : bobReply })
+        var unknownStyle = FilterRule(); unknownStyle.effect = .highlight; unknownStyle.conditions.karmaBelow = 100
+        var aliceBlock = FilterRule(); aliceBlock.assignedUsers = ["alice"]
+        var secondUnknown = FilterRule(); secondUnknown.effect = .fade; secondUnknown.conditions.youngerThanDays = 5
+        var bobBlock = FilterRule(); bobBlock.assignedUsers = ["bob"]
+        for (tail, expected) in [(aliceBlock, "visible"), (bobBlock, "unresolved"), (secondUnknown, "unresolved")] {
+            let policy = [unknownStyle, tail]
+            let live = await mixedOffline.decisions(ids: [200,201], rules: policy)
+            let cached = await mixedOffline.cachedDecisions(ids: [200,201], rules: policy)
+            precondition(live.effects["200"] == expected && live.effects["201"] == expected)
+            precondition(cached.effects == live.effects, "Cached and ancestor checks must use the same mixed-policy rule")
+            let account = await mixedOffline.accountMatch("bob", rules: policy)
+            precondition(account.effect == expected)
+        }
+        var scoped = FilterRule(); scoped.scope = .posts; scoped.assignedUsers = ["other"]
+        let account = await mixedOffline.accountMatch("bob", rules: [scoped,bobBlock])
+        precondition(account.effect == "blocked" && account.priority == 2 && account.contributionCaveat)
+        print("PASS mixed policy: later no-match, match, and unknown across item, ancestor, cached, and profile checks")
         var broad = FilterRule(); broad.name = "Alice"; broad.assignedUsers = ["alice"]; broad.hideReplies = false
         var result = await service.decisions(ids: [1,2,3], rules: [broad])
         precondition(result.effects["1"] == "hidden-item" && result.effects["2"] == "hidden-item" && result.effects["3"] == "visible")
