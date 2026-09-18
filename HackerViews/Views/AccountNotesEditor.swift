@@ -6,7 +6,8 @@ struct AccountNotesEditor: NSViewRepresentable {
     @Binding var text: String
     var placeholder = "What would you like to remember?"
     var focusOnAppear = false
-    func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
+    var onBlur: () -> Void = {}
+    func makeCoordinator() -> Coordinator { Coordinator(text: $text, onBlur: onBlur) }
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = NSScrollView()
         scroll.drawsBackground = false
@@ -33,6 +34,7 @@ struct AccountNotesEditor: NSViewRepresentable {
     }
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         context.coordinator.text = $text
+        context.coordinator.onBlur = onBlur
         guard let editor = scroll.documentView as? NotesTextView else { return }
         editor.placeholder = placeholder
         if editor.string != text { editor.string = text }
@@ -40,7 +42,9 @@ struct AccountNotesEditor: NSViewRepresentable {
     }
     @MainActor final class Coordinator: NSObject, NSTextViewDelegate {
         var text: Binding<String>
-        init(text: Binding<String>) { self.text = text }
+        var onBlur: () -> Void
+        init(text: Binding<String>, onBlur: @escaping () -> Void) { self.text = text; self.onBlur = onBlur }
+        func textDidEndEditing(_ notification: Notification) { onBlur() }
         func textDidChange(_ notification: Notification) {
             guard let editor = notification.object as? NSTextView else { return }
             text.wrappedValue = editor.string
@@ -77,10 +81,12 @@ struct AccountNotesEditor: View {
     @Binding var text: String
     var placeholder = "What would you like to remember?"
     var focusOnAppear = false
+    var onBlur: () -> Void = {}
     @FocusState private var focused: Bool
     var body: some View {
         TextEditor(text: $text).scrollContentBackground(.hidden)
             .focused($focused)
+            .onChange(of: focused) { _, editing in if !editing { onBlur() } }
             .onAppear { if focusOnAppear { focused = true } }
             .overlay(alignment: .topLeading) {
                 if text.isEmpty {

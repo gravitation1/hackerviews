@@ -7,6 +7,18 @@ import AppKit
         app.setActivationPolicy(.prohibited)
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
+        var noteDraft = ""
+        var savedNote = ""
+        let noteCoordinator = AccountNotesEditor.Coordinator(text: Binding(get: { noteDraft }, set: { noteDraft = $0 }), onBlur: { savedNote = noteDraft })
+        let noteView = NSTextView()
+        for value in ["First", "First sentence", "First sentence revised"] {
+            noteView.string = value
+            noteCoordinator.textDidChange(Notification(name: NSText.didChangeNotification, object: noteView))
+        }
+        precondition(savedNote.isEmpty && noteDraft == "First sentence revised")
+        noteCoordinator.textDidEndEditing(Notification(name: NSText.didEndEditingNotification, object: noteView))
+        precondition(savedNote == noteDraft)
+        print("PASS note edits remain draft until blur commits the latest value")
         let store = RecordStore(directory: directory)
         let source = Citation(url: "https://news.ycombinator.com/item?id=123", author: "example", excerpt: "Evidence", context: "Comment")
         let before = store.archive.revisionCount

@@ -3,6 +3,7 @@ import SwiftUI
 struct RecordEditor: View {
     @ObservedObject var store: RecordStore
     let draft: RecordDraft
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dismiss) private var dismiss
     @State private var username: String
     @State private var note: String
@@ -71,7 +72,7 @@ struct RecordEditor: View {
                 }
                 if !draft.filtersOnly {
                 Section("Notes") {
-                    AccountNotesEditor(text: $note)
+                    AccountNotesEditor(text: $note, onBlur: { saveChanges() })
                         .frame(height: 96)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -89,7 +90,7 @@ struct RecordEditor: View {
                     }
                     if citations.isEmpty { Text("No saved references.").foregroundStyle(.secondary) }
                     ForEach(citations) { citation in
-                        SavedReferenceRow(citation: referenceBinding(in: $citations, reference: citation), focusOnAppear: focusedReferenceID == citation.id) {
+                        SavedReferenceRow(citation: referenceBinding(in: $citations, reference: citation), focusOnAppear: focusedReferenceID == citation.id, onBlur: { saveChanges() }) {
                             citations.removeAll { $0.id == citation.id }
                         }
                     }
@@ -137,15 +138,23 @@ struct RecordEditor: View {
             .onChange(of: note) { _, _ in
                 noteSaveTask?.cancel()
                 noteSaveTask = Task { @MainActor in
-                    do { try await Task.sleep(for: .milliseconds(500)) } catch { return }
+                    do { try await Task.sleep(for: .seconds(5)) } catch { return }
                     saveChanges()
                 }
             }
             .onDisappear { noteSaveTask?.cancel(); saveChanges() }
+            .onChange(of: scenePhase) { _, phase in
+                if phase != .active { noteSaveTask?.cancel(); saveChanges() }
+            }
+            #if os(macOS)
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+                noteSaveTask?.cancel(); saveChanges()
+            }
+            #endif
             .onChange(of: citations) { _, _ in
                 noteSaveTask?.cancel()
                 noteSaveTask = Task { @MainActor in
-                    do { try await Task.sleep(for: .milliseconds(500)) } catch { return }
+                    do { try await Task.sleep(for: .seconds(5)) } catch { return }
                     saveChanges()
                 }
             }
@@ -319,6 +328,7 @@ func referenceBinding(in references: Binding<[Citation]>, reference: Citation) -
 private struct SavedReferenceRow: View {
     @Binding var citation: Citation
     var focusOnAppear = false
+    var onBlur: () -> Void = {}
     let remove: () -> Void
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -334,7 +344,7 @@ private struct SavedReferenceRow: View {
             }
             Text((URL(string: citation.url)?.host ?? citation.url) + " · " + citation.capturedAt.formatted(date: .abbreviated, time: .omitted))
                 .font(.caption).foregroundStyle(.secondary)
-            AccountNotesEditor(text: $citation.annotation, placeholder: "Add a note about this reference…", focusOnAppear: focusOnAppear)
+            AccountNotesEditor(text: $citation.annotation, placeholder: "Add a note about this reference…", focusOnAppear: focusOnAppear, onBlur: onBlur)
                 .frame(height: 80)
                 .frame(maxWidth: .infinity, alignment: .leading)
             DisclosureGroup("Saved excerpt") {
