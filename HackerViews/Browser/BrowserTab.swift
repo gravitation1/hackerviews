@@ -84,7 +84,9 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
     private var timeout: Task<Void, Never>?
     private static let world = WKContentWorld.world(name: "HackerViews")
 
+    private(set) var hasCreatedWebView = false
     lazy var webView: WKWebView = {
+        hasCreatedWebView = true
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = persistentSession ? .default() : .nonPersistent()
         configuration.userContentController.add(WeakMessageHandler(self), contentWorld: Self.world, name: "hackerViews")
@@ -111,14 +113,14 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
         self.store = store; self.service = service; self.persistentSession = persistentSession
         super.init()
         subscription = store.$archive.map(\.policy).removeDuplicates().dropFirst().sink { [weak self] policy in
-            guard let self else { return }
+            guard let self, self.pendingRestoredURL == nil else { return }
             self.installScripts(in: self.webView, policy: policy)
             self.webView.callAsyncJavaScript("window.HackerViews?.setOrdered(active, true)",
                 arguments: ["active": policy.rules.contains { $0.isActive }],
                 in: nil, in: Self.world, completionHandler: nil)
         }
         recordSubscription = store.$archive.dropFirst().sink { [weak self] archive in
-            guard let self, let url = self.webView.url, url.path == "/user",
+            guard let self, self.pendingRestoredURL == nil, let url = self.webView.url, url.path == "/user",
                   let name = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "id" })?.value else { return }
             self.sendProfileRecord(name, archive: archive)
         }
@@ -611,10 +613,10 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
             canonicalTopicURL = nil
             return true
         }
-        if type == .formSubmitted && ["/comment", "/edit", "/delete", "/delete-confirm"].contains(target.path) {
+        if type == .formSubmitted {
             submittingReply = true
         } else if submittingReply && Self.topicID(target) != nil {
-            // HN's accepted POST redirect contains the fresh reply before the API.
+            // Accepted form redirects contain fresh changes before the API catches up.
             submittingReply = false
             lazyURL = nil
             return true

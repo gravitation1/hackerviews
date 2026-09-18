@@ -29,7 +29,7 @@ import AppKit
         _ = navigation.preservesCanonicalNavigation(to: commentURL, type: .formSubmitted, isMainFrame: true)
         _ = navigation.preservesCanonicalNavigation(to: URL(string: "https://news.ycombinator.com/newest")!, type: .linkActivated, isMainFrame: true)
         precondition(!navigation.preservesCanonicalNavigation(to: topicURL, type: .other, isMainFrame: true), "Leaving an unsuccessful form clears submission routing")
-        for path in ["edit", "delete", "delete-confirm"] {
+        for path in ["edit", "delete", "delete-confirm", "xedit", "xdelete", "x?fnid=fixture", "submit"] {
             _ = navigation.preservesCanonicalNavigation(to: URL(string: "https://news.ycombinator.com/" + path)!, type: .formSubmitted, isMainFrame: true)
             precondition(navigation.preservesCanonicalNavigation(to: topicURL, type: .other, isMainFrame: true))
         }
@@ -60,7 +60,11 @@ import AppKit
         precondition(restored.tabs[1].canGoBack && restored.tabs[1].canGoForward)
         precondition(restored.tabs[0].pendingRestoredURL == nil)
         precondition(restored.tabs[1].pendingRestoredURL?.query == "id=456")
-        precondition(restored.tabs[1].webView.url == nil, "Background restoration must not start a page load")
+        precondition(!restored.tabs[1].hasCreatedWebView, "Background restoration must not instantiate a web view")
+        var changedRules = store.archive.rules
+        changedRules[0].assignedUsers.insert("fixture")
+        precondition(store.save(username: "fixture", blocked: false, note: "Publication", citations: [], rules: changedRules))
+        precondition(!restored.tabs[1].hasCreatedWebView, "Archive and policy publications must preserve deferred web views")
         restored.saveSession()
         restored.selectedID = restored.tabs[1].id
         precondition(restored.tabs[1].pendingRestoredURL == nil, "Selecting a restored tab starts its deferred load once")
