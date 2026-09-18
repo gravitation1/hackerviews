@@ -26,6 +26,11 @@
     post({kind:'scrollPosition',y:Math.max(0,window.scrollY),anchor});
   }
   window.addEventListener('pagehide',reportReadingPosition);
+  document.addEventListener('click',event=>{
+    if(!lazyThread && event.target.closest?.('.togg'))queueMicrotask(()=>{
+      post({kind:'collapsedState',ids:[...document.querySelectorAll('tr.comtr.coll')].map(row=>Number(row.id)).filter(id=>Number.isSafeInteger(id)&&id>0)});
+    });
+  });
   document.addEventListener('visibilitychange',()=>{if(document.hidden)reportReadingPosition();});
   let editedRow = null;
   let filterAnchor = null;
@@ -1248,7 +1253,7 @@
       const updateToggle=()=>{toggle.textContent=node.collapsed?'[+]':'[-]';toggle.setAttribute('aria-expanded',String(!node.collapsed));toggle.setAttribute('aria-label',node.collapsed?'Expand thread':'Collapse thread');toggle.title=node.collapsed?'Expand thread':'Collapse thread';};
       updateToggle();
       toggle.onclick=()=>{node.collapsed=!node.collapsed;if(node.collapsed)lazyCollapsed.add(node.id);else lazyCollapsed.delete(node.id);body.hidden=node.collapsed;votes.style.visibility=node.collapsed?'hidden':''; if(node.children)node.children.host.hidden=node.collapsed;
-        updateToggle();lazyPump();};heading.append(toggle);
+        updateToggle();post({kind:'collapsedState',ids:[...lazyCollapsed]});lazyPump();};heading.append(toggle);
       const body=document.createElement('div');body.className='comment';body.hidden=!!node.collapsed;
       const text=document.createElement('span');text.className='commtext';text.append(safeBody(item.deleted?'[deleted]':item.text || ''));body.append(text);
       const reply=document.createElement('div');reply.className='reply';reply.append(hnLink('reply','/reply?id='+item.id+'&goto='+encodeURIComponent('item?id='+document.body.dataset.hvTopic+'#'+item.id)));body.append(reply);

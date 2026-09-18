@@ -1018,6 +1018,7 @@ test('refresh restores nested collapsed threads before rendering and preserves l
   }
   const first=await lazyPage();await populate(first);
   first.doc.querySelector('[id="3"] .hv-collapse').click();first.doc.querySelector('[id="2"] .hv-collapse').click();
+  assert.deepEqual([...first.messages.filter(m=>m.kind==='collapsedState').at(-1).ids].sort(),[2,3]);
   const state=first.dom.window.HackerViews.refreshState();
   assert.deepEqual([...state.collapsed].sort(),[2,3]);
   first.dom.window.close();
@@ -1031,6 +1032,7 @@ test('refresh restores nested collapsed threads before rendering and preserves l
   }
   restored.doc.querySelector('[id="2"] .hv-collapse').click();
   assert.deepEqual([...restored.dom.window.HackerViews.refreshState().collapsed],[3]);
+  assert.deepEqual([...restored.messages.filter(m=>m.kind==='collapsedState').at(-1).ids],[3]);
   assert.equal(restored.doc.querySelector('[id="3"] .comment').hidden,true);
   assert.equal(restored.doc.querySelector('[id="5"] .comment').hidden,false);
   restored.dom.window.close();

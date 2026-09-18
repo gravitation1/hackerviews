@@ -83,6 +83,19 @@ actor HistoryRequests {
             }
             let collapsed = try! await threadView.evaluateJavaScript("[125,130].every(id=>document.getElementById(String(id))?.querySelector('.hv-collapse')?.getAttribute('aria-expanded') === 'false')") as! Bool
             precondition(collapsed, "Refresh must restore collapsed comment bodies")
+            let saved = try! JSONEncoder().encode(tab.savedHistory)
+            let reopened = BrowserTab(store: store, service: service, persistentSession: false, retainsPages: true)
+            reopened.restoreHistory(try! JSONDecoder().decode([BrowserTab.HistoryEntry].self, from: saved), index: tab.historyIndex)
+            reopened.load(tab.url!)
+            window.contentView = reopened.webView
+            for _ in 0..<100 {
+                let ready = (try? await reopened.webView.evaluateJavaScript("document.getElementById('130')?.querySelector('.hv-collapse')?.getAttribute('aria-expanded') === 'false'")) as? Bool ?? false
+                if ready { break }
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+            let reopenedCollapsed = try! await reopened.webView.evaluateJavaScript("[125,130].every(id=>document.getElementById(String(id))?.querySelector('.hv-collapse')?.getAttribute('aria-expanded') === 'false')") as! Bool
+            precondition(reopenedCollapsed, "A newly constructed reader must restore collapsed threads from its serialized session")
+            print("PASS real WebKit: serialized history restores collapsed comments in a newly constructed reader")
             print("PASS real WebKit: refresh preserves multiple collapsed comments")
             print("PASS real WebKit: repeated and rapid thread/home round trips retain documents, comment offset, home position and request count; inactive reports are ignored")
             try? FileManager.default.removeItem(at: directory)

@@ -65,6 +65,7 @@ import WebKit
         home.scrollY = 820
         first.open(URL(string: "https://news.ycombinator.com/item?id=123")!)
         first.tabs[1].saveReadingPosition(y: 2400, anchor: ["id": 124, "y": 2400, "top": -30.0, "ancestors": [123]])
+        first.tabs[1].saveCollapsedThreads([124, 125])
         first.tabs[1].title = "Saved discussion"
         first.tabs[1].recordNavigation(URL(string: "https://news.ycombinator.com/item?id=456")!)
         first.tabs[1].scrollY = 600
@@ -100,6 +101,13 @@ import WebKit
         let savedAnchor = try! JSONSerialization.jsonObject(with: restored.tabs[1].savedHistory[0].anchor!) as! [String: Any]
         precondition(savedAnchor["id"] as? Int == 124 && savedAnchor["top"] as? Double == -30,
                      "Back must retain the comment anchor across session persistence")
+        precondition(restored.tabs[1].savedHistory[0].collapsed == [124,125], "Collapsed threads must survive session serialization and deferred history loading")
+        precondition(restored.tabs[1].displayedPage.savedHistory.last?.collapsed == [124,125])
+        restored.tabs[1].saveCollapsedThreads([125])
+        restored.saveSession()
+        let expandedRestore = BrowserWorkspace(store: store, defaults: defaults)
+        expandedRestore.start()
+        precondition(expandedRestore.tabs[1].savedHistory[0].collapsed == [125], "Expansion must persist without a scroll event")
         restored.tabs[1].forward()
         precondition(restored.tabs[1].url?.query == "id=456")
         restored.tabs[1].restoreScrollY = nil

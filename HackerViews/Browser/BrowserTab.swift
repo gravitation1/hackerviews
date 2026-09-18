@@ -75,6 +75,12 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
         var url: URL
         var scrollY: Double = 0
         var anchor: Data? = nil
+        var collapsed: [Int]? = nil
+        var restorationAnchor: [String: Any]? {
+            var value = anchor.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
+            if let collapsed { value["collapsed"] = collapsed }
+            return value.isEmpty ? nil : value
+        }
     }
     private(set) var history: [HistoryEntry] = []
     private(set) var historyIndex = -1
@@ -203,7 +209,7 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
               entries.allSatisfy({ Self.isHN($0.url) && $0.scrollY.isFinite && $0.scrollY >= 0 }) else { return }
         history = entries
         historyIndex = index
-        refreshAnchor = entries[index].anchor.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+        refreshAnchor = entries[index].restorationAnchor
         updateHistoryButtons()
     }
     func recordNavigation(_ target: URL) {
@@ -240,6 +246,14 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
         }
         onSessionChange?()
     }
+    func saveCollapsedThreads(_ ids: [Int]) {
+        if let activePage { activePage.saveCollapsedThreads(ids); return }
+        if let historyOwner, historyOwner.activePage !== self { return }
+        guard history.indices.contains(historyIndex), ids.count <= 100_000,
+              ids.allSatisfy({ $0 > 0 }) else { return }
+        history[historyIndex].collapsed = Array(Set(ids)).sorted()
+        onSessionChange?()
+    }
     var savedHistory: [HistoryEntry] {
         var entries = history
         if entries.indices.contains(historyIndex) { entries[historyIndex].scrollY = scrollY }
@@ -260,7 +274,7 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
         historyIndex = index
         scrollY = history[index].scrollY
         restoreScrollY = scrollY
-        refreshAnchor = history[index].anchor.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+        refreshAnchor = history[index].restorationAnchor
         url = history[index].url
         updateHistoryButtons()
         onSessionChange?()
@@ -298,13 +312,13 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
         let page: BrowserTab
         if !reload, let retained = retainedPages[index] {
             page = retained
-            page.reactivationPosition = (entry.scrollY, entry.anchor.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] })
+            page.reactivationPosition = (entry.scrollY, entry.restorationAnchor)
         } else {
             page = BrowserTab(store: store, service: service, persistentSession: persistentSession)
             page.title = title
             page.historyOwner = self
             page.restoreScrollY = entry.scrollY
-            page.refreshAnchor = entry.anchor.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+            page.refreshAnchor = entry.restorationAnchor
             page.onRecord = { [weak self] in self?.onRecord?($0) }
             page.onOpenTab = { [weak self] url, select in self?.onOpenTab?(url, select) }
             page.onSessionChange = { [weak self, weak page] in
@@ -314,6 +328,7 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
             }
             retainedPages[index] = page
             page.load(entry.url)
+            if page.history.indices.contains(page.historyIndex) { page.history[page.historyIndex].collapsed = entry.collapsed }
         }
         activePage = page
         restoreScrollY = nil
@@ -335,6 +350,7 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
         scrollY = page.scrollY
         history[historyIndex].scrollY = page.scrollY
         if let position = page.savedHistory.last?.anchor { history[historyIndex].anchor = position }
+        history[historyIndex].collapsed = page.savedHistory.last?.collapsed
         if page.canGoBack != canGoBack { page.canGoBack = canGoBack }
         if page.canGoForward != canGoForward { page.canGoForward = canGoForward }
     }
@@ -516,6 +532,8 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
             }
         case "cancelLazy":
             lazyTasks.values.forEach { $0.cancel() }; lazyTasks.removeAll()
+        case "collapsedState":
+            if let ids = body["ids"] as? [Int] { saveCollapsedThreads(ids) }
         case "scrollPosition":
             guard state == .ready, restoreScrollY == nil,
                   let y = body["y"] as? Double, y.isFinite, y >= 0 else { return }
@@ -790,7 +808,7 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
                 historyIndex = index
                 scrollY = history[index].scrollY
                 restoreScrollY = scrollY
-                refreshAnchor = history[index].anchor.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+                refreshAnchor = history[index].restorationAnchor
                 url = target
                 updateHistoryButtons()
             }
