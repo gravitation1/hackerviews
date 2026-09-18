@@ -198,9 +198,10 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
         navigationSnapshot = nil
         state = .loading
         webView.loadHTMLString("""
-        <!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>Hacker News</title></head>
+        <!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>Hacker News</title>
+        <link rel="stylesheet" href="https://news.ycombinator.com/news.css"></head>
         <body data-hv-topic="\(id)" data-hv-scroll="\(y)" data-hv-anchor="\(anchorData)"><main id="hv-topic">
-        <nav class="hv-topic-nav"><a href="https://news.ycombinator.com/">home</a> · <a href="https://news.ycombinator.com/newest">new</a> · <a href="https://news.ycombinator.com/ask">ask</a> · <a href="https://news.ycombinator.com/show">show</a> · <a href="https://news.ycombinator.com/threads">threads</a> · <a href="https://news.ycombinator.com/submit">submit</a> · <a href="https://news.ycombinator.com/login">login</a></nav>
+        <header id="hv-header" class="hv-header"></header>
         <div id="hv-topic-root"></div></main></body></html>
         """, baseURL: target)
     }

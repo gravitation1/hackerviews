@@ -180,13 +180,6 @@ private struct BrowserPage: View {
                     Spacer()
                 }.padding(10)
             }
-            if tab.unresolvedCount > 0 && tab.state == .ready {
-                HStack {
-                    Text("\(tab.unresolvedCount) items hidden because account or ancestry checks couldn’t be completed.").font(.caption).foregroundStyle(.secondary)
-                    Spacer()
-                    Button("Retry", action: tab.retry).font(.caption)
-                }.padding(10)
-            }
             ZStack {
                 WebSurface(tab: tab)
                     .opacity(tab.state == .ready ? 1 : 0)
@@ -207,15 +200,6 @@ private struct BrowserPage: View {
                     status.frame(maxWidth: .infinity, maxHeight: .infinity).background(.background)
                 }
             }
-            HStack {
-                Spacer()
-                Text(tab.state == .ready && tab.hiddenCount > 0 ? "\(tab.hiddenCount) hidden" : "")
-                    .font(.caption).foregroundStyle(.secondary)
-                    .help("Page elements hidden by your filters")
-            }
-            .padding(.horizontal, 12)
-            .frame(height: 24)
-            .background(.bar)
         }
         #if os(macOS)
         .navigationTitle(tab.url.flatMap(BrowserTab.topicID) != nil ? (tab.threadTitle ?? "") : "")

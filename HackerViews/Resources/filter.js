@@ -137,7 +137,7 @@
   function paintOP() {
     if(!document.body?.dataset.hvTopic)readSignedInUser(document);
     document.querySelectorAll('.hnuser').forEach(link => {
-      if(link.closest('.pagetop') || link.id==='me')return;
+      if(link.closest('.pagetop, .hv-header') || link.id==='me')return;
       const author=link.textContent.trim();
       const own=!!signedInUser && author===signedInUser;
       const op=!!originalPoster && author===originalPoster && !!link.closest('tr.comtr');
@@ -186,7 +186,6 @@
     @keyframes qhn-spin { to { transform: rotate(360deg); } }
     @media (prefers-reduced-motion: reduce) { .qhn-spinner { animation: none; } }
     #hv-topic { padding: 12px 16px; }
-    .hv-topic-nav { padding-bottom: 16px; border-bottom: 1px solid var(--qhn-line); margin-bottom: 16px; }
     /* Retain real layout heights offscreen; estimated subtree heights change
        the scroll geometry as WebKit skips and reactivates nested comments. */
     body[data-hv-topic] { overflow-anchor: none; }
@@ -215,14 +214,36 @@
     html { overscroll-behavior-x: none; }
     body { font-size: 14px; }
     #hnmain { width: 100% !important; min-width: 0 !important; background: var(--qhn-bg); padding: 0 16px 16px; }
-    #hnmain > tbody > tr:first-child > td {
-      background: var(--qhn-bg) !important; border-bottom: 1px solid var(--qhn-line); padding: 8px 0;
-    }
+    #hnmain > tbody > tr:first-child > td { background: var(--qhn-bg) !important; padding: 0; }
     #hnmain > tbody > tr:first-child table { padding: 0 !important; }
     #hnmain > tbody > tr:first-child > td > table > tbody > tr > td:first-child:has(> a > img[src="y18.svg"]), .hnname { display: none; }
-    .pagetop { font-size: 12px; line-height: 24px; color: var(--qhn-line); }
-    .pagetop a { color: var(--qhn-muted); padding: 4px; }
-    .pagetop a:hover, .pagetop .topsel a { color: var(--qhn-accent); }
+    /* One header for feed pages and the topic shell. Every item carries a leading
+       tick and a trailing gap; the negative item margin puts the tick inside the
+       previous gap and the list's overflow clips the first tick of every line. */
+    .hv-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;
+      gap: 6px 16px; padding: 6px 0; margin: 0 0 10px; border-bottom: 1px solid var(--qhn-line);
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif; font-size: 12px; line-height: 24px; color: var(--qhn-muted); }
+    #hnmain .hv-header { margin-bottom: 0; }
+    .hv-header ul { display: flex; align-items: center; flex-wrap: wrap; list-style: none; overflow: hidden; margin: 0; padding: 0; }
+    .hv-header .hv-nav { margin-left: -7px; }
+    .hv-header .hv-side { margin-left: auto; margin-right: -7px; }
+    .hv-header li { display: flex; align-items: center; margin-left: -7px; }
+    .hv-header li::before { content: ''; display: block; flex: none; width: 1px; height: 12px; background: var(--qhn-line); margin: 0 3px; }
+    .hv-header li > :last-child { margin-right: 7px; }
+    .hv-header a { color: var(--qhn-muted); text-decoration: none; padding: 0 7px; border-radius: 5px; }
+    .hv-header a:hover { color: var(--qhn-text); background: var(--qhn-hover); }
+    .hv-header a:focus-visible { outline: 2px solid var(--qhn-accent); outline-offset: -2px; }
+    .hv-header a[aria-current="page"] { color: var(--qhn-accent); font-weight: 600; }
+    .hv-header .hv-me { color: var(--qhn-text); font-weight: 600; padding-right: 4px; }
+    .hv-header .hv-karma { font-variant-numeric: tabular-nums; padding-right: 7px; }
+    .hv-chip { display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 8px 0 6px; box-sizing: border-box;
+      font: inherit; font-size: 11px; line-height: 20px; cursor: default; white-space: nowrap;
+      border: 1px solid var(--qhn-line); border-radius: 999px; background: var(--qhn-panel); color: var(--qhn-muted); }
+    .hv-header li > .hv-chip:last-child { margin-right: 11px; }
+    .hv-chip svg { width: 12px; height: 12px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+    button.hv-chip { cursor: pointer; color: var(--qhn-accent); border-color: color-mix(in srgb, var(--qhn-accent) 45%, var(--qhn-line)); }
+    button.hv-chip:hover { background: var(--qhn-hover); }
+    .hv-skeleton { display: inline-block; width: 92px; height: 12px; border-radius: 6px; background: var(--qhn-line); vertical-align: middle; margin-left: 4px; }
     a:link { color: var(--qhn-text); }
     a:visited { color: var(--qhn-muted); }
     .title { font-size: 14px; line-height: 1.5; }
@@ -258,7 +279,7 @@
     .comtr td.default > div:first-child { margin: 0 0 6px !important; }
     .comtr td.default > br { display: none; }
     .comhead a.hnuser { color: var(--qhn-text); font-size: 12px; font-weight: 600; }
-    .reply a { display: inline-block; font-size: 11px; padding: 2px 9px; margin-top: 4px;
+    .reply a, .reply a:any-link { display: inline-block; font-size: 11px; padding: 2px 9px; margin-top: 4px;
       border: 1px solid var(--qhn-line); border-radius: 5px; text-decoration: none; color: var(--qhn-muted); }
     .reply a:hover { color: var(--qhn-accent); border-color: var(--qhn-accent); }
     .comment, .commtext, .toptext { color: var(--qhn-text); font-size: 14px; line-height: 1.6; }
@@ -356,8 +377,12 @@
     }
     @media (max-width: 600px) {
       #hnmain { padding: 0 8px 12px; }
-      .pagetop { white-space: normal; }
-      .pagetop a { display: inline-block; padding: 2px 3px; }
+      .hv-header a { padding: 0 5px; }
+      .hv-header li { margin-left: -5px; }
+      .hv-header li::before { margin: 0 2px; }
+      .hv-header li > :last-child { margin-right: 5px; }
+      .hv-header .hv-nav { margin-left: -5px; }
+      .hv-header .hv-side { margin-right: -5px; }
       .title { font-size: 15px; }
       .comtr td.default { padding: 8px 10px; }
       .qhn-composer { padding: 10px; }
@@ -466,25 +491,125 @@
       context: (document.querySelector('.fatitem .titleline')?.innerText || document.title || 'Hacker News').slice(0, 5000)
     };
   }
+  // ---- One header for feed pages and the topic shell. Links come from HN's
+  // own header so per-user URLs and the logout token stay correct. ----
+  const headerPaths = new Set(['/', '/news', '/newest', '/front', '/newcomments', '/ask', '/show', '/jobs', '/submit',
+    '/threads', '/best', '/active', '/lists', '/login', '/logout', '/user']);
+  const defaultSections = [['new', '/newest'], ['threads', '/threads'], ['past', '/front'], ['comments', '/newcomments'],
+    ['ask', '/ask'], ['show', '/show'], ['jobs', '/jobs'], ['submit', '/submit']];
+  const headerModel = {links: null, identity: {state: 'pending'}, hidden: 0, unresolved: 0, retry: null};
+  let headerSignature = '';
+  function readHeader(root, base) {
+    const spans = [...root.querySelectorAll('.pagetop')];
+    if (!spans.length) return null;
+    const links = [];
+    const identity = {state: 'out', loginURL: new URL('/login?goto=news', base).href};
+    for (const span of spans) for (const a of span.querySelectorAll('a[href]')) {
+      let url; try { url = new URL(a.getAttribute('href'), base); } catch (_) { continue; }
+      if (url.origin !== location.origin || !headerPaths.has(url.pathname)) continue;
+      const label = a.textContent.trim();
+      if (a.id === 'me' && url.pathname === '/user') {
+        identity.state = 'in'; identity.name = label; identity.profileURL = url.href;
+        identity.karma = (/\((\d[\d,]*)\)/.exec(span.textContent) || [])[1] || '';
+        continue;
+      }
+      if (url.pathname === '/logout') { identity.logoutURL = url.href; continue; }
+      if (url.pathname === '/login') { identity.loginURL = url.href; continue; }
+      if (a.closest('.hnname') || ['/', '/news', '/user'].includes(url.pathname)) continue;
+      if (!label || links.some(entry => entry.url === url.href)) continue;
+      links.push({label, url: url.href, current: !!a.closest('.topsel')});
+    }
+    if (identity.state === 'in' && !identity.logoutURL) identity.logoutURL = new URL('/logout?goto=news', base).href;
+    return {links, identity};
+  }
+  function headerElement() {
+    const shell = document.getElementById('hv-header');
+    if (shell) return shell;
+    if (document.body?.dataset.hvTopic) {
+      const header = document.createElement('header'); header.id = 'hv-header'; header.className = 'hv-header';
+      (document.getElementById('hv-topic') || document.body).prepend(header);
+      return header;
+    }
+    const cell = document.querySelector('#hnmain > tbody > tr:first-child > td');
+    if (!cell) return null;
+    let header = cell.querySelector(':scope > header.hv-header');
+    if (!header) {
+      const parsed = readHeader(cell, location.href);
+      if (!parsed) return null;
+      headerModel.links = parsed.links; headerModel.identity = parsed.identity;
+      header = document.createElement('header'); header.className = 'hv-header';
+      cell.replaceChildren(header);
+    }
+    return header;
+  }
+  function chipIcon(kind) {
+    const ns = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(ns, 'svg'); svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true');
+    const path = document.createElementNS(ns, 'path');
+    path.setAttribute('d', kind === 'retry' ? 'M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5'
+      : 'M3 3l18 18M10.6 10.6a2 2 0 0 0 2.8 2.8M9.9 5.1A10.4 10.4 0 0 1 12 5c5 0 9 4 10 7-.4 1.1-1.2 2.4-2.4 3.6M6.3 6.3C4.3 7.7 2.7 9.7 2 12c1 3 5 7 10 7 1.7 0 3.2-.4 4.5-1');
+    svg.append(path); return svg;
+  }
+  function renderHeader() {
+    const host = headerElement();
+    if (!host) return;
+    const model = headerModel;
+    const signature = JSON.stringify([location.pathname, model.links, model.identity, model.hidden, model.unresolved]);
+    if (signature === headerSignature && host.childElementCount) return;
+    headerSignature = signature;
+    const item = (label, url, options = {}) => {
+      const li = document.createElement('li'); const a = hnLink(label, url);
+      if (options.current) a.setAttribute('aria-current', 'page');
+      if (options.id) a.id = options.id;
+      if (options.className) a.className = options.className;
+      li.append(a); return li;
+    };
+    const nav = document.createElement('ul'); nav.className = 'hv-nav';
+    const links = model.links || defaultSections.map(([label, path]) => ({label, url: new URL(path, 'https://news.ycombinator.com/').href}));
+    const topic = !!document.body?.dataset.hvTopic;
+    const onFeedHome = !topic && !links.some(link => link.current) && ['/', '/news'].includes(location.pathname);
+    nav.append(item('home', 'https://news.ycombinator.com/', {current: onFeedHome}));
+    for (const link of links) nav.append(item(link.label, link.url, {current: !topic && !!link.current}));
+    const side = document.createElement('ul'); side.className = 'hv-side';
+    const plural = (n, noun) => n + ' ' + noun + (n === 1 ? '' : 's');
+    if (model.hidden > 0) {
+      const li = document.createElement('li'); const chip = document.createElement('span'); chip.className = 'hv-chip';
+      chip.append(chipIcon('hidden'), document.createTextNode(model.hidden + ' hidden'));
+      chip.title = plural(model.hidden, 'contribution') + ' hidden by your filters'; li.append(chip); side.append(li);
+    }
+    if (model.unresolved > 0) {
+      const li = document.createElement('li'); const chip = document.createElement('button'); chip.type = 'button'; chip.className = 'hv-chip';
+      chip.append(chipIcon('retry'), document.createTextNode(model.unresolved + ' unchecked · retry'));
+      chip.title = plural(model.unresolved, 'contribution') + ' couldn’t be checked. Retry.';
+      chip.onclick = () => model.retry?.(); li.append(chip); side.append(li);
+    }
+    const identity = model.identity || {state: 'unknown'};
+    if (identity.state === 'pending') {
+      const li = document.createElement('li'); li.className = 'hv-account';
+      const skeleton = document.createElement('span'); skeleton.className = 'hv-skeleton'; skeleton.setAttribute('aria-label', 'Loading account');
+      li.append(skeleton); side.append(li);
+    } else if (identity.state === 'in') {
+      const li = document.createElement('li'); li.className = 'hv-account';
+      const me = hnLink(identity.name, identity.profileURL); me.id = 'me'; me.className = 'hv-me'; li.append(me);
+      if (identity.karma) { const karma = document.createElement('span'); karma.className = 'hv-karma'; karma.textContent = identity.karma; karma.title = 'Karma'; li.append(karma); }
+      side.append(li);
+      side.append(item('logout', identity.logoutURL, {id: 'logout'}));
+    } else if (identity.state === 'out') {
+      side.append(item('login', identity.loginURL || 'https://news.ycombinator.com/login?goto=news'));
+    }
+    host.replaceChildren(nav, side);
+  }
+  function setHeaderStatus(hidden, unresolved, retry) {
+    headerModel.hidden = hidden; headerModel.unresolved = unresolved; headerModel.retry = retry;
+    renderHeader();
+  }
   function addControls() {
+    renderHeader();
     if (!requestedOP && location.pathname === '/item') {
       const id = Number(new URL(location.href).searchParams.get('id'));
       if (id > 0) { requestedOP = true; post({kind: 'originalPoster', id}); }
     }
     paintOP();
-    const navigation = document.querySelector('.pagetop');
-    if (navigation && !navigation.querySelector('.qhn-home')) {
-      const home = document.createElement('a');
-      home.className = 'qhn-home';
-      home.href = 'https://news.ycombinator.com/news';
-      home.textContent = 'home';
-      home.setAttribute('aria-label', 'Hacker News homepage');
-      if (location.pathname === '/' || location.pathname === '/news') {
-        home.setAttribute('aria-current', 'page');
-        home.style.color = 'var(--qhn-accent)';
-      }
-      navigation.prepend(home, document.createTextNode(' | '));
-    }
     document.querySelectorAll('tr.athing').forEach(row => {
       if (!row.querySelector('.titleline') || row.closest('.fatitem')) return;
       row.classList.add('qhn-story');
@@ -502,7 +627,7 @@
       if (!input.placeholder) input.placeholder = 'Add to the discussion…';
     });
     document.querySelectorAll('.hnuser').forEach(link => {
-      if (location.pathname === '/user' && !link.closest('.pagetop') &&
+      if (location.pathname === '/user' && !link.closest('.pagetop, .hv-header') &&
           link.textContent.trim() === new URL(location.href).searchParams.get('id')) return;
       if (link.dataset.qhnControl) return;
       link.dataset.qhnControl = '1';
@@ -619,7 +744,7 @@
   }
   function profileAction() {
     const username = new URL(location.href).searchParams.get('id');
-    const link = [...document.querySelectorAll('.hnuser')].find(link => link.textContent.trim() === username && !link.closest('.pagetop'));
+    const link = [...document.querySelectorAll('.hnuser')].find(link => link.textContent.trim() === username && !link.closest('.pagetop, .hv-header'));
     const button = document.createElement('button');
     button.type = 'button'; button.className = 'qhn-profile-edit'; button.textContent = 'Edit filters…';
     button.setAttribute('aria-label', `Edit filters for ${username}`);
@@ -740,7 +865,7 @@
     if (location.pathname !== '/user') return;
     const username = new URL(location.href).searchParams.get('id');
     if (!username) return;
-    const userLink = [...document.querySelectorAll('.hnuser')].find(link => link.textContent.trim() === username && !link.closest('.pagetop'));
+    const userLink = [...document.querySelectorAll('.hnuser')].find(link => link.textContent.trim() === username && !link.closest('.pagetop, .hv-header'));
     const table = userLink?.closest('table');
     if (!table) return;
     let panel = document.getElementById('qhn-profile-effect');
@@ -902,8 +1027,11 @@
       }
     }
     ready = true; document.documentElement.removeAttribute('data-qhn-pending');
-    post({kind:'ready', complete:true, hidden:[...lazyNodes.values()].filter(n=>['blocked','hidden-item'].includes(n.entry?.effect)).length,
-      unresolved:0, title:document.title, destinationHidden:false});
+    const nodes=[...lazyNodes.values()];
+    const hiddenNodes=nodes.filter(n=>['blocked','hidden-item'].includes(n.entry?.effect)).length;
+    const unresolvedNodes=nodes.filter(n=>n.entry?.effect==='unresolved');
+    setHeaderStatus(hiddenNodes,lazyActive()?0:unresolvedNodes.length,()=>{localPaused=false;lazyRefreshQueue=unresolvedNodes;lazyPump();});
+    post({kind:'ready', complete:true, hidden:hiddenNodes, unresolved:lazyActive()?0:unresolvedNodes.length, title:document.title, destinationHidden:false});
     rememberViewportAnchor();
   }
   function lazySchedule(group, count) {
@@ -1131,16 +1259,9 @@
       const html=await response.text();trace('votes.response',{ms:performance.now()-voteStarted,bytes:new TextEncoder().encode(html).length});
       const doc=new DOMParser().parseFromString(html,'text/html');
       readSignedInUser(doc);paintOP();
-      const nav=document.querySelector('.hv-topic-nav');
-      if(nav) {
-        const links=[];
-        for(const link of doc.querySelectorAll('.pagetop a[href]')) {
-          let url;try{url=new URL(link.getAttribute('href'),target);}catch(_){continue;}
-          if(url.origin!==location.origin || !['/','/news','/newest','/front','/newcomments','/ask','/show','/jobs','/submit','/threads','/login','/logout','/user'].includes(url.pathname))continue;
-          if(links.some(entry=>entry.url===url.href))continue;
-          links.push({label:link.textContent.trim(),url:url.href});
-        }
-        if(links.length){nav.replaceChildren();for(const link of links){if(nav.childNodes.length)nav.append(' · ');nav.append(hnLink(link.label,link.url));}}
+      if(document.getElementById('hv-header')) {
+        const parsed=readHeader(doc,target);
+        if(parsed){if(parsed.links.length)headerModel.links=parsed.links;headerModel.identity=parsed.identity;renderHeader();}
       }
       rememberCanonicalItems(doc,target);
       for(const row of doc.querySelectorAll('tr.athing[id]')) {
@@ -1154,6 +1275,7 @@
       votePage=next && next.origin===location.origin && next.pathname==='/item' && next.searchParams.get('id')===new URL(location.href).searchParams.get('id')?next.href:null;
     } catch (_) {
       // Unknown eligibility stays hidden. A later viewport entry can retry.
+      if(headerModel.identity.state==='pending'){headerModel.identity={state:'unknown'};renderHeader();}
       return;
     } finally {voteFetching=false;trace('votes.end',{ms:performance.now()-voteStarted});}
     void loadVoteActions();
@@ -1474,6 +1596,7 @@
       lazyPump();
     },{rootMargin:'500px'});
     window.addEventListener('scroll',lazyPump,{passive:true});
+    renderHeader();
     lazyGroup(document.getElementById('hv-topic-root'),[Number(document.body.dataset.hvTopic)],0,new Set());
     lazyAnnounce();lazyPump();void loadVoteActions();
   }
@@ -1569,6 +1692,7 @@
     }
     paintOP();
     const unresolvedCount = Object.values(decisions).filter(value => value === 'unresolved').length;
+    const hiddenContributions = [...tree.stories, ...tree.rows].filter(row => row.hasAttribute('data-qhn-hidden')).length;
     if (partial && pageID && !decisions[pageID]) return;
     checking = partial;
     if (!partial) pending = null;
@@ -1580,10 +1704,11 @@
     const boundary = [...tree.stories, ...tree.rows].find(row =>
       partial ? !pending?.decisions?.[idOf(row)] : decisions[idOf(row)] === 'unresolved');
     showProgress(boundary, !partial);
+    setHeaderStatus(hiddenContributions, partial ? 0 : unresolvedCount, () => process());
     restoreFilterAnchor();
     ready = true;
     document.documentElement.removeAttribute('data-qhn-pending');
-    post({kind: 'ready', complete: !partial, hidden: hidden.size, unresolved: unresolvedCount, title: document.title, destinationHidden: !!pageID && decisions[pageID] === 'hidden-item'});
+    post({kind: 'ready', complete: !partial, hidden: hiddenContributions, unresolved: unresolvedCount, title: document.title, destinationHidden: !!pageID && decisions[pageID] === 'hidden-item'});
     rememberViewportAnchor();
   }
 

@@ -37,7 +37,7 @@ actor HistoryRequests {
             let before = try! await threadView.callAsyncJavaScript("return window.HackerViews.readingPosition()", arguments: [:], in: nil, contentWorld: world) as! [String: Any]
             let id = before["id"] as! Int, top = before["top"] as! Double
             let requestCount = await requests.count
-            _ = try! await threadView.evaluateJavaScript("document.querySelector('.hv-topic-nav a').click()")
+            _ = try! await threadView.evaluateJavaScript("document.querySelector('.hv-header .hv-nav a').click()")
             for _ in 0..<50 {
                 if tab.displayedPage !== thread { break }
                 try? await Task.sleep(for: .milliseconds(20))

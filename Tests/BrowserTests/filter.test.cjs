@@ -1119,3 +1119,85 @@ test('failed undo stays retryable and restored controls respect current eligibil
   assert.equal(p.doc.querySelector('.hv-vote-status'),null);
   p.dom.window.close();
 });
+
+const hnHeader = (right, current = '') => `<table id="hnmain" border="0" cellpadding="0" cellspacing="0" width="85%"><tbody><tr><td bgcolor="#ff6600"><table border="0" cellpadding="0" cellspacing="0" width="100%" style="padding:2px"><tbody><tr>
+  <td style="width:18px;padding-right:4px"><a href="https://news.ycombinator.com"><img src="y18.svg" width="18" height="18"></a></td>
+  <td style="line-height:12pt; height:10px;"><span class="pagetop"><b class="hnname"><a href="news">Hacker News</a></b>
+    <a href="newest">new</a> | ${current === 'threads' ? '<span class="topsel">' : '<span>'}<a href="threads?id=alice">threads</a></span> | <a href="front">past</a> | <a href="newcomments">comments</a> | <a href="ask">ask</a> | <a href="show">show</a> | <a href="jobs">jobs</a> | <a href="submit">submit</a> | <a href="https://evil.test/newest">offsite</a></span></td>
+  <td style="text-align:right;padding-right:4px;"><span class="pagetop">${right}</span></td>
+</tr></tbody></table></td></tr><tr id="pagespace" style="height:10px"></tr><tr><td><table class="itemlist"><tbody>${story(1,'carol')}</tbody></table></td></tr></tbody></table>`;
+const signedIn = `<a id="me" href="user?id=alice">alice</a> (973) | <a id="logout" href="logout?auth=tok123&amp;goto=news">logout</a>`;
+
+test('feed pages replace HN\'s header with the shared header, keeping identity, karma and auth links', async () => {
+  const p = await page(hnHeader(signedIn, 'threads'), {blocked: [], url: 'https://news.ycombinator.com/threads?id=alice'});
+  const header = p.doc.querySelector('#hnmain > tbody > tr:first-child > td > header.hv-header');
+  assert.ok(header, 'header mounted inside HN\'s header cell');
+  assert.equal(p.doc.querySelector('.pagetop'), null);
+  assert.equal(p.doc.querySelector('.hnname'), null);
+  assert.equal(p.doc.querySelector('img[src="y18.svg"]'), null);
+  assert.deepEqual([...header.querySelectorAll('.hv-nav a')].map(a => a.textContent), ['home','new','threads','past','comments','ask','show','jobs','submit']);
+  assert.equal(header.querySelector('.hv-nav a').href, 'https://news.ycombinator.com/');
+  assert.equal(header.querySelector('.hv-nav a[aria-current="page"]').textContent, 'threads');
+  assert.equal(header.querySelector('a[href="https://news.ycombinator.com/threads?id=alice"]').textContent, 'threads');
+  const me = header.querySelector('.hv-side a#me');
+  assert.equal(me.textContent, 'alice');
+  assert.equal(me.href, 'https://news.ycombinator.com/user?id=alice');
+  assert.equal(header.querySelector('.hv-karma').textContent, '973');
+  assert.equal(header.querySelector('.hv-side a#logout').href, 'https://news.ycombinator.com/logout?auth=tok123&goto=news');
+  assert.equal(header.querySelector('.hv-side a[href*="login"]'), null);
+  // The signed-in identity still drives the "You" badge after the header is rebuilt.
+  assert.equal(p.doc.getElementById('1').nextElementSibling.querySelector('.qhn-op'), null);
+  p.dom.window.HackerViews.originalPoster('alice');
+  assert.equal(p.doc.querySelector('.hv-header .qhn-op'), null, 'header links never get badges');
+  p.dom.window.close();
+});
+
+test('home is current on the front page and signed-out headers offer login', async () => {
+  const p = await page(hnHeader(`<a href="login?goto=news">login</a>`), {blocked: [], url: 'https://news.ycombinator.com/'});
+  const header = p.doc.querySelector('header.hv-header');
+  assert.equal(header.querySelector('.hv-nav a[aria-current="page"]').textContent, 'home');
+  assert.equal(header.querySelector('.hv-side a').textContent, 'login');
+  assert.equal(header.querySelector('.hv-side a').href, 'https://news.ycombinator.com/login?goto=news');
+  assert.equal(header.querySelector('#me'), null);
+  assert.equal(header.querySelector('.hv-skeleton'), null);
+  p.dom.window.close();
+});
+
+test('the header shows hidden and unchecked counts and retry re-runs the page checks', async () => {
+  const p = await page(hnHeader(signedIn) + `<table>${row(10,'bob')}${row(11,'dave')}${row(12,'erin')}</table>`, {blocked: []});
+  p.dom.window.HackerViews.setOrdered(true);
+  p.resolve({1: 'visible', 10: 'blocked', 11: 'unresolved', 12: 'visible'});
+  const header = p.doc.querySelector('header.hv-header');
+  const chips = [...header.querySelectorAll('.hv-chip')];
+  assert.deepEqual(chips.map(chip => chip.textContent), ['2 hidden', '1 unchecked · retry']);
+  assert.equal(chips[1].tagName, 'BUTTON');
+  const before = p.messages.filter(m => m.kind === 'ancestors').length;
+  chips[1].click();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(p.messages.filter(m => m.kind === 'ancestors').length, before + 1, 'retry requests fresh checks');
+  p.resolve({1: 'visible', 10: 'visible', 11: 'visible', 12: 'visible'});
+  assert.equal(header.querySelector('.hv-chip'), null, 'chips disappear when nothing is hidden or unchecked');
+  assert.equal(p.messages.filter(m => m.kind === 'ready').at(-1).hidden, 0);
+  p.dom.window.close();
+});
+
+test('the topic shell renders the same header with a pending identity until HN\'s HTML arrives', async () => {
+  const p = await lazyPage();
+  const header = p.doc.getElementById('hv-header');
+  assert.deepEqual([...header.querySelectorAll('.hv-nav a')].map(a => a.textContent), ['home','new','threads','past','comments','ask','show','jobs','submit']);
+  assert.equal(header.querySelector('.hv-nav a[aria-current]'), null, 'no section is current inside a discussion');
+  assert.ok(header.querySelector('.hv-side .hv-skeleton'), 'identity slot holds its width');
+  assert.equal(header.querySelector('.hv-side a'), null);
+  p.dom.window.IntersectionObserver = class {constructor(callback){this.callback=callback;}observe(target){this.callback([{target,isIntersecting:true}]);}unobserve(){}};
+  p.dom.window.fetch = async () => ({ok: true, text: async () => hnHeader(signedIn)});
+  const request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  p.dom.window.HackerViews.lazyResult(request.token, [{id: 1, effect: 'visible', item: {id: 1, type: 'comment', by: 'reader', text: 'Comment'}}]);
+  await new Promise(r => setTimeout(r, 20));
+  assert.equal(header.querySelector('.hv-skeleton'), null);
+  assert.equal(header.querySelector('.hv-side a#me').textContent, 'alice');
+  assert.equal(header.querySelector('.hv-karma').textContent, '973');
+  assert.equal(header.querySelector('.hv-side a#logout').href, 'https://news.ycombinator.com/logout?auth=tok123&goto=news');
+  assert.equal(header.querySelector('.hv-nav a[href="https://news.ycombinator.com/threads?id=alice"]').textContent, 'threads');
+  assert.equal(header.querySelector('.hv-nav a[aria-current]'), null, 'HN\'s topsel from the fetched page does not mark a section inside the shell');
+  p.dom.window.close();
+});

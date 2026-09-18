@@ -61,7 +61,7 @@ struct NativeSmoke {
         let controls = try await evaluate(tab, "return {votes:document.querySelectorAll('a[id^=up_]').length, records:document.querySelectorAll('.qhn-record').length}") as? [String: Int]
         guard (controls?["votes"] ?? 0) > 0, (controls?["records"] ?? 0) > 0 else { throw Failure("HN controls or annotation controls missing") }
         print("PASS voting links remain intact and record controls are installed")
-        let headerVisible = try await evaluate(tab, "return document.querySelector('.pagetop').getBoundingClientRect().height > 0") as? Bool
+        let headerVisible = try await evaluate(tab, "return document.querySelector('.hv-header').getBoundingClientRect().height > 0 && !document.querySelector('.pagetop') && document.querySelector('.hv-header .hv-nav a').textContent === 'home'") as? Bool
         guard headerVisible == true else { throw Failure("HN section/account navigation is hidden") }
         print("PASS HN section/account navigation remains visible")
         if CommandLine.arguments.contains("--snapshots") { try await snapshot(tab, name: "thread") }
