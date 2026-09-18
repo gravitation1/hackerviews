@@ -456,3 +456,28 @@ import Testing
     // Acknowledging a successful save clears the local delta.
     #expect(RuleListEdits.mergingMembers(base: merged, edited: merged, stored: ["carol"]) == ["carol"])
 }
+
+
+@Test func revisionHeadsPreserveConcurrentBranchesWithoutQuadraticAncestry() throws {
+    let root = PersonRevision(username: "alice", isBlocked: false, note: "root", citations: [])
+    let left = PersonRevision(username: "alice", isBlocked: false, note: "left", citations: [], parentIDs: [root.id])
+    let right = PersonRevision(username: "alice", isBlocked: false, note: "right", citations: [], parentIDs: [root.id])
+    var archive = RecordArchive(revisions: [root, left, right])
+    #expect(Set(archive.revisionHeads(for: "alice")) == [left.id, right.id])
+    for _ in 0..<1000 {
+        let parents = archive.revisionHeads(for: "alice")
+        archive.revisions.append(PersonRevision(username: "alice", isBlocked: false, note: "edit", citations: [], parentIDs: parents))
+    }
+    #expect(archive.revisions.flatMap(\.parentIDs).count == 1003)
+    var oldShape = archive
+    for index in oldShape.revisions.indices {
+        oldShape.revisions[index].parentIDs = Array(oldShape.revisions.prefix(index).map(\.id))
+    }
+    let oldBytes = try JSONEncoder().encode(oldShape).count
+    let newBytes = try JSONEncoder().encode(archive).count
+    #expect(newBytes * 20 < oldBytes)
+    print("Journal ancestry fixture: \(oldBytes) bytes before, \(newBytes) bytes after (\(archive.revisionCount) revisions)")
+    let originalIDs = Set(archive.revisions.map(\.id))
+    try archive.merge(RecordArchive(revisions: [root, left, right]))
+    #expect(Set(archive.revisions.map(\.id)) == originalIDs)
+}

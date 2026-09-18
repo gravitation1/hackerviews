@@ -150,3 +150,7 @@ Content fields are post title, post URL, post domain, and body text. Title/URL/d
 Regex uses Foundation's [progress callbacks](https://developer.apple.com/documentation/foundation/nsregularexpression/matchingoptions/reportprogress) to stop long-running operations after a 25 ms budget at the next callback. This is cooperative cancellation, not a hard real-time guarantee or a linear-time regex engine. Patterns are limited to 2,000 UTF-8 bytes and tested text to 200,000 UTF-16 units. Timeout/oversize results remain unverified rather than silently being treated as nonmatches. The tester runs off the UI thread.
 
 **When blocking** defaults to **Hide contribution and replies**, for both new and existing filters without an explicit choice. **Hide matching contribution only** remains an explicit option that leaves discussions and replies available. Notes remain associated with the contribution independently of its filter assignments.
+
+### Durable record transactions
+
+Record edits first save a small immutable transaction in `record-transactions` next to `records.json`. A utility queue coalesces these into a full snapshot and keeps the previous completed snapshot as `records.json.previous`. Startup replays any transactions left by a quit or interrupted checkpoint; copy the entire application-support directory when making a filesystem backup. In-app exports still contain the complete archive. New person revisions reference all known branch tips instead of repeating their full ancestry; existing revisions remain unchanged.

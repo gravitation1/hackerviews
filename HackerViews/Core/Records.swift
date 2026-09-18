@@ -76,6 +76,14 @@ public struct RecordArchive: Codable, Sendable {
         revisions.filter { $0.username == username }.sorted { Self.older($1, $0) }
     }
 
+    /// Leaves of the known revision graph. Parenting these preserves every
+    /// concurrent branch without repeating the entire transitive ancestry.
+    public func revisionHeads(for username: String) -> [UUID] {
+        let versions = revisions.filter { $0.username == username }
+        let parents = Set(versions.flatMap(\.parentIDs))
+        return versions.map(\.id).filter { !parents.contains($0) }.sorted { $0.uuidString < $1.uuidString }
+    }
+
     public mutating func merge(_ other: RecordArchive) throws {
         try other.validate()
         var byID = Dictionary(uniqueKeysWithValues: revisions.map { ($0.id, $0) })
@@ -136,7 +144,7 @@ public struct RecordArchive: Codable, Sendable {
             guard kept.count != person.citations.count else { continue }
             var revision = PersonRevision(username: person.username, isBlocked: person.isBlocked,
                 note: person.note, citations: kept, createdAt: person.createdAt, device: device,
-                parentIDs: history(for: person.username).map(\.id))
+                parentIDs: revisionHeads(for: person.username))
             revision.isPreferred = person.isPreferred
             revision.modifiedAt = max(now, person.modifiedAt.addingTimeInterval(0.001))
             revisions.append(revision)

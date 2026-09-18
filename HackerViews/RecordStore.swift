@@ -8,6 +8,7 @@ final class RecordStore: ObservableObject {
     @Published private(set) var isSyncing = false
     @Published private(set) var storageAvailable = true
     private let fileURL: URL
+    private let journal: RecordJournal
     private let sync = CloudSync()
     private var readFailed = false
     var people: [PersonRevision] { archive.current }
@@ -17,10 +18,12 @@ final class RecordStore: ObservableObject {
     init(directory: URL? = nil) {
         let folder = directory ?? URL.applicationSupportDirectory.appendingPathComponent("HackerViews", isDirectory: true)
         fileURL = folder.appendingPathComponent("records.json")
+        journal = RecordJournal(file: fileURL)
         do {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             if FileManager.default.fileExists(atPath: fileURL.path) {
-                let loaded = try JSONDecoder().decode(RecordArchive.self, from: Data(contentsOf: fileURL))
+                var loaded = try JSONDecoder().decode(RecordArchive.self, from: Data(contentsOf: fileURL))
+                try journal.replay(into: &loaded)
                 try loaded.validate()
                 archive = loaded
                 var cleaned = loaded
@@ -43,7 +46,7 @@ final class RecordStore: ObservableObject {
         let history = archive.history(for: name)
         var revision = PersonRevision(username: name, isBlocked: blocked, note: note, citations: citations,
                                       createdAt: history.last?.createdAt ?? Date(), device: Self.deviceName,
-                                      parentIDs: history.map(\.id))
+                                      parentIDs: archive.revisionHeads(for: name))
         revision.isPreferred = preferred ?? current(name)?.isPreferred
         // A restored/imported future timestamp must not prevent a local edit from taking effect.
         revision.modifiedAt = max(Date(), (history.first?.modifiedAt ?? .distantPast).addingTimeInterval(0.001))
@@ -130,6 +133,7 @@ final class RecordStore: ObservableObject {
     }
 
     private func recover(_ recovery: RecordArchive) throws {
+        journal.flush()
         let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(recovery)
         if FileManager.default.fileExists(atPath: fileURL.path) {
@@ -137,6 +141,7 @@ final class RecordStore: ObservableObject {
             try original.write(to: fileURL.appendingPathExtension("unreadable-\(UUID())"), options: .atomic)
         }
         try data.write(to: fileURL, options: .atomic)
+        try journal.retireDeltas()
         readFailed = false; archive = recovery; storageAvailable = true; error = nil
     }
 
@@ -165,17 +170,11 @@ final class RecordStore: ObservableObject {
     private func persist(_ value: RecordArchive) throws {
         guard !readFailed else { throw CocoaError(.fileReadCorruptFile) }
         try value.validate()
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let data = try encoder.encode(value)
-        // Maintain the previous successfully saved journal as a recovery file.
-        if FileManager.default.fileExists(atPath: fileURL.path) {
-            let old = try Data(contentsOf: fileURL)
-            try old.write(to: fileURL.appendingPathExtension("previous"), options: .atomic)
-        }
-        try data.write(to: fileURL, options: .atomic)
+        try journal.append(value, previous: archive)
         archive = value
     }
+
+    func flushJournal() { journal.flush() }
 
     private static var deviceName: String {
         #if os(macOS)
@@ -183,5 +182,76 @@ final class RecordStore: ObservableObject {
         #else
         "iPhone / iPad"
         #endif
+    }
+}
+
+
+// Small immutable transactions are durable before save() succeeds. Full snapshots
+// and recovery-copy I/O run on a utility queue; a crash can always replay deltas.
+private final class RecordJournal: @unchecked Sendable {
+    private let file: URL
+    private let directory: URL
+    private let queue = DispatchQueue(label: "HackerViews.record-checkpoints", qos: .utility)
+    private var checkpoint: DispatchWorkItem?
+    private var checkpointBody: (@Sendable () -> Void)?
+    init(file: URL) {
+        self.file = file
+        directory = file.deletingLastPathComponent().appendingPathComponent("record-transactions")
+    }
+    func replay(into archive: inout RecordArchive) throws {
+        guard FileManager.default.fileExists(atPath: directory.path) else { return }
+        for url in try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+            where url.pathExtension == "json" {
+            try archive.merge(JSONDecoder().decode(RecordArchive.self, from: Data(contentsOf: url)))
+        }
+    }
+    func append(_ value: RecordArchive, previous: RecordArchive) throws {
+        let known = Set(previous.revisions.map(\.id))
+        let knownFilters = Set((previous.filterRevisions ?? []).map(\.id))
+        var delta = RecordArchive(revisions: value.revisions.filter { !known.contains($0.id) })
+        delta.filterRevisions = value.filterRevisions?.filter { !knownFilters.contains($0.id) }
+        guard delta.revisionCount > 0 else { return }
+        let manager = FileManager.default
+        // Establish a readable base before the first durable transaction.
+        if !manager.fileExists(atPath: file.path) {
+            try JSONEncoder().encode(previous).write(to: file, options: .atomic)
+        }
+        try manager.createDirectory(at: directory, withIntermediateDirectories: true)
+        let transaction = directory.appendingPathComponent(UUID().uuidString + ".json")
+        try JSONEncoder().encode(delta).write(to: transaction, options: .atomic)
+        let included = (try? manager.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
+        checkpoint?.cancel()
+        let file = self.file
+        let body: @Sendable () -> Void = {
+            let manager = FileManager.default
+            do {
+                let data = try JSONEncoder().encode(value)
+                if manager.fileExists(atPath: file.path) {
+                    try Data(contentsOf: file).write(to: file.appendingPathExtension("previous"), options: .atomic)
+                }
+                try data.write(to: file, options: .atomic)
+                // Only remove transactions incorporated in this snapshot. New saves
+                // arriving during the write remain available for crash recovery.
+                for url in included where url.pathExtension == "json" { try? manager.removeItem(at: url) }
+            } catch {
+                // The durable transactions remain authoritative if checkpointing fails.
+            }
+        }
+        checkpointBody = body
+        let work = DispatchWorkItem(block: body)
+        checkpoint = work
+        queue.asyncAfter(deadline: .now() + 1, execute: work)
+    }
+    func flush() {
+        checkpoint?.cancel()
+        let body = checkpointBody
+        checkpointBody = nil
+        queue.sync { body?() }
+    }
+    func retireDeltas() throws {
+        if FileManager.default.fileExists(atPath: directory.path) {
+            try FileManager.default.moveItem(at: directory,
+                to: directory.appendingPathExtension("recovered-" + UUID().uuidString))
+        }
     }
 }

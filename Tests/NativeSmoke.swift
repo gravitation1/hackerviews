@@ -39,7 +39,8 @@ struct NativeSmoke {
         let recoveryDirectory = directory.appendingPathComponent("recovery")
         let recoveryStore = RecordStore(directory: recoveryDirectory)
         guard recoveryStore.save(username: "fixture_user", blocked: true, note: "Keep this reason", citations: []),
-              recoveryStore.save(username: "fixture_user", blocked: false, note: "Newer reason", citations: []) else { throw Failure("Recovery fixture could not be saved") }
+              { recoveryStore.flushJournal(); return recoveryStore.save(username: "fixture_user", blocked: false, note: "Newer reason", citations: []) }() else { throw Failure("Recovery fixture could not be saved") }
+        recoveryStore.flushJournal()
         try Data("corrupt".utf8).write(to: recoveryDirectory.appendingPathComponent("records.json"))
         let corrupted = RecordStore(directory: recoveryDirectory)
         guard !corrupted.storageAvailable else { throw Failure("Corrupt journal did not pause browsing") }
