@@ -118,6 +118,16 @@ import Foundation
             if expected == "unresolved" { precondition(live.labels["200"]?.contains("offline") == true) }
         }
         print("PASS styling-only uncertainty stays visible; reachable blocks remain unresolved; offline cause retained")
+        // A profile fetched during the account check must count as fresh for that check.
+        let firstVisit = HNService(directory: folder.appendingPathComponent("first-visit"), profileLoader: { name in HNAccount(id: name, karma: 973, created: 1_634_774_400) })
+        var lowKarma = FilterRule(); lowKarma.name = "Low karma"; lowKarma.effect = .fade; lowKarma.conditions.karmaBelow = 100
+        let firstLook = await firstVisit.accountMatch("reader", rules: [lowKarma])
+        precondition(firstLook.effect == "visible" && firstLook.label == "No matching filter", "Fresh karma must not read as unverified: \(firstLook.label)")
+        var highKarma = FilterRule(); highKarma.name = "Regulars"; highKarma.effect = .highlight; highKarma.conditions.karmaBelow = 500; highKarma.conditions.karmaHigher = true
+        let firstMatch = await HNService(directory: folder.appendingPathComponent("first-match"), profileLoader: { name in HNAccount(id: name, karma: 973, created: 1_634_774_400) })
+            .accountMatch("reader", rules: [highKarma])
+        precondition(firstMatch.effect == "highlight:#27a99a" && firstMatch.label == "Highlight · Teal" && firstMatch.priority == 1, "First-visit match must carry its real label: \(firstMatch.label)")
+        print("PASS first-visit account checks judge freshness from the fetch, not the check start")
         var scoped = FilterRule(); scoped.scope = .posts; scoped.assignedUsers = ["other"]
         let account = await mixedOffline.accountMatch("bob", rules: [scoped,bobBlock])
         precondition(account.effect == "blocked" && account.priority == 2 && account.contributionCaveat)

@@ -223,14 +223,32 @@ actor HNService {
         }
         let (rule, effect, _) = await itemMatch(HNItem(id: -1, by: name, parent: nil, type: "story"), rules: accountRules, now: now)
         let cached = users[name]
+        // A profile fetched during the check above is newer than `now`; judge its
+        // freshness from when it arrived, or freshly cached karma reads as stale.
+        let evaluatedAt = max(now, cached?.fetched ?? now)
         var match = RuleEvaluation.match(for: name, rules: accountRules,
-            karma: Self.cacheOnly ? cached?.account.karma : cached?.karma(at: now), created: cached?.creationDate, now: now)
+            karma: Self.cacheOnly ? cached?.account.karma : cached?.karma(at: evaluatedAt), created: cached?.creationDate, now: evaluatedAt)
         if match.effect != effect {
-            match = AccountRuleMatch(effect: effect, label: effect == "unresolved" ? "Couldn’t verify effect" : "Shown without unverified styling",
+            match = AccountRuleMatch(effect: effect, label: Self.effectLabel(rule, effect: effect),
                 ruleName: rule?.name, priority: rule.flatMap { rule in rules.firstIndex(where: { $0.id == rule.id }).map { $0 + 1 } })
         }
         match.contributionCaveat = varies
         return match
+    }
+
+    private static func effectLabel(_ rule: FilterRule?, effect: String) -> String {
+        switch effect {
+        case "unresolved": return "Couldn’t verify effect"
+        case "visible": return rule == nil ? "Shown without unverified styling" : "Show normally"
+        default:
+            guard let rule else { return "No matching filter" }
+            switch rule.effect {
+            case .block: return "Blocked"
+            case .highlight: return "Highlight · " + rule.color.rawValue.capitalized
+            case .allow: return "Show normally"
+            case .fade: return "Fade · " + rule.fade.label
+            }
+        }
     }
 
     private func effect(_ name: String, rules: [FilterRule], now: Date) async -> String {
