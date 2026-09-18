@@ -1035,3 +1035,47 @@ test('refresh restores nested collapsed threads before rendering and preserves l
   assert.equal(restored.doc.querySelector('[id="5"] .comment').hidden,false);
   restored.dom.window.close();
 });
+
+test('upvote state survives a fresh reader document without resurrecting hidden HN actions',async()=>{
+  let voted=false;const requests=[];
+  async function open() {
+    const p=await lazyPage();const w=p.dom.window;
+    w.IntersectionObserver=class {constructor(callback){this.callback=callback;}observe(target){this.callback([{target,isIntersecting:true}]);}unobserve(){}};
+    w.fetch=async(url,options)=>{
+      requests.push({url,options});
+      if(new URL(url).pathname==='/vote'){voted=true;return {ok:true};}
+      return {ok:true,text:async()=>`<table><tr class="athing comtr" id="1"><td class="votelinks">
+        <a id="up_1" class="${voted?'nosee':''}" href="vote?id=1&how=up&auth=fixture">up</a>
+        <a id="down_1" style="${voted?'visibility:hidden':''}" href="vote?id=1&how=down&auth=fixture">down</a>
+        </td><td><span class="comhead">author ${voted?'<a id="un_1" href="vote?id=1&how=un&auth=fixture">unvote</a>':''}</span></td></tr></table>`};
+    };
+    const request=p.messages.filter(m=>m.kind==='lazyItems').at(-1);
+    w.HackerViews.lazyResult(request.token,[{id:1,effect:'visible',item:{id:1,type:'comment',by:'author',text:'Comment'}}]);
+    await new Promise(r=>setTimeout(r,20));return p;
+  }
+  const first=await open();
+  assert.ok([...first.doc.querySelectorAll('.hv-vote')].every(button=>!button.hidden));
+  first.doc.querySelector('.hv-vote').click();
+  await new Promise(r=>setTimeout(r,10));
+  assert.ok([...first.doc.querySelectorAll('.hv-vote')].every(button=>button.hidden));
+  assert.match(first.doc.querySelector('.hv-vote-status').textContent,/Upvoted/);
+  first.dom.window.close();
+  const refreshed=await open();
+  assert.ok([...refreshed.doc.querySelectorAll('.hv-vote')].every(button=>button.hidden));
+  assert.match(refreshed.doc.querySelector('.hv-vote-status').textContent,/Upvoted/);
+  assert.equal(requests.filter(r=>new URL(r.url).pathname==='/vote').length,1);
+  assert.ok(requests.every(r=>r.options.cache==='no-store'));
+  refreshed.dom.window.close();
+});
+
+test('hidden authenticated vote links are unavailable even without an undo link',async()=>{
+  const p=await lazyPage();
+  p.dom.window.IntersectionObserver=class {constructor(callback){this.callback=callback;}observe(target){this.callback([{target,isIntersecting:true}]);}unobserve(){}};
+  p.dom.window.fetch=async()=>({ok:true,text:async()=>'<table><tr class="athing" id="1"><td class="votelinks"><span class="noshow"><a href="vote?id=1&how=up&auth=fixture">up</a></span><a hidden href="vote?id=1&how=down&auth=fixture">down</a></td></tr></table>'});
+  const request=p.messages.filter(m=>m.kind==='lazyItems').at(-1);
+  p.dom.window.HackerViews.lazyResult(request.token,[{id:1,effect:'visible',item:{id:1,type:'comment',by:'author',text:'Comment'}}]);
+  await new Promise(r=>setTimeout(r,20));
+  assert.ok([...p.doc.querySelectorAll('.hv-vote')].every(button=>button.hidden));
+  assert.equal(p.doc.querySelector('.hv-vote-status'),null);
+  p.dom.window.close();
+});

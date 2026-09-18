@@ -1043,7 +1043,22 @@
   let voteObserver;
   function updateVoteControls(id) {
     const actions=voteActions.get(id);
-    for(const {button,direction} of voteControls.get(id)||[])button.hidden=!actions?.[direction];
+    for(const {button,direction} of voteControls.get(id)||[])button.hidden=!!actions?.voted || !actions?.[direction];
+    const heading=lazyNodes.get(id)?.host.querySelector(':scope > .hv-own .comhead, :scope > .hv-own .subtext');
+    if(heading) {
+      let status=heading.querySelector('.hv-vote-status');
+      if(actions?.voted) {
+        if(!status){status=document.createElement('span');status.className='hv-vote-status';heading.append(status);}
+        status.textContent=actions.voted==='up'?' · Upvoted':' · Downvoted';
+      } else status?.remove();
+    }
+  }
+  function voteLinkHidden(link) {
+    for(let node=link;node && node.nodeType===1;node=node.parentElement) {
+      if(node.hidden || node.classList.contains('nosee') || node.classList.contains('noshow') ||
+         node.style.display==='none' || node.style.visibility==='hidden')return true;
+    }
+    return false;
   }
   async function loadVoteActions() {
     if(localPaused || voteFetching || !votePage || typeof fetch!=='function')return;
@@ -1055,7 +1070,7 @@
     try {
       // HN's read-only item API has no per-account voting permissions. Inspect
       // authenticated action links in the background; never gate comment loading.
-      const response=await pooledFetch(target,{credentials:'same-origin',signal:AbortSignal.timeout(10000)});
+      const response=await pooledFetch(target,{credentials:'same-origin',cache:'no-store',signal:AbortSignal.timeout(10000)});
       if(!response.ok)throw new Error();
       const html=await response.text();trace('votes.response',{ms:performance.now()-voteStarted,bytes:new TextEncoder().encode(html).length});
       const doc=new DOMParser().parseFromString(html,'text/html');
@@ -1076,9 +1091,18 @@
         const id=Number(row.id);if(!Number.isSafeInteger(id))continue;
         const actions={};
         for(const a of row.querySelectorAll('.votelinks a[href]')) {
-          if(a.closest('tr.athing')!==row)continue;
+          if(a.closest('tr.athing')!==row || voteLinkHidden(a))continue;
           const url=new URL(a.getAttribute('href'),target),direction=url.searchParams.get('how');
           if(url.origin===location.origin && url.pathname==='/vote' && url.searchParams.get('id')===String(id) && url.searchParams.get('auth') && ['up','down'].includes(direction))actions[direction]=url.href;
+        }
+        const undo=doc.getElementById('un_'+id);
+        if(undo && !voteLinkHidden(undo)) {
+          const url=new URL(undo.getAttribute('href')||'',target);
+          const label=undo.textContent.trim().toLowerCase();
+          if(url.origin===location.origin && url.pathname==='/vote' && url.searchParams.get('id')===String(id) && url.searchParams.get('how')==='un' && url.searchParams.get('auth')) {
+            if(label==='unvote')actions.voted='up';
+            else if(label==='undown')actions.voted='down';
+          }
         }
         voteActions.set(id,actions);updateVoteControls(id);
       }
@@ -1102,6 +1126,7 @@
     // Observe the row host, since an ineligible/unknown button itself is hidden.
     setTimeout(()=>{
       const host=button.closest('.hv-own');if(!host)return;
+      updateVoteControls(item.id);
       if(typeof IntersectionObserver==='undefined')return;
       voteObserver ??= new IntersectionObserver(entries=>{
         for(const entry of entries)if(entry.isIntersecting) {
@@ -1115,13 +1140,13 @@
   }
   async function lazyVote(item, button, direction) {
     const action=voteActions.get(item.id)?.[direction];if(!action)return;
-    button.disabled=true;
+    for(const control of voteControls.get(item.id)||[])control.button.disabled=true;
     try {
       const url=new URL(action);url.searchParams.set('js','t');
-      const voted=await pooledFetch(url.href,{credentials:'same-origin'});
+      const voted=await pooledFetch(url.href,{credentials:'same-origin',cache:'no-store'});
       if(!voted.ok)throw new Error();
-      voteActions.set(item.id,{});updateVoteControls(item.id);
-    } catch (_) {button.title='Retry vote';button.setAttribute('aria-label','Retry vote');button.disabled=false;}
+      voteActions.set(item.id,{voted:direction});updateVoteControls(item.id);
+    } catch (_) {button.title='Retry vote';button.setAttribute('aria-label','Retry vote');for(const control of voteControls.get(item.id)||[])control.button.disabled=false;}
   }
   function lazyNavigation(node, item, heading) {
     const nav=document.createElement('span');nav.className='hv-comment-nav';
