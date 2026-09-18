@@ -619,7 +619,7 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
             return true
         }
         switch type {
-        case .formSubmitted:
+        case .formSubmitted, .formResubmitted:
             if pendingFormSubmission, Self.topicID(target) != nil {
                 pendingFormSubmission = false
                 lazyURL = nil

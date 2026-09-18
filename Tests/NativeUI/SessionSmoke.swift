@@ -42,6 +42,9 @@ import WebKit
         _ = navigation.preservesCanonicalNavigation(to: commentURL, type: .formSubmitted, isMainFrame: true)
         precondition(navigation.preservesCanonicalNavigation(to: topicURL, type: .formSubmitted, isMainFrame: true))
         precondition(!navigation.preservesCanonicalNavigation(to: topicURL, type: .linkActivated, isMainFrame: true))
+        _ = navigation.preservesCanonicalNavigation(to: commentURL, type: .formResubmitted, isMainFrame: true)
+        precondition(navigation.preservesCanonicalNavigation(to: topicURL, type: .other, isMainFrame: true))
+        precondition(!navigation.preservesCanonicalNavigation(to: topicURL, type: .linkActivated, isMainFrame: true))
         for action in [WKNavigationType.linkActivated, .reload, .backForward] {
             _ = navigation.preservesCanonicalNavigation(to: commentURL, type: .formSubmitted, isMainFrame: true)
             precondition(!navigation.preservesCanonicalNavigation(to: topicURL, type: action, isMainFrame: true))
