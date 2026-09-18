@@ -9,3 +9,5 @@ node_modules/
 *.xcuserstate
 xcuserdata/
 Config/Signing.local.xcconfig
+__pycache__/
+*.pyc

@@ -17,7 +17,7 @@ struct NativeSmoke {
     }
 
     @MainActor static func run() async throws {
-        let directory = URL.temporaryDirectory.appendingPathComponent("QuietHN-smoke-\(UUID())")
+        let directory = URL.temporaryDirectory.appendingPathComponent("HackerViews-smoke-\(UUID())")
         let store = RecordStore(directory: directory)
         let accountCache = directory.appendingPathComponent("account-cache")
         let service = HNService(directory: accountCache, profileLoader: { name in
@@ -27,7 +27,7 @@ struct NativeSmoke {
         let firstMatch = await service.accountMatch("fixture", rules: [age])
         guard firstMatch.effect == "blocked" else { throw Failure("Fixture profile fetch failed") }
         await service.flushProfiles()
-        let persisted = accountCache.appendingPathComponent("QuietHN-accounts.json")
+        let persisted = accountCache.appendingPathComponent("HackerViews-accounts.json")
         var saved = try JSONDecoder().decode([String: CachedAccount].self, from: Data(contentsOf: persisted))
         saved["fixture"]?.fetched = Date().addingTimeInterval(-3600)
         try JSONEncoder().encode(saved).write(to: persisted, options: .atomic)
@@ -162,7 +162,7 @@ struct NativeSmoke {
     }
 
     @MainActor static func evaluate(_ tab: BrowserTab, _ script: String) async throws -> Any? {
-        try await tab.webView.callAsyncJavaScript(script, arguments: [:], in: nil, contentWorld: WKContentWorld.world(name: "QuietHN"))
+        try await tab.webView.callAsyncJavaScript(script, arguments: [:], in: nil, contentWorld: WKContentWorld.world(name: "HackerViews"))
     }
 
     @MainActor static func snapshot(_ tab: BrowserTab, name: String) async throws {

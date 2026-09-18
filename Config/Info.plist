@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-<key>QuietHNCloudEnabled</key><string>$(QUIET_HN_CLOUD_ENABLED)</string>
-<key>QuietHNCloudContainer</key><string>$(QUIET_HN_CLOUD_CONTAINER)</string>
-<key>CFBundleURLTypes</key><array><dict><key>CFBundleURLName</key><string>QuietHN links</string><key>CFBundleURLSchemes</key><array><string>quiethn</string></array></dict></array>
+<key>HackerViewsCloudEnabled</key><string>$(HACKER_VIEWS_CLOUD_ENABLED)</string>
+<key>HackerViewsCloudContainer</key><string>$(HACKER_VIEWS_CLOUD_CONTAINER)</string>
+<key>CFBundleURLTypes</key><array><dict><key>CFBundleURLName</key><string>HackerViews links</string><key>CFBundleURLSchemes</key><array><string>hackerviews</string></array></dict></array>
 <key>ITSAppUsesNonExemptEncryption</key><false/>
 </dict></plist>

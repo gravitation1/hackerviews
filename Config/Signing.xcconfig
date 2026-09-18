@@ -1,4 +1,4 @@
 // Optional signing settings. Set your team in Xcode or in Signing.local.xcconfig.
-QUIET_HN_BUNDLE_ID = com.local.QuietHN
-QUIET_HN_CLOUD_CONTAINER = iCloud.com.local.QuietHN
+HACKER_VIEWS_BUNDLE_ID = com.local.HackerViews
+HACKER_VIEWS_CLOUD_CONTAINER = iCloud.com.local.HackerViews
 #include? "Signing.local.xcconfig"

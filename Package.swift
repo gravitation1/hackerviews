@@ -2,11 +2,11 @@
 import PackageDescription
 
 let package = Package(
-    name: "QuietHNCore",
+    name: "HackerViewsCore",
     platforms: [.macOS(.v14), .iOS(.v17)],
-    products: [.library(name: "QuietHNCore", targets: ["QuietHNCore"])],
+    products: [.library(name: "HackerViewsCore", targets: ["HackerViewsCore"])],
     targets: [
-        .target(name: "QuietHNCore", path: "QuietHN/Core"),
-        .testTarget(name: "QuietHNCoreTests", dependencies: ["QuietHNCore"], path: "Tests/CoreTests")
+        .target(name: "HackerViewsCore", path: "HackerViews/Core"),
+        .testTarget(name: "HackerViewsCoreTests", dependencies: ["HackerViewsCore"], path: "Tests/CoreTests")
     ]
 )

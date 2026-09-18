@@ -1,29 +1,47 @@
-import AppKit
 import Foundation
+import CoreGraphics
+import ImageIO
+import UniformTypeIdentifiers
+
 let root = URL(fileURLWithPath: CommandLine.arguments[1])
-var images: [[String:String]] = []
-func render(_ pixels: Int, _ filename: String) {
-    let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: pixels, pixelsHigh: pixels, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
-    NSGraphicsContext.saveGraphicsState()
-    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
-    let scale = CGFloat(pixels) / 1024
-    let transform = NSAffineTransform(); transform.scale(by: scale); transform.concat()
-    NSColor(calibratedRed: 0.94, green: 0.43, blue: 0.18, alpha: 1).setFill()
-    NSBezierPath(rect: NSRect(x: 0,y: 0,width: 1024,height: 1024)).fill()
-    NSColor(calibratedRed: 1, green: 0.97, blue: 0.9, alpha: 1).setStroke()
-    let ring = NSBezierPath(ovalIn: NSRect(x: 228, y: 254, width: 548, height: 548)); ring.lineWidth = 100; ring.stroke()
-    let tail = NSBezierPath(); tail.move(to: NSPoint(x: 600,y: 400)); tail.line(to: NSPoint(x: 799,y: 206)); tail.lineWidth = 100; tail.lineCapStyle = .round; tail.stroke()
-    NSGraphicsContext.restoreGraphicsState()
-    try! rep.representation(using: .png, properties: [:])!.write(to: root.appendingPathComponent(filename))
+let sourceURL = CommandLine.arguments.count > 2
+    ? URL(fileURLWithPath: CommandLine.arguments[2])
+    : URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        .appendingPathComponent("Design/AppIcon/signal-source.png")
+guard let input = CGImageSourceCreateWithURL(sourceURL as CFURL, nil),
+      let source = CGImageSourceCreateImageAtIndex(input, 0, nil) else {
+    fatalError("Missing icon master: \(sourceURL.path)")
 }
-for size in [16,32,128,256,512] {
-    for scale in [1,2] {
+var images: [[String: String]] = []
+func render(_ pixels: Int, _ filename: String, iOS: Bool = false) {
+    let alpha: CGImageAlphaInfo = iOS ? .noneSkipLast : .premultipliedLast
+    let context = CGContext(data: nil, width: pixels, height: pixels, bitsPerComponent: 8,
+        bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: alpha.rawValue)!
+    context.interpolationQuality = .high
+    let destination = CGRect(x: 0, y: 0, width: pixels, height: pixels)
+    var artwork = source
+    if iOS {
+        // iOS supplies its own corner mask. Remove the preview margin and fill transparencies.
+        context.setFillColor(CGColor(srgbRed: 0.13, green: 0.14, blue: 0.16, alpha: 1))
+        context.fill(destination)
+        let bounds = CGRect(x: 0, y: 0, width: source.width, height: source.height)
+        artwork = source.cropping(to: bounds.insetBy(dx: bounds.width * 0.11, dy: bounds.height * 0.11))!
+    }
+    context.draw(artwork, in: destination)
+    let output = CGImageDestinationCreateWithURL(root.appendingPathComponent(filename) as CFURL,
+        UTType.png.identifier as CFString, 1, nil)!
+    CGImageDestinationAddImage(output, context.makeImage()!, nil)
+    precondition(CGImageDestinationFinalize(output), "Could not export \(filename)")
+}
+for size in [16, 32, 128, 256, 512] {
+    for scale in [1, 2] {
         let filename = "mac-\(size)@\(scale)x.png"
-        render(size*scale, filename)
-        images.append(["idiom":"mac", "size":"\(size)x\(size)", "scale":"\(scale)x", "filename":filename])
+        render(size * scale, filename)
+        images.append(["idiom": "mac", "size": "\(size)x\(size)", "scale": "\(scale)x", "filename": filename])
     }
 }
-render(1024, "universal.png")
-images.append(["idiom":"universal", "platform":"ios", "size":"1024x1024", "filename":"universal.png"])
-let contents: [String:Any] = ["images":images,"info":["author":"xcode","version":1]]
-try! JSONSerialization.data(withJSONObject: contents, options:.prettyPrinted).write(to: root.appendingPathComponent("Contents.json"))
+render(1024, "universal.png", iOS: true)
+images.append(["idiom": "universal", "platform": "ios", "size": "1024x1024", "filename": "universal.png"])
+let contents: [String: Any] = ["images": images, "info": ["author": "xcode", "version": 1]]
+try JSONSerialization.data(withJSONObject: contents, options: [.prettyPrinted, .sortedKeys])
+    .write(to: root.appendingPathComponent("Contents.json"))

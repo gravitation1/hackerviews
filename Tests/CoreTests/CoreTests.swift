@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import QuietHNCore
+@testable import HackerViewsCore
 
 @Test func concurrentEditsAreRetainedAndMergeOrderIsStable() throws {
     var a = PersonRevision(username: "alice", isBlocked: true, note: "Reason on Mac", citations: [], device: "Mac")
@@ -363,4 +363,80 @@ import Testing
     let count = archive.revisionCount
     archive.removeLegacyProfilePlaceholders()
     #expect(archive.revisionCount == count)
+}
+
+@Test func contentPatternsAndScopes() throws {
+    var pattern = ContentPattern(); pattern.field = .title; pattern.mode = .regex
+    pattern.pattern = #"\b(hiring|seeking work)\b"#
+    let post = HNItem(id: 1, by: "alice", parent: nil, type: "story", title: "HIRING engineers")
+    let comment = HNItem(id: 2, by: "alice", parent: 1, text: "HIRING engineers")
+    #expect(pattern.evaluate(post) == .blocked)
+    #expect(pattern.evaluate(comment) == .visible)
+    pattern.ignoreCase = false
+    #expect(pattern.evaluate(post) == .visible)
+    pattern.field = .body; pattern.pattern = "fish & chips"; pattern.mode = .contains
+    #expect(pattern.evaluate(HNItem(id: 3, by: "a", parent: 1, text: "<p>fish &amp; chips</p>")) == .blocked)
+    #expect(ContentPattern.readable("&#x41;&#66;&lt;tag&gt;") == "AB<tag>")
+    var rule = FilterRule(); rule.content = pattern; rule.scope = .comments
+    #expect(rule.isActive && rule.isValid)
+    #expect(!rule.applies(to: post) && rule.applies(to: comment))
+    rule.content?.pattern = "["; rule.content?.mode = .regex
+    #expect(!rule.isValid)
+    #expect(RuleListEdits.updating(rule, in: []).isEmpty)
+}
+
+@Test func contentCombinesWithUsersAndConditions() {
+    var rule = FilterRule(); rule.assignedUsers = ["alice"]
+    var pattern = ContentPattern(); pattern.pattern = "spam"; rule.content = pattern
+    let ordinary = HNItem(id: 1, by: "alice", parent: 9, text: "hello")
+    let spam = HNItem(id: 2, by: "bob", parent: 9, text: "spam")
+    #expect(rule.matches(item: ordinary, karma: nil, created: nil, now: Date()) == .blocked)
+    #expect(rule.matches(item: spam, karma: nil, created: nil, now: Date()) == .blocked)
+    rule.combine = .all
+    #expect(rule.matches(item: ordinary, karma: nil, created: nil, now: Date()) == .visible)
+    #expect(rule.matches(item: spam, karma: nil, created: nil, now: Date()) == .visible)
+    rule.itemIDs = [2]
+    #expect(rule.matches(item: spam, karma: nil, created: nil, now: Date()) == .blocked)
+    rule.scope = .posts
+    #expect(rule.matches(item: spam, karma: nil, created: nil, now: Date()) == .visible)
+}
+
+@Test func slowRegexStopsAndReportsUnverified() {
+    var pattern = ContentPattern(); pattern.mode = .regex; pattern.pattern = "(a+)+$"
+    let start = Date()
+    #expect(pattern.test(String(repeating: "a", count: 5000) + "!").decision == .unresolved)
+    #expect(Date().timeIntervalSince(start) < 1)
+}
+
+@Test func contributionFilterRoundTrip() throws {
+    var rule = FilterRule(); rule.name = "Patterns"; rule.scope = .posts; rule.hideReplies = false
+    rule.itemIDs = [123]; rule.combine = .all
+    var pattern = ContentPattern(); pattern.field = .domain; pattern.pattern = "example.com"; rule.content = pattern
+    #expect(try JSONDecoder().decode(FilterRule.self, from: JSONEncoder().encode(rule)) == rule)
+    var legacy = FilterRule(); legacy.assignedUsers = ["alice"]
+    #expect(legacy.includesReplies && legacy.applies(to: HNItem(id: 1, by: "alice", parent: nil, type: "story")))
+}
+
+@Test func contributionAssignmentAcceptsHNLinksAndRejectsOtherURLs() {
+    #expect(HNItem.assignmentID(" https://news.ycombinator.com/item?id=123#456 ") == 123)
+    #expect(HNItem.assignmentID("123") == 123)
+    #expect(HNItem.assignmentID("https://example.com/item?id=123") == nil)
+    #expect(HNItem.assignmentID("https://news.ycombinator.com/user?id=123") == nil)
+    #expect(HNItem.assignmentID("https://news.ycombinator.com/item?id=-1") == nil)
+}
+
+@Test func savedNotesDirectorySkipsEmptyRecordsAndSearchesReferenceContent() {
+    var person = PersonRevision(username: "alice", isBlocked: false, note: " \n", citations: [])
+    #expect(!person.hasSavedNotes)
+    var citation = Citation(url: "https://news.ycombinator.com/item?id=123", author: "alice", excerpt: "Original excerpt", context: "Source title")
+    citation.annotation = "Useful explanation"
+    person.citations = [citation]
+    #expect(person.hasSavedNotes)
+    #expect(person.savedNotePreview == "Useful explanation")
+    #expect(person.matchesSavedNotesSearch("EXPLANATION"))
+    #expect(person.matchesSavedNotesSearch("original"))
+    #expect(person.matchesSavedNotesSearch("alice"))
+    #expect(!person.matchesSavedNotesSearch("missing"))
+    person.note = "Profile note"
+    #expect(person.savedNotePreview == "Profile note")
 }

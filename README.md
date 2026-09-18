@@ -1,10 +1,10 @@
-# Quiet HN
+# HackerViews
 
 A native **Mac and iPhone** companion for Hacker News. Read and participate on the actual HN website, while privately blocking users and their discussion branches and preserving the reasons with citations.
 
 ## Open and run
 
-Open **QuietHN.xcodeproj** in Xcode. Select the **QuietHN** scheme and either **My Mac** or an iPhone simulator, then Run. There are no runtime package dependencies.
+Open **HackerViews.xcodeproj** in Xcode. Select the **HackerViews** scheme and either **My Mac** or an iPhone simulator, then Run. There are no runtime package dependencies.
 
 The local scheme works without iCloud provisioning. To install on a physical iPhone, choose your development team in Signing & Capabilities, use a bundle identifier you own, connect your phone, and Run. HN login happens inside the app, separately on each device.
 
@@ -12,13 +12,13 @@ Requirements: macOS 14+, iOS 17+, and an Xcode version with the relevant SDK. De
 
 ### Built Mac app
 
-After the command-line build below, the app is at `build/Build/Products/Debug/QuietHN.app`. Development builds are not notarized distribution releases.
+After the command-line build below, the app is at `build/Build/Products/Debug/HackerViews.app`. Development builds are not notarized distribution releases.
 
 ```sh
-xcodebuild -project QuietHN.xcodeproj -scheme QuietHN \
+xcodebuild -project HackerViews.xcodeproj -scheme HackerViews \
   -destination 'platform=macOS,arch=arm64' -derivedDataPath build \
   CODE_SIGNING_ALLOWED=NO build
-open build/Build/Products/Debug/QuietHN.app
+open build/Build/Products/Debug/HackerViews.app
 ```
 
 ## Using it
@@ -53,13 +53,13 @@ iCloud requires Apple provisioning. The code is implemented, but an unsigned loc
 
    ```xcconfig
    DEVELOPMENT_TEAM = YOURTEAMID
-   QUIET_HN_BUNDLE_ID = com.yourname.QuietHN
-   QUIET_HN_CLOUD_CONTAINER = iCloud.com.yourname.QuietHN
+   HACKER_VIEWS_BUNDLE_ID = com.yourname.HackerViews
+   HACKER_VIEWS_CLOUD_CONTAINER = iCloud.com.yourname.HackerViews
    ```
 
 2. In your Apple developer account / Xcode Signing & Capabilities, enable **iCloud → CloudKit**, register that container, and associate it with the app identifier. Use the **same container and bundle identifier** for the Mac and iPhone builds.
-3. Select the **QuietHN Cloud** scheme. Sign in to the same iCloud account on both devices and run this scheme on each.
-4. The first development sync creates a private `QuietHN` record zone and `PersonRevision` records with a `payload` field. No query indexes are required: synchronization enumerates zone changes. Confirm that Settings reports a successful sync on both devices.
+3. Select the **HackerViews Cloud** scheme. Sign in to the same iCloud account on both devices and run this scheme on each.
+4. The first development sync creates a private `HackerViews` record zone and `PersonRevision` records with a `payload` field. No query indexes are required: synchronization enumerates zone changes. Confirm that Settings reports a successful sync on both devices.
 5. Before TestFlight/App Store distribution, deploy the CloudKit schema to production in CloudKit Console, and verify a production-signed build. Development and production databases are separate.
 
 Sync runs after edits, on launch/activation, and once per minute while the app is active. Failed sync leaves local records intact and reports the error. There is no background push requirement. Large individual records exceeding the CloudKit payload limit remain local and exportable, with an explicit sync error.
@@ -85,7 +85,7 @@ npm test
 zsh scripts/native-smoke.sh
 
 # iPhone simulator build
-xcodebuild -project QuietHN.xcodeproj -scheme QuietHN -sdk iphonesimulator \
+xcodebuild -project HackerViews.xcodeproj -scheme HackerViews -sdk iphonesimulator \
   -destination 'generic/platform=iOS Simulator' -derivedDataPath build-ios \
   CODE_SIGNING_ALLOWED=NO build
 ```
@@ -95,11 +95,11 @@ The native smoke suite verifies live HN loading, isolated-world message handling
 ## Structure
 
 ```text
-QuietHN/Core/          Codable journal, validation, merge, ancestry rules
-QuietHN/Browser/       WebKit host, isolated message bridge, API ancestry cache
-QuietHN/Resources/     Page filter and annotation controls
-QuietHN/Views/         SwiftUI browsing, records, citations, history, backups
-QuietHN/Sync/          Private CloudKit revision exchange
+HackerViews/Core/          Codable journal, validation, merge, ancestry rules
+HackerViews/Browser/       WebKit host, isolated message bridge, API ancestry cache
+HackerViews/Resources/     Page filter and annotation controls
+HackerViews/Views/         SwiftUI browsing, records, citations, history, backups
+HackerViews/Sync/          Private CloudKit revision exchange
 Config/               Platform entitlements, Info.plist, optional signing config
 Tests/                Swift, DOM, and native WebKit integration tests
 ```
@@ -138,3 +138,15 @@ Opening the account panel creates no record or reference. Notes save when edited
 Profile pages show editable private Notes and Saved references below the filter banner. Notes save after a short pause or on leaving the field. References can be added, annotated, opened, and removed inline. The profile’s Edit filters button opens a filter-only panel; contribution capture panels still offer notes and deliberate reference saving.
 
 The profile’s **Your notes** list combines account notes and source annotations. Notes are fully visible in reading mode, with source links and Edit/Remove actions. Only saved excerpts collapse. Add note defaults to the current profile and can target another source URL. Inline edits autosave; each new note uses a stable ID to avoid duplicate entries.
+
+## Post, comment, and content filters
+
+Filters can apply to posts, comments, or both. Assign an individual contribution from its ellipsis menu under **This contribution**, or enter its HN item ID in the filter editor. Direct item assignments take precedence over user and content matches; filter order breaks ties. Scope and enabled state still apply. A blocked ancestor whose filter hides replies still hides the branch, including directly assigned descendants.
+
+Combine the configured user group, account-condition group, and content pattern with **Match any (OR)** or **Match all (AND)**. Empty groups do not participate. Account conditions keep their own any/all setting. Direct item assignments bypass these conditions. Empty filters match nobody.
+
+Content fields are post title, post URL, post domain, and body text. Title/URL/domain do not match comments. Body text strips HTML markup and decodes common HN entities and numeric character references. Matching supports literal text or ICU regular expressions, with case-insensitive matching on by default. Enter regex directly (no surrounding `/` delimiters). The tester marks the first matched range. Invalid drafts never replace the last valid saved rule.
+
+Regex uses Foundation's [progress callbacks](https://developer.apple.com/documentation/foundation/nsregularexpression/matchingoptions/reportprogress) to stop long-running operations after a 25 ms budget at the next callback. This is cooperative cancellation, not a hard real-time guarantee or a linear-time regex engine. Patterns are limited to 2,000 UTF-8 bytes and tested text to 200,000 UTF-16 units. Timeout/oversize results remain unverified rather than silently being treated as nonmatches. The tester runs off the UI thread.
+
+**When blocking** defaults to **Hide contribution and replies**, for both new and existing filters without an explicit choice. **Hide matching contribution only** remains an explicit option that leaves discussions and replies available. Notes remain associated with the contribution independently of its filter assignments.
