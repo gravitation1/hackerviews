@@ -194,7 +194,10 @@
     .hv-own .hv-collapse { position: relative; font: inherit; color: var(--qhn-muted); background: transparent; border: 0; min-height: 0; padding: 0 3px; }
     .hv-collapse::before { content: ''; position: absolute; inset: -7px -3px; border-radius: 4px; }
     .hv-own .hv-collapse:hover, .hv-own .hv-collapse:focus-visible { color: var(--qhn-text); background: var(--qhn-hover); outline: 1px solid var(--qhn-line); }
+    .hv-comment-tail, .hv-age { white-space: nowrap; }
     .hv-comment-nav a { text-decoration: none; }
+    .comtr.hv-tombstone td.default { background: transparent; border-left-style: dashed; padding-top: 6px; padding-bottom: 6px; }
+    .hv-tombstone-label { color: var(--qhn-muted); font-size: 12px; font-style: italic; }
     .hv-own .hv-vote { appearance: none; -webkit-appearance: none; display: block; box-sizing: border-box;
       width: 20px; height: 16px; min-height: 0; padding: 0; margin: 0; border: 0; border-radius: 2px;
       background: transparent; color: var(--qhn-muted); }
@@ -224,6 +227,7 @@
       gap: 6px 16px; padding: 6px 0; margin: 0 0 10px; border-bottom: 1px solid var(--qhn-line);
       font-family: -apple-system, BlinkMacSystemFont, sans-serif; font-size: 12px; line-height: 24px; color: var(--qhn-muted); }
     #hnmain .hv-header { margin-bottom: 0; }
+    body.hv-plain { padding: 0 16px 16px; }
     .hv-header ul { display: flex; align-items: center; flex-wrap: wrap; list-style: none; overflow: hidden; margin: 0; padding: 0; }
     .hv-header .hv-nav { margin-left: -7px; }
     .hv-header .hv-side { margin-left: auto; margin-right: -7px; }
@@ -276,6 +280,7 @@
       background: var(--qhn-panel); padding: 10px 14px;
     }
     .comtr.qhn-root td.default { border-left-color: var(--qhn-accent); }
+    .comtr.qhn-flat td.default { border-left-color: var(--qhn-line); }
     .comtr td.default > div:first-child { margin: 0 0 6px !important; }
     .comtr td.default > br { display: none; }
     .comhead a.hnuser { color: var(--qhn-text); font-size: 12px; font-weight: 600; }
@@ -353,8 +358,8 @@
       color: var(--qhn-text); background: var(--qhn-hover); border: 1px solid var(--qhn-line); border-radius: 5px; }
     .qhn-profile-edit:hover { border-color: var(--qhn-accent); }
     .qhn-profile-edit:focus-visible { outline: 2px solid var(--qhn-accent); outline-offset: 2px; }
-    .qhn-record { margin: 0 3px; border: 0; background: transparent; color: var(--qhn-muted);
-      font: 16px/16px -apple-system, sans-serif; padding: 4px 8px; min-width: 32px; min-height: 32px; box-sizing: border-box;
+    .qhn-record { margin: 0 2px; border: 0; background: transparent; color: var(--qhn-muted);
+      font: 15px/15px -apple-system, sans-serif; padding: 3px 6px; min-width: 28px; min-height: 26px; box-sizing: border-box;
       vertical-align: middle; cursor: pointer; border-radius: 4px; }
     .qhn-record:hover, .qhn-record:focus-visible { background: var(--qhn-hover); color: var(--qhn-accent); }
     #qhn-profile-record button, .qhn-profile-effect button, .qhn-note summary, .reply a {
@@ -531,7 +536,14 @@
       return header;
     }
     const cell = document.querySelector('#hnmain > tbody > tr:first-child > td');
-    if (!cell) return null;
+    if (!cell) {
+      if (!document.body || document.getElementById('hnmain')) return null;
+      const header = document.createElement('header'); header.id = 'hv-header'; header.className = 'hv-header';
+      document.body.classList.add('hv-plain'); document.body.prepend(header);
+      const me = document.querySelector('a#me[href]');
+      headerModel.identity = me ? readHeader(document.body, location.href)?.identity || {state: 'unknown'} : (location.pathname === '/login' ? {state: 'unknown'} : {state: 'out'});
+      return header;
+    }
     let header = cell.querySelector(':scope > header.hv-header');
     if (!header) {
       const parsed = readHeader(cell, location.href);
@@ -616,6 +628,9 @@
       row.nextElementSibling?.classList.add('qhn-story-meta');
       row.closest('table')?.classList.add('qhn-feed');
     });
+    document.querySelectorAll('tr.athing:not(.comtr)').forEach(row => {
+      if (row.querySelector(':scope > td.default') && !row.querySelector('.titleline')) row.classList.add('comtr', 'qhn-flat');
+    });
     document.querySelectorAll('tr.comtr').forEach(row => {
       row.classList.toggle('qhn-root', depthOf(row) === 0);
     });
@@ -652,6 +667,9 @@
   }
 
   function collect() {
+    document.querySelectorAll('tr.athing:not(.comtr)').forEach(row => {
+      if (row.querySelector(':scope > td.default') && !row.querySelector('.titleline')) row.classList.add('comtr', 'qhn-flat');
+    });
     const rows = [...document.querySelectorAll('tr.comtr')];
     // Some focused comments live in .fatitem instead of the normal comment tree.
     for (const row of document.querySelectorAll('.fatitem tr.athing')) {
@@ -1137,11 +1155,12 @@
   function applyCanonicalMetadata(node) {
     const data=canonicalItems.get(node.id),own=node.host.querySelector(':scope > .hv-own');
     if(!data || !own)return;
-    const heading=own.querySelector('.comhead');
-    if(heading && !heading.querySelector('.hv-hn-actions') && data.actions.length) {
+    const heading=own.querySelector('.subtext .comhead, .comtr .comhead');
+    if(heading && !own.querySelector('.hv-hn-actions') && data.actions.length) {
       const actions=document.createElement('span');actions.className='hv-hn-actions';
       for(const action of data.actions)actions.append(' | ',hnLink(action.label,action.url));
-      heading.append(actions);
+      if(heading.closest('.subtext'))heading.after(actions);
+      else {const toggle=heading.querySelector('.hv-collapse');if(toggle)toggle.before(actions,'\u00a0');else heading.append(actions);}
     }
     const text=own.querySelector('.commtext');
     if(text && data.fade)text.style.opacity=String(data.fade);
@@ -1341,7 +1360,23 @@
     const available=id=>{const entry=lazyNodes.get(id)?.entry;return !['blocked','hidden-item','unresolved'].includes(entry?.effect) && !(entry?.item?.deleted && !entry.item.kids?.length);};
     link('prev',siblings.slice(0,index).reverse().find(available));
     link('next',siblings.slice(index+1).find(available));
-    heading.append(' | ',nav,' ');
+    let tail=heading.querySelector(':scope > .hv-comment-tail');
+    if(!tail){tail=document.createElement('span');tail.className='hv-comment-tail';heading.append(tail);}
+    if(nav.childNodes.length){nav.prepend(' | ');tail.append(nav,' ');}
+  }
+  function headingTail(heading) { return heading.querySelector(':scope > .hv-comment-tail') || heading; }
+  function collapseToggle(node, onToggle) {
+    const toggle=document.createElement('button');toggle.type='button';toggle.className='hv-collapse';
+    const update=()=>{toggle.textContent=node.collapsed?'[+]':'[-]';toggle.setAttribute('aria-expanded',String(!node.collapsed));toggle.setAttribute('aria-label',node.collapsed?'Expand thread':'Collapse thread');toggle.title=node.collapsed?'Expand thread':'Collapse thread';};
+    update();
+    toggle.onclick=()=>{
+      node.collapsed=!node.collapsed;
+      if(node.collapsed)lazyCollapsed.add(node.id);else lazyCollapsed.delete(node.id);
+      if(node.children)node.children.host.hidden=node.collapsed;
+      onToggle?.(node.collapsed);update();
+      post({kind:'collapsedState',ids:[...lazyCollapsed]});lazyPump();
+    };
+    return toggle;
   }
   function lazyRender(node, entry) {
     const started=performance.now();
@@ -1373,18 +1408,39 @@
       return;
     }
     if(item.deleted===true || (item.dead===true && !canonicalItems.get(item.id)?.showDead)) {
-      if(root || item.kids?.length) {
+      const marker=item.dead?'[moderated]':'[deleted]';
+      if(root)document.title=(item.dead?'Moderated':'Deleted')+' comment | Hacker News';
+      if(item.type==='comment' && (root || item.kids?.length)) {
+        // Same scaffold as a live comment, so the tombstone keeps its place in
+        // the tree and its replies can be collapsed like any other branch.
+        const table=document.createElement('table');table.className='comment-tree';
+        const tbody=document.createElement('tbody');table.append(tbody);
+        const row=document.createElement('tr');row.id=String(item.id);row.className='athing comtr hv-tombstone';
+        const outer=document.createElement('td');const inner=document.createElement('table');const innerRow=document.createElement('tr');
+        inner.innerHTML='<tbody></tbody>';inner.firstChild.append(innerRow);outer.append(inner);row.append(outer);
+        const ind=document.createElement('td');ind.className='ind';ind.setAttribute('indent',String(node.depth*40));
+        const spacer=document.createElement('span');spacer.style.cssText='display:block;width:'+Math.min(node.depth*28,280)+'px';ind.append(spacer);
+        const votes=document.createElement('td');votes.className='votelinks';
+        const cell=document.createElement('td');cell.className='default';
+        const heading=document.createElement('span');heading.className='comhead';
+        const label=hnLink(marker,'/item?id='+item.id);label.className='hv-tombstone-label';heading.append(label);
+        if(item.time){const age=hnLink(relativeTime(item.time),'/item?id='+item.id);age.title=new Date(item.time*1000).toLocaleString();const stamp=document.createElement('span');stamp.className='hv-age';stamp.append(' · ',age);heading.append(stamp);}
+        lazyNavigation(node,item,heading);
+        headingTail(heading).append(collapseToggle(node));
+        const head=document.createElement('div');head.append(heading);
+        cell.append(head);innerRow.append(ind,votes,cell);tbody.append(row);
+        own.append(table);
+      } else if(root || item.kids?.length) {
         const placeholder=document.createElement('p');placeholder.className='hv-deleted';
-        placeholder.append(hnLink(item.dead?'[moderated]':'[deleted]','/item?id='+item.id));
+        placeholder.append(hnLink(marker,'/item?id='+item.id));
         if(root && item.parent)placeholder.append(' · ',hnLink('parent','/item?id='+item.parent));
         own.append(placeholder);
       }
-      if(root)document.title=(item.dead?'Moderated':'Deleted')+' comment | Hacker News';
       if(!node.children && item.kids?.length) {
         const host=document.createElement('div');host.className='hv-children';node.host.append(host);
-        node.children=lazyGroup(host,item.kids,node.depth+1,new Set([...node.ancestors,node.id]));
+        node.children=lazyGroup(host,item.kids,item.type==='comment'?node.depth+1:0,new Set([...node.ancestors,node.id]));
       }
-      if(node.children)node.children.host.hidden=false;
+      if(node.children)node.children.host.hidden=!!node.collapsed;
       if(item.dead)void loadVoteActions();
       return;
     }
@@ -1396,7 +1452,7 @@
     const user=hnLink(item.by || '[deleted]','/user?id='+encodeURIComponent(item.by || ''));
     user.className='hnuser';
     const heading=document.createElement('span');heading.className='comhead'; heading.append(user);
-    if(item.time) { const age=hnLink(relativeTime(item.time),'/item?id='+item.id);age.title=new Date(item.time*1000).toLocaleString(); heading.append(' · ',age); }
+    if(item.time) { const age=hnLink(relativeTime(item.time),'/item?id='+item.id);age.title=new Date(item.time*1000).toLocaleString();const stamp=document.createElement('span');stamp.className='hv-age';stamp.append(' · ',age);heading.append(stamp); }
 
     if(item.type==='comment') {
       row.className='athing comtr';
@@ -1410,12 +1466,8 @@
       const cell=document.createElement('td');cell.className='default';
       const head=document.createElement('div');head.append(heading);
       lazyNavigation(node,item,heading);
-      const toggle=document.createElement('button');toggle.className='hv-collapse';
-      const updateToggle=()=>{toggle.textContent=node.collapsed?'[+]':'[-]';toggle.setAttribute('aria-expanded',String(!node.collapsed));toggle.setAttribute('aria-label',node.collapsed?'Expand thread':'Collapse thread');toggle.title=node.collapsed?'Expand thread':'Collapse thread';};
-      updateToggle();
-      toggle.onclick=()=>{node.collapsed=!node.collapsed;if(node.collapsed)lazyCollapsed.add(node.id);else lazyCollapsed.delete(node.id);body.hidden=node.collapsed;votes.style.visibility=node.collapsed?'hidden':''; if(node.children)node.children.host.hidden=node.collapsed;
-        updateToggle();post({kind:'collapsedState',ids:[...lazyCollapsed]});lazyPump();};heading.append(toggle);
       const body=document.createElement('div');body.className='comment';body.hidden=!!node.collapsed;
+      headingTail(heading).append(collapseToggle(node,collapsed=>{body.hidden=collapsed;votes.style.visibility=collapsed?'hidden':'';}));
       const text=document.createElement('span');text.className='commtext';text.append(safeBody(item.deleted?'[deleted]':item.text || ''));body.append(text);
       const reply=document.createElement('div');reply.className='reply';reply.append(hnLink('reply','/reply?id='+item.id+'&goto='+encodeURIComponent('item?id='+document.body.dataset.hvTopic+'#'+item.id)));body.append(reply);
       cell.append(head,body);innerRow.append(ind,votes,cell);tbody.append(row);
@@ -1424,7 +1476,7 @@
       let target;try{target=new URL(item.url || '/item?id='+item.id,'https://news.ycombinator.com/');}catch(_){target=new URL('/item?id='+item.id,'https://news.ycombinator.com/');}
       if(!['https:','http:'].includes(target.protocol))target=new URL('/item?id='+item.id,'https://news.ycombinator.com/');
       const link=hnLink('',target.href);link.append(safeBody(item.title || 'Discussion'));title.append(link);if(target.hostname!=='news.ycombinator.com'){const domain=document.createElement('span');domain.className='sitebit comhead';domain.append(' (',hnLink(target.hostname.replace(/^www\./,''),'/from?site='+encodeURIComponent(target.hostname)),')');title.append(domain);}cell.append(title);row.append(cell);tbody.append(row);
-      const meta=document.createElement('tr');const md=document.createElement('td');md.className='subtext';if(item.by)md.append((item.score ?? 0)+' points by ',heading,' · '+(item.descendants ?? 0)+' comments');else if(item.time)md.append(relativeTime(item.time));meta.append(md);tbody.append(meta);
+      const meta=document.createElement('tr');const md=document.createElement('td');md.className='subtext';if(item.by)md.append((item.score ?? 0)+' points by ',heading,' | '+(item.descendants ?? 0)+' comments');else if(item.time)md.append(relativeTime(item.time));meta.append(md);tbody.append(meta);
       if(item.text){const textRow=document.createElement('tr');const text=document.createElement('td');text.className='toptext';text.append(safeBody(item.text));textRow.append(text);tbody.append(textRow);}
       const actions=document.createElement('div');actions.className='reply';actions.append(hnLink('Add a comment','/reply?id='+item.id+'&goto='+encodeURIComponent('item?id='+document.body.dataset.hvTopic+'#'+item.id)));
       const votes=document.createElement('td');votes.className='votelinks';votes.append(lazyVoteControl(item,'up'));row.prepend(votes);md.colSpan=2;

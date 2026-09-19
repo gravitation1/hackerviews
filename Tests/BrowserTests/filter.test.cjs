@@ -470,7 +470,7 @@ test('a discussion over 1000 comments requests every item and renders progressiv
 });
 
 async function lazyPage(anchor) {
-  const p=await page('<main id="hv-topic"><div id="hv-topic-root"></div></main>',{blocked:[],url:'https://news.ycombinator.com/item?id=1'});
+  const p=await page('<main id="hv-topic"><header id="hv-header" class="hv-header"></header><div id="hv-topic-root"></div></main>',{blocked:[],url:'https://news.ycombinator.com/item?id=1'});
   p.dom.window.Element.prototype.getClientRects=function(){return this.closest('[hidden]')?[]:[{}];};
   p.dom.window.Element.prototype.getBoundingClientRect=function(){return {top:0,bottom:100};};
   p.doc.body.dataset.hvTopic='1';
@@ -1199,5 +1199,79 @@ test('the topic shell renders the same header with a pending identity until HN\'
   assert.equal(header.querySelector('.hv-side a#logout').href, 'https://news.ycombinator.com/logout?auth=tok123&goto=news');
   assert.equal(header.querySelector('.hv-nav a[href="https://news.ycombinator.com/threads?id=alice"]').textContent, 'threads');
   assert.equal(header.querySelector('.hv-nav a[aria-current]'), null, 'HN\'s topsel from the fetched page does not mark a section inside the shell');
+  p.dom.window.close();
+});
+
+test('moderated and deleted comments keep their row, indent and a working, persisted collapse toggle', async () => {
+  const p = await lazyPage();
+  const api = p.dom.window.HackerViews;
+  let request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  api.lazyResult(request.token, [{id: 1, effect: 'visible', item: {id: 1, type: 'story', by: 'op', title: 'Story', kids: [2]}}]);
+  await new Promise(r => setTimeout(r, 5));
+  request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  api.lazyResult(request.token, [{id: 2, effect: 'visible', item: {id: 2, type: 'comment', by: null, parent: 1, dead: true, time: 1, kids: [3]}}]);
+  await new Promise(r => setTimeout(r, 5));
+  request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  api.lazyResult(request.token, [{id: 3, effect: 'visible', item: {id: 3, type: 'comment', by: 'alice', parent: 2, text: 'Surviving reply'}}]);
+  await new Promise(r => setTimeout(r, 5));
+  const row = p.doc.getElementById('2');
+  assert.ok(row.classList.contains('comtr') && row.classList.contains('hv-tombstone'), 'tombstone renders as a comment row');
+  assert.equal(row.querySelector('.hv-tombstone-label').textContent, '[moderated]');
+  assert.equal(row.querySelector('td.ind').getAttribute('indent'), '0', 'top-level tombstone sits at depth 0');
+  assert.equal(p.doc.getElementById('3').querySelector('td.ind').getAttribute('indent'), '40', 'its reply is indented one level');
+  assert.match(row.querySelector('.hv-comment-nav').textContent, /parent/);
+  assert.equal(p.doc.querySelector('.hv-deleted'), null, 'no bare placeholder for comments');
+  const children = p.doc.getElementById('3').closest('.hv-children');
+  assert.equal(children.hidden, false);
+  const toggle = row.querySelector('.hv-collapse');
+  assert.equal(toggle.textContent, '[-]');
+  toggle.click();
+  assert.equal(children.hidden, true, 'collapsing a tombstone hides its replies');
+  assert.equal(toggle.textContent, '[+]');
+  assert.deepEqual([...p.messages.filter(m => m.kind === 'collapsedState').at(-1).ids], [2], 'collapse state is persisted');
+  assert.deepEqual([...api.refreshState().collapsed], [2]);
+  toggle.click();
+  assert.equal(children.hidden, false);
+  p.dom.window.close();
+});
+
+test('a tombstone restored as collapsed loads collapsed', async () => {
+  const p = await lazyPage({id: 1, top: 0, y: 0, ancestors: [], collapsed: [2]});
+  const api = p.dom.window.HackerViews;
+  let request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  api.lazyResult(request.token, [{id: 1, effect: 'visible', item: {id: 1, type: 'story', by: 'op', title: 'Story', kids: [2]}}]);
+  await new Promise(r => setTimeout(r, 5));
+  request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  api.lazyResult(request.token, [{id: 2, effect: 'visible', item: {id: 2, type: 'comment', by: null, parent: 1, deleted: true, kids: [3]}}]);
+  await new Promise(r => setTimeout(r, 5));
+  const row = p.doc.getElementById('2');
+  assert.equal(row.querySelector('.hv-tombstone-label').textContent, '[deleted]');
+  assert.equal(row.querySelector('.hv-collapse').textContent, '[+]');
+  assert.equal(row.closest('.hv-node').querySelector('.hv-children').hidden, true);
+  p.dom.window.close();
+});
+
+const flatRow = (id, name) => `<tr class="athing" id="${id}"><td class="ind"></td><td valign="top" class="votelinks"><center><a id="up_${id}" href="vote?id=${id}&how=up">up</a></center></td><td class="default"><div><span class="comhead"><a href="user?id=${name}" class="hnuser">${name}</a> <span class="age"><a href="item?id=${id}">1 minute ago</a></span><span class="navs"> | <a href="item?id=9">parent</a></span></span></div><br><div class="comment"><div class="commtext c00">Flat comment ${id}</div></div></td></tr><tr class="spacer"><td></td></tr>`;
+
+test('flat comment lists such as newcomments are filtered and styled like threaded comments', async () => {
+  const p = await page(`<table id="hnmain"><tbody><tr><td><span class="pagetop"><a href="newest">new</a></span></td></tr><tr><td><table><tbody>${flatRow(20,'bob')}${flatRow(21,'carol')}</tbody></table></td></tr></tbody></table>`, {url: 'https://news.ycombinator.com/newcomments'});
+  assert.ok(p.doc.getElementById('20').classList.contains('comtr'), 'flat rows are treated as comment rows');
+  assert.ok(p.doc.getElementById('20').classList.contains('qhn-root'));
+  const request = p.messages.filter(m => m.kind === 'ancestors').at(-1);
+  assert.ok(request && [...request.ids].includes(20) && [...request.ids].includes(21), 'flat rows are checked');
+  p.resolve({20: 'blocked', 21: 'visible'});
+  assert.equal(hidden(p, 20), true, 'a blocked author\'s comment is hidden on a flat list');
+  assert.equal(hidden(p, 21), false);
+  assert.ok(p.doc.getElementById('21').querySelector('.qhn-record'), 'flat rows get the ⋯ control');
+  p.dom.window.close();
+});
+
+test('pages without HN\'s header still get the shared header and a gutter', async () => {
+  const p = await page(`<b>Login</b><br><br><form method="post"><table><tr><td>username:</td><td><input name="acct"></td></tr></table></form>`, {blocked: [], url: 'https://news.ycombinator.com/login'});
+  const header = p.doc.querySelector('body > header#hv-header.hv-header');
+  assert.ok(header, 'header is prepended to headerless pages');
+  assert.ok(p.doc.body.classList.contains('hv-plain'));
+  assert.deepEqual([...header.querySelectorAll('.hv-nav a')].map(a => a.textContent), ['home','new','threads','past','comments','ask','show','jobs','submit']);
+  assert.equal(header.querySelector('.hv-side a'), null, 'the login page does not advertise a login link');
   p.dom.window.close();
 });

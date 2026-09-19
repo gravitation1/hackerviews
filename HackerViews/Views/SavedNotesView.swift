@@ -28,8 +28,10 @@ struct SavedNotesView: View {
                                 VStack(alignment: .leading, spacing: 6) {
                                     Text(person.username).font(.headline)
                                     Text(person.savedNotePreview).font(.callout).foregroundStyle(.secondary).lineLimit(2)
-                                    Text("\(person.citations.count) saved \(person.citations.count == 1 ? "reference" : "references")")
-                                        .font(.caption).foregroundStyle(.secondary)
+                                    if !person.citations.isEmpty {
+                                        Text("\(person.citations.count) saved \(person.citations.count == 1 ? "reference" : "references")")
+                                            .font(.caption).foregroundStyle(.secondary)
+                                    }
                                 }
                                 Spacer()
                                 Image(systemName: "arrow.up.right").foregroundStyle(.secondary)
