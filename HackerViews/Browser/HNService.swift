@@ -258,15 +258,19 @@ actor HNService {
     struct ItemEffects: Sendable {
         var effects: [String: String]
         var labels: [String: String]
+        /// Contributions blocked only because an ancestor matched a branch-blocking
+        /// rule, keyed to that ancestor. Revealing the ancestor lifts these blocks.
+        var inherited: [String: Int] = [:]
     }
     func decisions(ids: [Int], rules: [FilterRule], knownItems: [Int: HNItem] = [:], progress: (@Sendable (ItemEffects) async -> Void)? = nil) async -> ItemEffects {
         let now = Date()
         let checksBranches = rules.contains { $0.isActive && $0.effect == .block }
         var result: [String: String] = [:]
         var labels: [String: String] = [:]
+        var inherited: [String: Int] = [:]
         for start in stride(from: 0, to: ids.count, by: 8) {
             if Task.isCancelled { break }
-            await withTaskGroup(of: (Int, String, String?).self) { group in
+            await withTaskGroup(of: Decision.self) { group in
                 for id in ids[start..<min(start + 8, ids.count)] {
                     group.addTask {
                         if let item = knownItems[id], item.by != nil,
@@ -277,9 +281,10 @@ actor HNService {
                         return await self.contributionDecision(id, rules: rules, now: now, checksBranches: checksBranches)
                     }
                 }
-                for await (id, effect, label) in group {
-                    result[String(id)] = effect; labels[String(id)] = label
-                    await progress?(ItemEffects(effects: [String(id): effect], labels: label.map { [String(id): $0] } ?? [:]))
+                for await (id, effect, label, source) in group {
+                    result[String(id)] = effect; labels[String(id)] = label; inherited[String(id)] = source
+                    await progress?(ItemEffects(effects: [String(id): effect], labels: label.map { [String(id): $0] } ?? [:],
+                                                inherited: source.map { [String(id): $0] } ?? [:]))
                 }
             }
         }
@@ -287,27 +292,28 @@ actor HNService {
             cache = Dictionary(uniqueKeysWithValues: cache.sorted { $0.value.fetched > $1.value.fetched }.prefix(15_000).map { ($0.key, $0.value) })
         }
         scheduleItemSave()
-        return ItemEffects(effects: result, labels: labels)
+        return ItemEffects(effects: result, labels: labels, inherited: inherited)
     }
 
     // A policy edit evaluates the current snapshot, including retained account
     // values. It must never join or start a network request.
     func cachedDecisions(ids: [Int], rules: [FilterRule]) async -> ItemEffects {
         await Self.$cacheOnly.withValue(true) {
-            var effects: [String: String] = [:], labels: [String: String] = [:]
+            var effects: [String: String] = [:], labels: [String: String] = [:], inherited: [String: Int] = [:]
             for id in ids {
-                let (_, effect, label) = await contributionDecision(id, rules: rules, now: Date(),
+                let (_, effect, label, source) = await contributionDecision(id, rules: rules, now: Date(),
                     checksBranches: rules.contains { $0.isActive && $0.effect == .block })
                 effects[String(id)] = effect
                 labels[String(id)] = label
+                inherited[String(id)] = source
             }
-            return ItemEffects(effects: effects, labels: labels)
+            return ItemEffects(effects: effects, labels: labels, inherited: inherited)
         }
     }
 
     func checkedContribution(_ id: Int, rules: [FilterRule]) async -> ItemEffects {
-        let (_, effect, label) = await contributionDecision(id, rules: rules, now: Date(), checksBranches: rules.contains { $0.isActive && $0.effect == .block })
-        return ItemEffects(effects: [String(id): effect], labels: label.map { [String(id): $0] } ?? [:])
+        let (_, effect, label, source) = await contributionDecision(id, rules: rules, now: Date(), checksBranches: rules.contains { $0.isActive && $0.effect == .block })
+        return ItemEffects(effects: [String(id): effect], labels: label.map { [String(id): $0] } ?? [:], inherited: source.map { [String(id): $0] } ?? [:])
     }
     private func scheduleItemSave() {
         loadCachesIfNeeded()
@@ -369,47 +375,49 @@ actor HNService {
         return (nil, "visible", nil)
     }
 
-    private func contributionDecision(_ id: Int, rules: [FilterRule], now: Date, checksBranches: Bool) async -> (Int, String, String?) {
+    /// (id, effect, label or unresolved reason, ancestor whose branch block this contribution inherits)
+    typealias Decision = (Int, String, String?, Int?)
+    private func contributionDecision(_ id: Int, rules: [FilterRule], now: Date, checksBranches: Bool) async -> Decision {
         let traceStart = Date()
         ReaderTrace.event("check.start", ["id": id])
         defer { ReaderTrace.event("check.end", ["id": id, "ms": Date().timeIntervalSince(traceStart)*1000]) }
         let item: HNItem
         do {
-            guard let fetched = try await self.item(id) else { return (id, "unresolved", "This contribution is no longer available from Hacker News.") }
+            guard let fetched = try await self.item(id) else { return (id, "unresolved", "This contribution is no longer available from Hacker News.", nil) }
             item = fetched
-        } catch { return (id, "unresolved", Self.failureDescription(error, subject: "this contribution")) }
-        if checksBranches && item.type == "comment" && item.parent == nil { return (id, "unresolved", "Hacker News omitted this comment’s parent; can’t check blocked ancestors.") }
+        } catch { return (id, "unresolved", Self.failureDescription(error, subject: "this contribution"), nil) }
+        if checksBranches && item.type == "comment" && item.parent == nil { return (id, "unresolved", "Hacker News omitted this comment’s parent; can’t check blocked ancestors.", nil) }
         let (rule, effect, issue) = await itemMatch(item, rules: rules, now: now)
         // A blocked item stays hidden itself; only explicit branch blocking affects descendants.
         if checksBranches {
             var cursor = item.parent
             var visited: Set<Int> = [id]
             while let parentID = cursor {
-                guard visited.count < 512, visited.insert(parentID).inserted else { return (id, "unresolved", "This comment’s ancestry is cyclic or too deep to verify.") }
+                guard visited.count < 512, visited.insert(parentID).inserted else { return (id, "unresolved", "This comment’s ancestry is cyclic or too deep to verify.", nil) }
                 ReaderTrace.event("check.ancestor", ["id": id, "parent": parentID])
                 let parent: HNItem
                 do {
-                    guard let fetched = try await self.ancestorItem(parentID, rules: rules) else { return (id, "unresolved", "A parent contribution is unavailable; can’t check blocked ancestors.") }
+                    guard let fetched = try await self.ancestorItem(parentID, rules: rules) else { return (id, "unresolved", "A parent contribution is unavailable; can’t check blocked ancestors.", nil) }
                     parent = fetched
-                } catch { return (id, "unresolved", Self.failureDescription(error, subject: "a parent contribution")) }
+                } catch { return (id, "unresolved", Self.failureDescription(error, subject: "a parent contribution"), nil) }
                 let (ancestorRule, ancestorEffect, ancestorIssue) = await itemMatch(parent, rules: rules, now: now)
                 if ancestorRule?.includesReplies == true {
-                    if ancestorEffect == "blocked" { return (id, "blocked", ancestorRule.map { $0.name + " · Blocked ancestor" }) }
-                    if ancestorEffect == "unresolved" { return (id, "unresolved", "Couldn’t verify a parent contribution. " + (ancestorIssue ?? "Its filter check failed.")) }
+                    if ancestorEffect == "blocked" { return (id, "blocked", ancestorRule.map { $0.name + " · Blocked ancestor" }, parentID) }
+                    if ancestorEffect == "unresolved" { return (id, "unresolved", "Couldn’t verify a parent contribution. " + (ancestorIssue ?? "Its filter check failed."), nil) }
                 }
-                if parent.type == "comment" && parent.parent == nil { return (id, "unresolved", "Hacker News omitted a parent comment’s ancestry; can’t check blocked ancestors.") }
+                if parent.type == "comment" && parent.parent == nil { return (id, "unresolved", "Hacker News omitted a parent comment’s ancestry; can’t check blocked ancestors.", nil) }
                 cursor = parent.parent
             }
         }
         return formattedDecision(item, rule: rule, effect: effect, issue: issue)
     }
 
-    private func domDecision(_ item: HNItem, rules: [FilterRule], now: Date) async -> (Int, String, String?) {
+    private func domDecision(_ item: HNItem, rules: [FilterRule], now: Date) async -> Decision {
         ReaderTrace.event("check.dom", ["id": item.id])
         let (rule, effect, issue) = await itemMatch(item, rules: rules, now: now)
         return formattedDecision(item, rule: rule, effect: effect, issue: issue)
     }
-    private func formattedDecision(_ item: HNItem, rule: FilterRule?, effect: String, issue: String?) -> (Int, String, String?) {
+    private func formattedDecision(_ item: HNItem, rule: FilterRule?, effect: String, issue: String?) -> Decision {
         let id = item.id
         let label = rule.map { rule in
             let name = rule.name.isEmpty ? "Unnamed filter" : rule.name
@@ -419,7 +427,7 @@ actor HNService {
         }
         // Keep a directly opened discussion available when only its post/comment is hidden.
         let result = effect == "blocked" && rule?.includesReplies == false ? "hidden-item" : effect
-        return (id, result, result == "unresolved" ? issue : label)
+        return (id, result, result == "unresolved" ? issue : label, nil)
     }
 
     func highlights(names: [String], filters: AccountFilters) async -> [String] {

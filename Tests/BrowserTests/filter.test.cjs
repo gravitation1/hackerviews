@@ -469,11 +469,12 @@ test('a discussion over 1000 comments requests every item and renders progressiv
   p.dom.window.close();
 });
 
-async function lazyPage(anchor) {
+async function lazyPage(anchor, {reveal = false} = {}) {
   const p=await page('<main id="hv-topic"><header id="hv-header" class="hv-header"></header><div id="hv-topic-root"></div></main>',{blocked:[],url:'https://news.ycombinator.com/item?id=1'});
   p.dom.window.Element.prototype.getClientRects=function(){return this.closest('[hidden]')?[]:[{}];};
   p.dom.window.Element.prototype.getBoundingClientRect=function(){return {top:0,bottom:100};};
   p.doc.body.dataset.hvTopic='1';
+  if(reveal)p.doc.body.dataset.hvReveal='1';
   if(anchor) {p.doc.body.dataset.hvAnchor=Buffer.from(JSON.stringify(anchor)).toString('base64');p.doc.body.dataset.hvScroll=String(anchor.y);}
   p.dom.window.HackerViews.retry();
   return p;
@@ -1336,5 +1337,126 @@ test('in a discussion the chip reveals blocked comments, loads their replies, an
   await new Promise(r => setTimeout(r, 5));
   assert.equal(p.doc.getElementById('2'), null, 'hidden again');
   assert.equal(chip().textContent, '1 hidden');
+  p.dom.window.close();
+});
+
+test('following an item link out of a revealed row asks the app to keep the destination revealed', async () => {
+  const feedRow = (id, author) => `<tr class="athing submission" id="${id}"><td><span class="titleline"><a href="https://example.com/${id}">Story ${id}</a></span></td></tr><tr><td class="subtext"><a class="hnuser" href="user?id=${author}">${author}</a> | <a href="item?id=${id}">${id} comments</a></td></tr><tr class="spacer"><td></td></tr>`;
+  const p = await page(hnHeader(signedIn) + `<table>${feedRow(1, 'bob')}${feedRow(2, 'erin')}</table>`, {blocked: []});
+  p.doc.addEventListener('click', event => event.preventDefault());
+  p.dom.window.HackerViews.setOrdered(true);
+  p.dom.window.HackerViews.resolve(p.messages.filter(m => m.kind === 'ancestors').at(-1).token, {1: 'blocked', 2: 'visible'}, {1: 'Newbies'});
+  const intents = () => p.messages.filter(m => m.kind === 'revealIntent').map(m => m.id);
+  const chip = () => p.doc.querySelector('.hv-header .hv-chip[aria-pressed]');
+  const follow = href => p.doc.querySelector(`a[href="${href}"]`).click();
+  follow('item?id=1');
+  assert.deepEqual(intents(), [], 'a hidden row carries nothing');
+  chip().click();
+  follow('item?id=1');
+  assert.deepEqual(intents(), [1], 'a link out of the revealed row carries its discussion');
+  follow('user?id=bob'); follow('item?id=2');
+  assert.deepEqual(intents(), [1], 'profile links and rows that were never hidden carry nothing');
+  chip().click();
+  follow('item?id=1');
+  assert.deepEqual(intents(), [1], 'hidden again, the row carries nothing');
+  p.dom.window.close();
+});
+
+test('a discussion opened from a revealed row starts revealed, and replies hidden only through it come along unlabelled', async () => {
+  const p = await lazyPage(undefined, {reveal: true}); const api = p.dom.window.HackerViews;
+  const text = () => p.doc.body.textContent;
+  const button = label => [...p.doc.querySelectorAll('button')].find(b => b.textContent === label);
+  const chip = () => p.doc.querySelector('#hv-header .hv-chip[aria-pressed]');
+  let request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  api.lazyResult(request.token, [{id: 1, effect: 'blocked', label: 'Newbies', item: {id: 1, type: 'story', by: 'newbie', title: 'Hidden title', kids: [2, 3]}}]);
+  await new Promise(r => setTimeout(r, 5));
+  assert.match(text(), /Hidden title/, 'the destination is shown without a second reveal');
+  assert.match(text(), /Temporarily revealed · Hidden by Newbies/);
+  assert.equal(button('Reveal this contribution'), undefined);
+  assert.ok(p.doc.querySelector('.fatitem').closest('[data-qhn-revealed]'), 'links out of the revealed destination carry the reveal');
+  request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  assert.deepEqual([...request.ids].sort(), [2, 3], 'its replies load');
+  api.lazyResult(request.token, [
+    {id: 2, effect: 'blocked', label: 'Newbies · Blocked ancestor', inheritedFrom: 1, item: {id: 2, type: 'comment', by: 'reader', parent: 1, text: 'Lifted reply', kids: [4]}},
+    {id: 3, effect: 'blocked', label: 'Trolls', item: {id: 3, type: 'comment', by: 'troll', parent: 1, text: 'Own block'}}]);
+  await new Promise(r => setTimeout(r, 5));
+  assert.match(text(), /Lifted reply/, 'a reply hidden only through the destination is shown');
+  assert.equal(p.doc.getElementById('2').querySelector('.qhn-reveal-label'), null, 'without a label');
+  assert.equal(p.doc.getElementById('2').classList.contains('qhn-revealed'), false, 'and without fading');
+  assert.ok(p.doc.getElementById('2').closest('[data-qhn-revealed]'), 'links out of it carry the reveal');
+  assert.equal(p.doc.getElementById('3'), null, 'a reply hidden by its own rule stays hidden');
+  assert.equal(chip().textContent, '1 hidden', 'the chip counts only what is hidden on its own account');
+  request = p.messages.filter(m => m.kind === 'lazyItems').find(m => m.ids.includes(4));
+  api.lazyResult(request.token, [{id: 4, effect: 'blocked', label: 'Newbies · Blocked ancestor', inheritedFrom: 1, item: {id: 4, type: 'comment', by: 'other', parent: 2, text: 'Nested lifted'}}]);
+  await new Promise(r => setTimeout(r, 5));
+  assert.match(text(), /Nested lifted/, 'nested replies are lifted too');
+  assert.equal(chip().textContent, '1 hidden');
+  chip().click(); await new Promise(r => setTimeout(r, 5));
+  assert.equal(chip().textContent, 'Showing 1 hidden');
+  assert.equal(p.doc.getElementById('3').querySelector('.qhn-reveal-label').textContent, 'Hidden by Trolls');
+  assert.equal(p.doc.getElementById('2').querySelector('.qhn-reveal-label'), null, 'lifted replies stay unlabelled under the chip');
+  chip().click(); await new Promise(r => setTimeout(r, 5));
+  assert.equal(p.doc.getElementById('3'), null);
+  button('Hide again').click(); await new Promise(r => setTimeout(r, 5));
+  assert.ok(button('Reveal this contribution'), 'the destination is hidden again');
+  assert.doesNotMatch(text(), /Hidden title/);
+  assert.ok(p.doc.getElementById('2').closest('[hidden]'), 'its replies go with it');
+  assert.equal(chip().textContent, '2 hidden');
+  button('Reveal this contribution').click(); await new Promise(r => setTimeout(r, 5));
+  assert.equal(p.doc.getElementById('2').closest('[hidden]'), null, 'revealing it brings the replies back');
+  assert.equal(chip().textContent, '1 hidden');
+  p.dom.window.close();
+});
+
+test('hiding the destination again also ends a chip reveal, so the control visibly hides it', async () => {
+  const p = await lazyPage(undefined, {reveal: true}); const api = p.dom.window.HackerViews;
+  const button = label => [...p.doc.querySelectorAll('button')].find(b => b.textContent === label);
+  const chip = () => p.doc.querySelector('#hv-header .hv-chip[aria-pressed]');
+  let request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  api.lazyResult(request.token, [{id: 1, effect: 'blocked', label: 'Newbies', item: {id: 1, type: 'story', by: 'newbie', title: 'Hidden title', kids: [3]}}]);
+  await new Promise(r => setTimeout(r, 5));
+  request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  api.lazyResult(request.token, [{id: 3, effect: 'blocked', label: 'Trolls', item: {id: 3, type: 'comment', by: 'troll', parent: 1, text: 'Own block'}}]);
+  await new Promise(r => setTimeout(r, 5));
+  chip().click(); await new Promise(r => setTimeout(r, 5));
+  assert.equal(chip().textContent, 'Showing 1 hidden');
+  button('Hide again').click(); await new Promise(r => setTimeout(r, 5));
+  assert.doesNotMatch(p.doc.body.textContent, /Hidden title/);
+  assert.equal(p.doc.getElementById('3'), null);
+  assert.equal(chip().textContent, '2 hidden');
+  assert.equal(chip().getAttribute('aria-pressed'), 'false');
+  p.dom.window.close();
+});
+
+test('revealing a comment hidden through an ancestor outside the page lifts replies hidden for the same reason', async () => {
+  const p = await lazyPage(); const api = p.dom.window.HackerViews;
+  const text = () => p.doc.body.textContent;
+  const chip = () => p.doc.querySelector('#hv-header .hv-chip[aria-pressed]');
+  let request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  api.lazyResult(request.token, [{id: 1, effect: 'blocked', label: 'Newbies · Blocked ancestor', inheritedFrom: 99, item: {id: 1, type: 'comment', by: 'reader', parent: 99, text: 'Subthread root', kids: [2]}}]);
+  await new Promise(r => setTimeout(r, 5));
+  assert.match(text(), /Hidden by Newbies · Blocked ancestor/);
+  assert.equal(chip().textContent, '1 hidden');
+  api.revealDestination(); await new Promise(r => setTimeout(r, 5));
+  assert.match(text(), /Subthread root/);
+  request = p.messages.filter(m => m.kind === 'lazyItems').find(m => m.ids.includes(2));
+  api.lazyResult(request.token, [{id: 2, effect: 'blocked', label: 'Newbies · Blocked ancestor', inheritedFrom: 99, item: {id: 2, type: 'comment', by: 'other', parent: 1, text: 'Same reason'}}]);
+  await new Promise(r => setTimeout(r, 5));
+  assert.match(text(), /Same reason/, 'the reply shares the root’s reason and follows it');
+  assert.equal(p.doc.getElementById('2').querySelector('.qhn-reveal-label'), null);
+  assert.equal(chip(), null, 'nothing is left hidden on its own account');
+  p.dom.window.close();
+});
+
+test('on an HTML page a revealed destination lifts replies blocked only through it', async () => {
+  const p = await page(`<table>${row(10,'alice')}${row(11,'bob',1)}${row(12,'carol',1)}</table>`, {blocked: [], url: 'https://news.ycombinator.com/item?id=10'});
+  const api = p.dom.window.HackerViews;
+  api.setOrdered(true);
+  api.revealDestination();
+  const request = p.messages.filter(m => m.kind === 'ancestors').at(-1);
+  api.resolve(request.token, {'10': 'blocked', '11': 'blocked', '12': 'blocked'}, {'10': 'Newbies', '11': 'Newbies · Blocked ancestor', '12': 'Trolls'}, {'11': 10});
+  assert.equal(hidden(p, 10), false);
+  assert.equal(hidden(p, 11), false, 'a reply blocked through the destination is lifted');
+  assert.equal(hidden(p, 12), true, 'a reply blocked by its own rule stays hidden');
   p.dom.window.close();
 });

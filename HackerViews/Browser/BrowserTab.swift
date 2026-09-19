@@ -52,6 +52,9 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
     private var readinessID = UUID()
     @Published var destinationHidden = false
     @Published var revealedDestination = false
+    /// A discussion the reader is about to open from a temporarily revealed
+    /// contribution. The topic shell opens it revealed instead of asking again.
+    private var pendingReveal: (id: Int, at: Date)?
     @Published var blockingReason = ""
     var savedReferences: [Citation] {
         guard let url = webView.url ?? url else { return [] }
@@ -60,6 +63,20 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
     func revealDestination() {
         revealedDestination = true
         webView.callAsyncJavaScript("window.HackerViews?.revealDestination()", arguments: [:], in: nil, in: Self.world, completionHandler: nil)
+    }
+    /// Takes the pending reveal for `id` from this tab and its history owner.
+    /// A reveal older than a few seconds belonged to a navigation that never
+    /// happened in this tab, such as a link opened in a new tab.
+    private func consumePendingReveal(for id: Int) -> Bool {
+        var matched = false
+        for tab in [self, historyOwner].compactMap({ $0 }) {
+            guard let pending = tab.pendingReveal else { continue }
+            let fresh = Date().timeIntervalSince(pending.at) < 10
+            // An intent for another discussion stays for the navigation it belongs to.
+            if pending.id == id || !fresh { tab.pendingReveal = nil }
+            if pending.id == id && fresh { matched = true }
+        }
+        return matched
     }
     func openInBrowser() {
         guard let url = webView.url ?? url else { return }
@@ -170,7 +187,7 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
         pendingFormSubmission = false
         recordNavigation(url)
         if Self.topicID(url) != nil { loadTopic(url) }
-        else { lazyURL = nil; webView.load(URLRequest(url: url)) }
+        else { lazyURL = nil; pendingReveal = nil; webView.load(URLRequest(url: url)) }
     }
     static func topicID(_ url: URL) -> Int? {
         guard isHN(url), url.path == "/item",
@@ -197,10 +214,11 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
         refreshAnchor = nil
         navigationSnapshot = nil
         state = .loading
+        let reveal = consumePendingReveal(for: id) ? " data-hv-reveal=\"1\"" : ""
         webView.loadHTMLString("""
         <!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>Hacker News</title>
         <link rel="stylesheet" href="https://news.ycombinator.com/news.css"></head>
-        <body data-hv-topic="\(id)" data-hv-scroll="\(y)" data-hv-anchor="\(anchorData)"><main id="hv-topic">
+        <body data-hv-topic="\(id)" data-hv-scroll="\(y)" data-hv-anchor="\(anchorData)"\(reveal)><main id="hv-topic">
         <header id="hv-header" class="hv-header"></header>
         <div id="hv-topic-root"></div></main></body></html>
         """, baseURL: target)
@@ -328,6 +346,7 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
                 self.onSessionChange?()
             }
             retainedPages[index] = page
+            page.pendingReveal = pendingReveal; pendingReveal = nil
             page.load(entry.url)
             if page.history.indices.contains(page.historyIndex) { page.history[page.historyIndex].collapsed = entry.collapsed }
         }
@@ -483,8 +502,8 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
                 guard let self else { return }
                 let result = await service.cachedDecisions(ids: ids, rules: policy.rules)
                 guard navigationID == epoch, store.archive.policy == policy else { return }
-                webView.callAsyncJavaScript("window.HackerViews?.localResult(token, effects, labels)",
-                    arguments: ["token": token, "effects": result.effects, "labels": result.labels],
+                webView.callAsyncJavaScript("window.HackerViews?.localResult(token, effects, labels, inherited)",
+                    arguments: ["token": token, "effects": result.effects, "labels": result.labels, "inherited": result.inherited],
                     in: nil, in: Self.world, completionHandler: nil)
             }
         case "lazyItems":
@@ -509,6 +528,7 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
                     for await (itemID, decisions) in group {
                         guard !Task.isCancelled, navigationID == epoch, store.archive.policy == policy else { group.cancelAll(); return }
                         var entry: [String: Any] = ["id": itemID, "effect": decisions.effects[String(itemID)] ?? "unresolved", "label": decisions.labels[String(itemID)] ?? ""]
+                        if let source = decisions.inherited[String(itemID)] { entry["inheritedFrom"] = source }
                         if decisions.effects[String(itemID)] == "unresolved" {
                             entry["reason"] = decisions.labels[String(itemID)] ?? "This contribution’s filter check could not finish."
                         } else if let item = try? await service.item(itemID), let data = try? JSONEncoder().encode(item), let object = try? JSONSerialization.jsonObject(with: data) {
@@ -531,6 +551,17 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
                 }
                 ReaderTrace.event("batch.deliver", ["tab": self.id.uuidString, "navigation": epoch.uuidString, "token": token])
             }
+        case "revealIntent":
+            // Following a link out of a temporarily revealed contribution keeps
+            // the destination revealed. The shell reads it when it loads; if the
+            // intent lands after the shell, `ready` applies it.
+            guard let id = body["id"] as? Int, id > 0 else { return }
+            let owner = historyOwner ?? self
+            owner.pendingReveal = (id, Date())
+            let current = owner.activePage ?? owner
+            if current.lazyURL.flatMap(Self.topicID) == id, current.state == .ready {
+                current.webView.callAsyncJavaScript("window.HackerViews?.revealDestination()", arguments: [:], in: nil, in: Self.world, completionHandler: nil)
+            }
         case "cancelLazy":
             lazyTasks.values.forEach { $0.cancel() }; lazyTasks.removeAll()
         case "collapsedState":
@@ -543,6 +574,9 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
         case "ready":
             destinationHidden = body["destinationHidden"] as? Bool ?? false
             timeout?.cancel()
+            if let topic = lazyURL.flatMap(Self.topicID), consumePendingReveal(for: topic) {
+                webView.callAsyncJavaScript("window.HackerViews?.revealDestination()", arguments: [:], in: nil, in: Self.world, completionHandler: nil)
+            }
             if let y = restoreScrollY {
                 if body["complete"] as? Bool == true {
                     restoreScrollY = nil
@@ -686,8 +720,8 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
                     await self?.showPartial(partial, token: token, epoch: epoch, policy: policy)
                 }
                 guard navigationID == epoch, store.archive.policy == policy else { return }
-                webView.callAsyncJavaScript("window.HackerViews?.resolve(token, decisions, labels)",
-                                            arguments: ["token": token, "decisions": decisions.effects, "labels": decisions.labels],
+                webView.callAsyncJavaScript("window.HackerViews?.resolve(token, decisions, labels, inherited)",
+                                            arguments: ["token": token, "decisions": decisions.effects, "labels": decisions.labels, "inherited": decisions.inherited],
                                             in: nil, in: Self.world, completionHandler: nil)
             }
         default: break
@@ -707,8 +741,8 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
 
     private func showPartial(_ result: HNService.ItemEffects, token: Int, epoch: UUID, policy: FilterPolicy) {
         guard navigationID == epoch, store.archive.policy == policy else { return }
-        webView.callAsyncJavaScript("window.HackerViews?.resolvePartial(token, decisions, labels)",
-            arguments: ["token": token, "decisions": result.effects, "labels": result.labels],
+        webView.callAsyncJavaScript("window.HackerViews?.resolvePartial(token, decisions, labels, inherited)",
+            arguments: ["token": token, "decisions": result.effects, "labels": result.labels, "inherited": result.inherited],
             in: nil, in: Self.world, completionHandler: nil)
     }
 

@@ -33,6 +33,19 @@
     });
   });
   document.addEventListener('visibilitychange',()=>{if(document.hidden)reportReadingPosition();});
+  // Opening a discussion from a temporarily revealed contribution should not ask
+  // the reader to reveal it again. The intent travels with the navigation.
+  function carryReveal(event) {
+    if (event.button === 2) return;
+    const link = event.target.closest?.('a[href]');
+    if (!link || !link.closest('[data-qhn-revealed]')) return;
+    let target; try { target = new URL(link.href, location.href); } catch (_) { return; }
+    if (target.hostname !== 'news.ycombinator.com' || target.pathname !== '/item') return;
+    const id = Number(target.searchParams.get('id'));
+    if (Number.isSafeInteger(id) && id > 0) post({kind: 'revealIntent', id});
+  }
+  document.addEventListener('click', carryReveal, true);
+  document.addEventListener('auxclick', carryReveal, true);
   let editedRow = null;
   let filterAnchor = null;
   function captureFilterAnchor() {
@@ -643,6 +656,7 @@
     const targets = revealTargets(row);
     for (const element of targets) {
       element.classList.toggle('qhn-revealed', revealed);
+      element.toggleAttribute('data-qhn-revealed', revealed);
       if (revealed) { element.removeAttribute('data-qhn-hidden'); hidden.delete(element); } else hide(element);
     }
     const author = (targets[1] || row).querySelector('.hnuser') || row.querySelector('.hnuser');
@@ -653,12 +667,12 @@
   function toggleRevealAll() {
     revealAll = !revealAll;
     if (lazyThread) {
-      for (const node of lazyNodes.values()) if (['blocked', 'hidden-item'].includes(node.entry?.effect)) lazyRender(node, node.entry);
-      lazyPump();
+      for (const node of lazyNodes.values()) if (filteredEffect(node.entry?.effect)) lazyRender(node, node.entry);
+      lazyHeaderStatus(); lazyPump();
     } else {
       for (const row of document.querySelectorAll('tr.athing.qhn-filtered')) setRevealed(row, revealAll);
+      renderHeader();
     }
-    renderHeader();
   }
   function setHeaderStatus(hidden, unresolved, retry) {
     headerModel.hidden = hidden; headerModel.unresolved = unresolved; headerModel.retry = retry;
@@ -1070,6 +1084,47 @@
     lazyObserver?.observe(sentinel);
     return group;
   }
+  const filteredEffect = effect => effect === 'blocked' || effect === 'hidden-item';
+  // The nearest loaded ancestor hidden for the same reason as this node: the
+  // contribution whose branch block it inherits, or another reply under it.
+  function inheritanceAnchor(node, entry = node.entry) {
+    if (entry?.effect !== 'blocked' || !entry.inheritedFrom) return null;
+    for (const id of [...node.ancestors].reverse()) {
+      const ancestor = lazyNodes.get(id);
+      if (ancestor?.entry && (ancestor.id === entry.inheritedFrom || ancestor.entry.inheritedFrom === entry.inheritedFrom)) return ancestor;
+    }
+    return null;
+  }
+  // Hidden on its own account. Replies hidden only because of a loaded
+  // ancestor are neither counted nor labelled: revealing that ancestor lifts them.
+  function lazyFiltered(node, entry = node.entry) {
+    return filteredEffect(entry?.effect) && node.id !== revealedID && !inheritanceAnchor(node, entry);
+  }
+  function lazyShown(node, entry = node.entry) {
+    if (!filteredEffect(entry?.effect)) return true;
+    if (node.id === revealedID || revealAll) return true;
+    const anchor = inheritanceAnchor(node, entry);
+    return !!anchor && lazyShown(anchor);
+  }
+  function lazyHeaderStatus() {
+    const nodes = [...lazyNodes.values()];
+    const hiddenNodes = nodes.filter(n => lazyFiltered(n)).length;
+    const unresolvedNodes = nodes.filter(n => n.entry?.effect === 'unresolved');
+    const unresolved = lazyActive() ? 0 : unresolvedNodes.length;
+    setHeaderStatus(hiddenNodes, unresolved, () => { localPaused = false; lazyRefreshQueue = unresolvedNodes; lazyPump(); });
+    return {hidden: hiddenNodes, unresolved};
+  }
+  // The discussion root's own reveal control. Its replies follow it.
+  function setRootRevealed(revealed) {
+    const id = Number(document.body.dataset.hvTopic);
+    revealedID = revealed ? id : null;
+    // Hiding the destination again ends the chip's reveal too; otherwise the
+    // root would stay on screen and the control would appear to do nothing.
+    if (!revealed && revealAll) { toggleRevealAll(); return; }
+    const root = lazyNodes.get(id);
+    if (root?.entry) lazyRender(root, root.entry);
+    lazyHeaderStatus(); lazyPump();
+  }
   function lazyAnnounce() {
     if (lazyRefreshQueue) return;
     if(lazyRestoreAnchor) {
@@ -1094,11 +1149,8 @@
       }
     }
     ready = true; document.documentElement.removeAttribute('data-qhn-pending');
-    const nodes=[...lazyNodes.values()];
-    const hiddenNodes=nodes.filter(n=>['blocked','hidden-item'].includes(n.entry?.effect)).length;
-    const unresolvedNodes=nodes.filter(n=>n.entry?.effect==='unresolved');
-    setHeaderStatus(hiddenNodes,lazyActive()?0:unresolvedNodes.length,()=>{localPaused=false;lazyRefreshQueue=unresolvedNodes;lazyPump();});
-    post({kind:'ready', complete:true, hidden:hiddenNodes, unresolved:lazyActive()?0:unresolvedNodes.length, title:document.title, destinationHidden:false});
+    const {hidden:hiddenNodes, unresolved}=lazyHeaderStatus();
+    post({kind:'ready', complete:true, hidden:hiddenNodes, unresolved, title:document.title, destinationHidden:false});
     rememberViewportAnchor();
   }
   function lazySchedule(group, count) {
@@ -1439,8 +1491,12 @@
     let own=node.host.querySelector(':scope > .hv-own');
     if (!own) { own=document.createElement('div'); own.className='hv-own'; node.host.prepend(own); }
     own.style.visibility=''; own.replaceChildren();
-    let effect=entry.effect, revealed=false;
-    if ((node.id===revealedID || revealAll) && ['blocked','hidden-item'].includes(effect)) { revealed=node.id!==revealedID; effect='visible'; }
+    let effect=entry.effect, revealed=false, shown=false;
+    if (filteredEffect(effect) && lazyShown(node, entry)) {
+      // Only what the header chip revealed carries a label; a revealed
+      // destination has its notice and a lifted reply follows its ancestor.
+      shown=true; revealed=revealAll && node.id!==revealedID && !inheritanceAnchor(node, entry); effect='visible';
+    }
     const root=node.id===Number(document.body.dataset.hvTopic);
     if (!item || effect==='unresolved') {
       lazyStatus(own,entry.reason || 'This contribution’s filter check could not finish.',()=>{ lazyStatus(own,'Retrying…'); localPaused=false; lazyRefreshQueue=[node]; lazyPump(); });
@@ -1451,7 +1507,7 @@
       if (root) {
         const text=document.createElement('p'); text.textContent='Hidden by '+(entry.label || 'your filters');
         const reveal=document.createElement('button'); reveal.textContent='Reveal this contribution';
-        reveal.onclick=()=>{revealedID=node.id;lazyRender(node,node.entry);lazyPump();}; own.append(text,reveal);
+        reveal.onclick=()=>setRootRevealed(true); own.append(text,reveal);
       }
       if (node.children) node.children.host.hidden=true;
       return;
@@ -1533,15 +1589,16 @@
     }
     if(effect!=='hidden-item') {
       own.prepend(table);paintOrdered(row,effect,item.type==='comment'?null:row.nextElementSibling,entry.label);
+      if(shown)table.setAttribute('data-qhn-revealed','');
       if(revealed){row.classList.add('qhn-revealed');revealLabel(heading,entry.label);}
-    } else if(root) { const reveal=document.createElement('button');reveal.textContent='Reveal this contribution';reveal.onclick=()=>{revealedID=node.id;lazyRender(node,node.entry);};own.prepend(reveal); }
+    } else if(root) { const reveal=document.createElement('button');reveal.textContent='Reveal this contribution';reveal.onclick=()=>setRootRevealed(true);own.prepend(reveal); }
     if(!node.children && item.kids?.length) {
       const host=document.createElement('div');host.className='hv-children';node.host.append(host);
       node.children=lazyGroup(host,item.kids,item.type==='comment'?node.depth+1:0,new Set([...node.ancestors,node.id]));
     }
     if(node.children) node.children.host.hidden=!!node.collapsed;
-    if(root && revealedID===node.id) { const notice=document.createElement('div');notice.className='qhn-loading';
-      notice.append('Temporarily revealed · '); const hide=document.createElement('button');hide.textContent='Hide again';hide.onclick=()=>{revealedID=null;lazyRender(node,node.entry);};notice.append(hide);own.prepend(notice); }
+    if(root && revealedID===node.id && filteredEffect(entry.effect)) { const notice=document.createElement('div');notice.className='qhn-loading';
+      notice.append('Temporarily revealed · Hidden by '+(entry.label || 'your filters')+' · '); const hide=document.createElement('button');hide.textContent='Hide again';hide.onclick=()=>setRootRevealed(false);notice.append(hide);own.prepend(notice); }
     addControls();paintOP();applyCanonicalMetadata(node);
   }
   const queuedResults = new Map();
@@ -1645,20 +1702,20 @@
       post({kind:'localRecheck',token,ids:[...new Set([pageID,...tree.rows.map(idOf),...tree.stories.map(idOf)].filter(Boolean))]});
     }
   }
-  function localResult(token,effects,labels) {
+  function localResult(token,effects,labels,inherited={}) {
     if(token!==localToken)return;
     if(!lazyThread) {
       for(const element of hidden)element.removeAttribute('data-qhn-hidden');
       hidden.clear();
       if(!accountFiltersActive)for(const story of pending?.tree.stories||[])paintOrdered(story,'visible',story.nextElementSibling,'');
-      finish(pending?.token,effects,false,labels);return;
+      finish(pending?.token,effects,false,labels,false,inherited);return;
     }
     localApplying=true;
     for(const node of lazyNodes.values()) {
       if(!node.entry || !effects[node.id])continue;
-      const effect=effects[node.id],label=labels[node.id]||'';
-      if(node.entry.effect===effect && (node.entry.label||'')===label)continue;
-      lazyRender(node,{...node.entry,effect,label,reason:effect==='unresolved'?label:undefined});
+      const effect=effects[node.id],label=labels[node.id]||'',inheritedFrom=inherited[node.id]||undefined;
+      if(node.entry.effect===effect && (node.entry.label||'')===label && node.entry.inheritedFrom===inheritedFrom)continue;
+      lazyRender(node,{...node.entry,effect,label,inheritedFrom,reason:effect==='unresolved'?label:undefined});
     }
     localApplying=false;
     showPausedComments();
@@ -1686,6 +1743,7 @@
   function startLazyThread() {
     if(lazyThread) { lazyRefresh();return; }
     lazyThread=true;lazyRestoreY=Number(document.body.dataset.hvScroll)||0;
+    if(document.body.dataset.hvReveal)revealedID=Number(document.body.dataset.hvTopic);
     try {
       const anchor=JSON.parse(atob(document.body.dataset.hvAnchor||''));
       for(const id of anchor.collapsed || [])if(Number.isSafeInteger(id) && id>0)lazyCollapsed.add(id);
@@ -1741,12 +1799,13 @@
     if(!pageID && ordered)finish(token, {}, false, {}, true);
   }
 
-  function finish(token, decisions, blockPage = false, labels = {}, partial = false) {
+  function finish(token, decisions, blockPage = false, labels = {}, partial = false, inherited = {}) {
     if (!pending || pending.token !== token) return;
     if (partial) {
       pending.decisions = Object.assign(pending.decisions || {}, decisions);
       pending.labels = Object.assign(pending.labels || {}, labels);
-      decisions = pending.decisions; labels = pending.labels;
+      pending.inherited = Object.assign(pending.inherited || {}, inherited);
+      decisions = pending.decisions; labels = pending.labels; inherited = pending.inherited;
     }
     if (partial && filterAnchor) return;
     const {tree, pageID} = pending;
@@ -1762,10 +1821,12 @@
         if (gap) decisions[id] = 'unresolved';
       }
     }
-    // Only the explicitly inspected destination is exempted. Descendants keep
-    // their original decisions, including blocks inherited from this item.
+    // Revealing the destination also lifts the replies hidden only because of
+    // it. Contributions hidden by their own rules keep their decisions.
     if (revealedID && revealedID === pageID && ['blocked', 'hidden-item'].includes(decisions[pageID])) {
+      const source = decisions[pageID] === 'blocked' ? (inherited[pageID] || pageID) : null;
       decisions = {...decisions, [pageID]: 'visible'};
+      if (source) for (const id of Object.keys(inherited)) if (inherited[id] === source && decisions[id] === 'blocked') decisions[id] = 'visible';
     }
     if (pageID && decisions[pageID] === 'blocked') blockPage = true;
     for (const row of tree.rows) {
@@ -1852,13 +1913,14 @@
       paintHighlights(matchedHighlights); paintOP();
     },
     revealDestination() {
+      if (lazyThread) { setRootRevealed(true); return; }
       revealedID = Number(new URL(location.href).searchParams.get('id'));
       process();
     },
     setFilters(names, active) { blocked = new Set(names); accountFiltersActive = !!active; process(); },
     setBlocked(names) { blocked = new Set(names); process(); },
-    resolvePartial(token, decisions, labels = {}) { finish(token, decisions, false, labels, true); },
-    resolve(token, decisions, labels = {}) { finish(token, decisions, false, labels); },
+    resolvePartial(token, decisions, labels = {}, inherited = {}) { finish(token, decisions, false, labels, true, inherited); },
+    resolve(token, decisions, labels = {}, inherited = {}) { finish(token, decisions, false, labels, false, inherited); },
     retry() { process(); }
   };
   const observer = new MutationObserver(mutations => {
