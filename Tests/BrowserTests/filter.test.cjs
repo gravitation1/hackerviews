@@ -1169,7 +1169,7 @@ test('the header shows hidden and unchecked counts and retry re-runs the page ch
   p.resolve({1: 'visible', 10: 'blocked', 11: 'unresolved', 12: 'visible'});
   const header = p.doc.querySelector('header.hv-header');
   const chips = [...header.querySelectorAll('.hv-chip')];
-  assert.deepEqual(chips.map(chip => chip.textContent), ['2 hidden', '1 unchecked · retry']);
+  assert.deepEqual(chips.map(chip => chip.textContent), ['1 hidden', '1 unchecked · retry'], 'unchecked rows are counted separately from filtered ones');
   assert.equal(chips[1].tagName, 'BUTTON');
   const before = p.messages.filter(m => m.kind === 'ancestors').length;
   chips[1].click();
@@ -1273,5 +1273,68 @@ test('pages without HN\'s header still get the shared header and a gutter', asyn
   assert.ok(p.doc.body.classList.contains('hv-plain'));
   assert.deepEqual([...header.querySelectorAll('.hv-nav a')].map(a => a.textContent), ['home','new','threads','past','comments','ask','show','jobs','submit']);
   assert.equal(header.querySelector('.hv-side a'), null, 'the login page does not advertise a login link');
+  p.dom.window.close();
+});
+
+test('the hidden chip temporarily reveals filtered rows in place with their reasons, and filter changes hide them again', async () => {
+  const p = await page(hnHeader(signedIn) + `<table>${row(10,'bob')}${row(11,'dave')}${row(12,'erin')}</table>`, {blocked: []});
+  p.dom.window.HackerViews.setOrdered(true);
+  p.dom.window.HackerViews.resolve(p.messages.filter(m => m.kind === 'ancestors').at(-1).token, {1: 'blocked', 10: 'blocked', 11: 'unresolved', 12: 'visible'}, {1: 'Blocked', 10: 'Blocked · Blocked ancestor'});
+  const header = p.doc.querySelector('header.hv-header');
+  const chip = () => header.querySelector('.hv-chip[aria-pressed]');
+  assert.equal(chip().textContent, '2 hidden');
+  assert.equal(chip().getAttribute('aria-pressed'), 'false');
+  assert.equal(hidden(p, 10), true);
+  chip().click();
+  assert.equal(chip().textContent, 'Showing 2 hidden');
+  assert.equal(chip().getAttribute('aria-pressed'), 'true');
+  assert.equal(hidden(p, 10), false, 'a blocked comment is revealed in place');
+  assert.ok(p.doc.getElementById('10').classList.contains('qhn-revealed'));
+  assert.equal(p.doc.getElementById('10').querySelector('.qhn-reveal-label').textContent, 'Hidden by Blocked · Blocked ancestor');
+  assert.equal(hidden(p, 1), false, 'a blocked story is revealed');
+  assert.equal(p.doc.getElementById('1').nextElementSibling.hasAttribute('data-qhn-hidden'), false, 'its metadata row comes back too');
+  assert.equal(p.doc.getElementById('1').nextElementSibling.querySelector('.qhn-reveal-label').textContent, 'Hidden by Blocked');
+  assert.equal(hidden(p, 11), true, 'unchecked rows stay hidden');
+  assert.equal(header.querySelector('.hv-sr').textContent, 'Showing 2 hidden contributions temporarily');
+  chip().click();
+  assert.equal(chip().textContent, '2 hidden');
+  assert.equal(hidden(p, 10), true);
+  assert.equal(p.doc.querySelector('.qhn-reveal-label'), null, 'labels are removed when hidden again');
+  chip().click();
+  assert.equal(hidden(p, 10), false);
+  p.dom.window.HackerViews.setOrdered(true);
+  p.dom.window.HackerViews.resolve(p.messages.filter(m => m.kind === 'ancestors').at(-1).token, {1: 'blocked', 10: 'blocked', 11: 'visible', 12: 'visible'});
+  assert.equal(hidden(p, 10), true, 'a filter change ends the temporary reveal');
+  assert.equal(chip().getAttribute('aria-pressed'), 'false');
+  p.dom.window.close();
+});
+
+test('in a discussion the chip reveals blocked comments, loads their replies, and hides them again', async () => {
+  const p = await lazyPage();
+  const api = p.dom.window.HackerViews;
+  let request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  api.lazyResult(request.token, [{id: 1, effect: 'visible', item: {id: 1, type: 'story', by: 'op', title: 'Story', kids: [2, 4]}}]);
+  await new Promise(r => setTimeout(r, 5));
+  request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  api.lazyResult(request.token, [{id: 2, effect: 'blocked', label: 'Blocked', item: {id: 2, type: 'comment', by: 'bob', parent: 1, text: 'Blocked text', kids: [3]}},
+    {id: 4, effect: 'visible', item: {id: 4, type: 'comment', by: 'erin', parent: 1, text: 'Fine'}}]);
+  await new Promise(r => setTimeout(r, 5));
+  assert.equal(p.doc.getElementById('2'), null, 'blocked comment renders nothing');
+  assert.doesNotMatch(p.doc.body.textContent, /Reveal this contribution/, 'a visible root shows no reveal button');
+  const requestsBefore = p.messages.filter(m => m.kind === 'lazyItems').length;
+  const chip = () => p.doc.querySelector('#hv-header .hv-chip[aria-pressed]');
+  assert.equal(chip().textContent, '1 hidden');
+  chip().click();
+  await new Promise(r => setTimeout(r, 5));
+  const row = p.doc.getElementById('2');
+  assert.ok(row && row.classList.contains('qhn-revealed'), 'blocked comment is rendered as revealed');
+  assert.match(row.textContent, /Blocked text/);
+  assert.equal(row.querySelector('.qhn-reveal-label').textContent, 'Hidden by Blocked');
+  assert.ok(p.messages.filter(m => m.kind === 'lazyItems').length > requestsBefore, 'its replies are requested');
+  assert.equal(chip().textContent, 'Showing 1 hidden');
+  chip().click();
+  await new Promise(r => setTimeout(r, 5));
+  assert.equal(p.doc.getElementById('2'), null, 'hidden again');
+  assert.equal(chip().textContent, '1 hidden');
   p.dom.window.close();
 });

@@ -10,6 +10,7 @@
   let ordered = !!window.__hackerViewsOrdered;
   if (ordered) { blocked = new Set(); preferred = new Set(); highlightActive = false; accountFiltersActive = !!window.__hackerViewsOrderedActive; }
   let revealedID = null;
+  let revealAll = false;
   let scrollReportPending = false;
   window.addEventListener('scroll', () => {
     if (!ready || scrollReportPending) return;
@@ -245,8 +246,15 @@
       border: 1px solid var(--qhn-line); border-radius: 999px; background: var(--qhn-panel); color: var(--qhn-muted); }
     .hv-header li > .hv-chip:last-child { margin-right: 11px; }
     .hv-chip svg { width: 12px; height: 12px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-    button.hv-chip { cursor: pointer; color: var(--qhn-accent); border-color: color-mix(in srgb, var(--qhn-accent) 45%, var(--qhn-line)); }
-    button.hv-chip:hover { background: var(--qhn-hover); }
+    button.hv-chip { cursor: pointer; }
+    button.hv-chip:hover { background: var(--qhn-hover); color: var(--qhn-text); }
+    button.hv-chip:focus-visible { outline: 2px solid var(--qhn-accent); outline-offset: 1px; }
+    .hv-chip-alert, .hv-chip[aria-pressed="true"] { color: var(--qhn-accent); border-color: color-mix(in srgb, var(--qhn-accent) 45%, var(--qhn-line)); }
+    .hv-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+    .qhn-revealed .commtext, .qhn-revealed .titleline, .qhn-revealed .toptext { opacity: .6; }
+    .comtr.qhn-revealed td.default { border-left-style: dashed; }
+    .qhn-reveal-label { display: inline-block; margin-left: 6px; padding: 1px 5px; font-size: 10px; line-height: 1.3; font-weight: 600;
+      color: var(--qhn-accent); border: 1px solid currentColor; border-radius: 4px; vertical-align: baseline; white-space: nowrap; }
     .hv-skeleton { display: inline-block; width: 92px; height: 12px; border-radius: 6px; background: var(--qhn-line); vertical-align: middle; margin-left: 4px; }
     a:link { color: var(--qhn-text); }
     a:visited { color: var(--qhn-muted); }
@@ -559,6 +567,7 @@
     const svg = document.createElementNS(ns, 'svg'); svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true');
     const path = document.createElementNS(ns, 'path');
     path.setAttribute('d', kind === 'retry' ? 'M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5'
+      : kind === 'shown' ? 'M2 12c1-3 5-7 10-7s9 4 10 7c-1 3-5 7-10 7S3 15 2 12zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z'
       : 'M3 3l18 18M10.6 10.6a2 2 0 0 0 2.8 2.8M9.9 5.1A10.4 10.4 0 0 1 12 5c5 0 9 4 10 7-.4 1.1-1.2 2.4-2.4 3.6M6.3 6.3C4.3 7.7 2.7 9.7 2 12c1 3 5 7 10 7 1.7 0 3.2-.4 4.5-1');
     svg.append(path); return svg;
   }
@@ -566,7 +575,7 @@
     const host = headerElement();
     if (!host) return;
     const model = headerModel;
-    const signature = JSON.stringify([location.pathname, model.links, model.identity, model.hidden, model.unresolved]);
+    const signature = JSON.stringify([location.pathname, model.links, model.identity, model.hidden, model.unresolved, revealAll]);
     if (signature === headerSignature && host.childElementCount) return;
     headerSignature = signature;
     const item = (label, url, options = {}) => {
@@ -585,12 +594,17 @@
     const side = document.createElement('ul'); side.className = 'hv-side';
     const plural = (n, noun) => n + ' ' + noun + (n === 1 ? '' : 's');
     if (model.hidden > 0) {
-      const li = document.createElement('li'); const chip = document.createElement('span'); chip.className = 'hv-chip';
-      chip.append(chipIcon('hidden'), document.createTextNode(model.hidden + ' hidden'));
-      chip.title = plural(model.hidden, 'contribution') + ' hidden by your filters'; li.append(chip); side.append(li);
+      const li = document.createElement('li'); const chip = document.createElement('button'); chip.type = 'button'; chip.className = 'hv-chip';
+      chip.setAttribute('aria-pressed', String(revealAll));
+      chip.append(chipIcon(revealAll ? 'shown' : 'hidden'), document.createTextNode((revealAll ? 'Showing ' : '') + model.hidden + ' hidden'));
+      chip.title = revealAll ? 'Hide the ' + plural(model.hidden, 'revealed contribution') + ' again'
+        : 'Temporarily show the ' + plural(model.hidden, 'contribution') + ' hidden by your filters';
+      chip.onclick = toggleRevealAll; li.append(chip); side.append(li);
+      const status = document.createElement('span'); status.className = 'hv-sr'; status.setAttribute('role', 'status');
+      status.textContent = revealAll ? 'Showing ' + plural(model.hidden, 'hidden contribution') + ' temporarily' : ''; li.append(status);
     }
     if (model.unresolved > 0) {
-      const li = document.createElement('li'); const chip = document.createElement('button'); chip.type = 'button'; chip.className = 'hv-chip';
+      const li = document.createElement('li'); const chip = document.createElement('button'); chip.type = 'button'; chip.className = 'hv-chip hv-chip-alert';
       chip.append(chipIcon('retry'), document.createTextNode(model.unresolved + ' unchecked · retry'));
       chip.title = plural(model.unresolved, 'contribution') + ' couldn’t be checked. Retry.';
       chip.onclick = () => model.retry?.(); li.append(chip); side.append(li);
@@ -610,6 +624,41 @@
       side.append(item('login', identity.loginURL || 'https://news.ycombinator.com/login?goto=news'));
     }
     host.replaceChildren(nav, side);
+  }
+  // A filtered row keeps the reason it was hidden so a temporary reveal can label it.
+  function markFiltered(row, reason) { row.classList.add('qhn-filtered'); row.dataset.qhnReason = reason || ''; }
+  function revealTargets(row) {
+    if (row.matches('.comtr') || !row.querySelector('.titleline')) return [row];
+    const metadata = row.nextElementSibling;
+    return [row, metadata, metadata?.nextElementSibling?.matches('.spacer') ? metadata.nextElementSibling : null].filter(Boolean);
+  }
+  function revealLabel(head, reason) {
+    if (!head) return;
+    let label = head.querySelector(':scope > .qhn-reveal-label');
+    if (!label) { label = document.createElement('span'); label.className = 'qhn-reveal-label'; head.append(label); }
+    label.textContent = 'Hidden by ' + (reason || 'your filters');
+    label.title = 'Temporarily revealed. Reload or use the header control to hide it again.';
+  }
+  function setRevealed(row, revealed) {
+    const targets = revealTargets(row);
+    for (const element of targets) {
+      element.classList.toggle('qhn-revealed', revealed);
+      if (revealed) { element.removeAttribute('data-qhn-hidden'); hidden.delete(element); } else hide(element);
+    }
+    const author = (targets[1] || row).querySelector('.hnuser') || row.querySelector('.hnuser');
+    const head = author?.closest('.comhead, .subtext') || author?.parentElement;
+    if (revealed) revealLabel(head, row.dataset.qhnReason);
+    else head?.querySelector(':scope > .qhn-reveal-label')?.remove();
+  }
+  function toggleRevealAll() {
+    revealAll = !revealAll;
+    if (lazyThread) {
+      for (const node of lazyNodes.values()) if (['blocked', 'hidden-item'].includes(node.entry?.effect)) lazyRender(node, node.entry);
+      lazyPump();
+    } else {
+      for (const row of document.querySelectorAll('tr.athing.qhn-filtered')) setRevealed(row, revealAll);
+    }
+    renderHeader();
   }
   function setHeaderStatus(hidden, unresolved, retry) {
     headerModel.hidden = hidden; headerModel.unresolved = unresolved; headerModel.retry = retry;
@@ -1390,8 +1439,8 @@
     let own=node.host.querySelector(':scope > .hv-own');
     if (!own) { own=document.createElement('div'); own.className='hv-own'; node.host.prepend(own); }
     own.style.visibility=''; own.replaceChildren();
-    let effect=entry.effect;
-    if (node.id===revealedID && ['blocked','hidden-item'].includes(effect)) effect='visible';
+    let effect=entry.effect, revealed=false;
+    if ((node.id===revealedID || revealAll) && ['blocked','hidden-item'].includes(effect)) { revealed=node.id!==revealedID; effect='visible'; }
     const root=node.id===Number(document.body.dataset.hvTopic);
     if (!item || effect==='unresolved') {
       lazyStatus(own,entry.reason || 'This contribution’s filter check could not finish.',()=>{ lazyStatus(own,'Retrying…'); localPaused=false; lazyRefreshQueue=[node]; lazyPump(); });
@@ -1482,8 +1531,10 @@
       const votes=document.createElement('td');votes.className='votelinks';votes.append(lazyVoteControl(item,'up'));row.prepend(votes);md.colSpan=2;
       const textCell=tbody.querySelector('.toptext');if(textCell)textCell.colSpan=2;if(item.type!=='job')own.append(actions);
     }
-    if(effect!=='hidden-item') { own.prepend(table);paintOrdered(row,effect,item.type==='comment'?null:row.nextElementSibling,entry.label); }
-    else if(root) { const reveal=document.createElement('button');reveal.textContent='Reveal this contribution';reveal.onclick=()=>{revealedID=node.id;lazyRender(node,node.entry);};own.prepend(reveal); }
+    if(effect!=='hidden-item') {
+      own.prepend(table);paintOrdered(row,effect,item.type==='comment'?null:row.nextElementSibling,entry.label);
+      if(revealed){row.classList.add('qhn-revealed');revealLabel(heading,entry.label);}
+    } else if(root) { const reveal=document.createElement('button');reveal.textContent='Reveal this contribution';reveal.onclick=()=>{revealedID=node.id;lazyRender(node,node.entry);};own.prepend(reveal); }
     if(!node.children && item.kids?.length) {
       const host=document.createElement('div');host.className='hv-children';node.host.append(host);
       node.children=lazyGroup(host,item.kids,item.type==='comment'?node.depth+1:0,new Set([...node.ancestors,node.id]));
@@ -1719,8 +1770,11 @@
     if (pageID && decisions[pageID] === 'blocked') blockPage = true;
     for (const row of tree.rows) {
       const state = decisions[accountFiltersActive ? idOf(row) : tree.rootFor.get(row)] || (accountFiltersActive ? 'unresolved' : undefined);
-      if (state === 'blocked' || state === 'hidden-item' || state === 'unresolved') hide(row);
-      else if (ordered) { row.removeAttribute('data-qhn-hidden'); hidden.delete(row); }
+      const filtered = state === 'blocked' || state === 'hidden-item';
+      row.classList.remove('qhn-filtered', 'qhn-revealed');
+      if (filtered) { markFiltered(row, labels[idOf(row)]); setRevealed(row, revealAll); }
+      else if (state === 'unresolved') hide(row);
+      else if (ordered) { row.removeAttribute('data-qhn-hidden'); hidden.delete(row); setRevealed(row, false); row.removeAttribute('data-qhn-hidden'); hidden.delete(row); }
       if (ordered) paintOrdered(row, state, null, labels[idOf(row)]);
     }
     if (accountFiltersActive) {
@@ -1737,14 +1791,15 @@
           continue;
         }
         const metadata = story.nextElementSibling;
-        hide(story); hide(metadata);
-        if (metadata?.nextElementSibling?.matches('.spacer')) hide(metadata.nextElementSibling);
+        story.classList.remove('qhn-filtered', 'qhn-revealed');
+        if (state === 'blocked' || state === 'hidden-item') { markFiltered(story, labels[idOf(story)]); setRevealed(story, revealAll); }
+        else { hide(story); hide(metadata); if (metadata?.nextElementSibling?.matches('.spacer')) hide(metadata.nextElementSibling); }
         if (story.closest('.fatitem') && state === 'blocked') blockPage = true;
       }
     }
     paintOP();
     const unresolvedCount = Object.values(decisions).filter(value => value === 'unresolved').length;
-    const hiddenContributions = [...tree.stories, ...tree.rows].filter(row => row.hasAttribute('data-qhn-hidden')).length;
+    const hiddenContributions = [...tree.stories, ...tree.rows].filter(row => row.classList.contains('qhn-filtered')).length;
     if (partial && pageID && !decisions[pageID]) return;
     checking = partial;
     if (!partial) pending = null;
@@ -1783,7 +1838,7 @@
     profileRecord, profileSaveStatus,
     resolveProfile,
     setOrdered(active, local = false) {
-      ordered = true; blocked = new Set(); preferred = new Set(); highlightActive = false;
+      ordered = true; blocked = new Set(); preferred = new Set(); highlightActive = false; revealAll = false;
       accountFiltersActive = !!active;
       if(local)localRecheck();else {captureFilterAnchor();process();}
     },
