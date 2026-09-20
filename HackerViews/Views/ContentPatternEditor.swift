@@ -17,7 +17,15 @@ struct ContentPatternEditor: View {
                 Text("Contains text").tag(ContentPattern.Mode.contains)
                 Text("Regular expression").tag(ContentPattern.Mode.regex)
             }
-            TextField("Pattern", text: $pattern.pattern).multilineTextAlignment(.leading)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Pattern").font(.caption).foregroundStyle(.secondary)
+                // Laid out like the filter name: a full-width box, text from the left.
+                TextField("Pattern", text: $pattern.pattern, prompt: Text(pattern.mode == .regex ? "Regular expression, e.g. (^|\\.)youtube\\.com$" : "Text to look for, e.g. youtube.com"))
+                    .labelsHidden().textFieldStyle(.plain).multilineTextAlignment(.leading).autocorrectionDisabled()
+                    .padding(8)
+                    .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.3)))
+            }
             Toggle("Ignore case", isOn: $pattern.ignoreCase)
             if let error = pattern.error { Text(error).foregroundStyle(.red) }
             DisclosureGroup("Test pattern") {

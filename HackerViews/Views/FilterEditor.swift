@@ -101,7 +101,7 @@ struct FilterEditor: View {
                             if useKarma {
                                 conditionHeader("Author’s karma") { useKarma = false }
                                 comparison("Comparison", binding: Binding(get: { rule.conditions.karmaHigher == true }, set: { rule.conditions.karmaHigher = $0 }), lower: "Below", higher: "At least")
-                                TextField("Karma", text: $karma)
+                                TextField("Karma", text: $karma, prompt: Text("e.g. 500")).textFieldStyle(.roundedBorder)
                             }
                             if useDate {
                                 conditionHeader("Author’s creation date") { useDate = false }
@@ -111,7 +111,7 @@ struct FilterEditor: View {
                             if useAge {
                                 conditionHeader("Author’s account age") { useAge = false }
                                 comparison("Comparison", binding: Binding(get: { rule.conditions.ageOlder == true }, set: { rule.conditions.ageOlder = $0 }), lower: "Younger than", higher: "At least")
-                                TextField("Days", text: $days)
+                                TextField("Days", text: $days, prompt: Text("e.g. 30")).textFieldStyle(.roundedBorder)
                             }
                         }
                     }

@@ -40,7 +40,7 @@ struct RecordEditor: View {
         NavigationStack {
             Form {
                 if savedUsername == nil {
-                    TextField("HN username", text: $username).autocorrectionDisabled()
+                    TextField("HN username", text: $username).textFieldStyle(.roundedBorder).autocorrectionDisabled()
                         #if os(iOS)
                         .textInputAutocapitalization(.never)
                         #endif
@@ -372,11 +372,11 @@ private struct CitationEditor: View {
         NavigationStack {
             Form {
                 Section("Source") {
-                    TextField("https://…", text: $url).autocorrectionDisabled()
+                    TextField("https://…", text: $url).textFieldStyle(.roundedBorder).autocorrectionDisabled()
                         #if os(iOS)
                         .textInputAutocapitalization(.never).keyboardType(.URL)
                         #endif
-                    TextField("Title or context", text: $context)
+                    TextField("Title or context", text: $context).textFieldStyle(.roundedBorder)
                 }
                 Section("Saved excerpt") { TextEditor(text: $excerpt).frame(minHeight: 90) }
                 Text("Optional: paste text you want to keep with this reference.").font(.caption).foregroundStyle(.secondary)
