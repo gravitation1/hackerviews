@@ -853,7 +853,8 @@ test('nested replies and story comments return to their containing topic',async(
   const p=await lazyPage();const api=p.dom.window.HackerViews;
   let request=p.messages.filter(m=>m.kind==='lazyItems').at(-1);
   api.lazyResult(request.token,[{id:1,effect:'visible',item:{id:1,type:'story',title:'Topic',kids:[2]}}]);
-  assert.equal(new URL(p.doc.querySelector('.reply a').href).searchParams.get('goto'),'item?id=1#1');
+  assert.ok(p.doc.querySelector('.hv-comment-toggle'),'the story comments inline rather than through HN\u2019s reply page');
+  assert.equal(p.doc.querySelector('.reply a'),null);
   await new Promise(r=>setTimeout(r,5));
   request=p.messages.filter(m=>m.kind==='lazyItems').at(-1);
   api.lazyResult(request.token,[{id:2,effect:'visible',item:{id:2,type:'comment',by:'reader',parent:1,text:'Reply target'}}]);
@@ -1458,5 +1459,61 @@ test('on an HTML page a revealed destination lifts replies blocked only through 
   assert.equal(hidden(p, 10), false);
   assert.equal(hidden(p, 11), false, 'a reply blocked through the destination is lifted');
   assert.equal(hidden(p, 12), true, 'a reply blocked by its own rule stays hidden');
+  p.dom.window.close();
+});
+
+const canonicalStory = form => `<table><tr class="athing" id="1"><td><span class="titleline"><a href="https://example.com">Topic</a></span></td></tr><tr><td class="subtext"><a href="hide?id=1">hide</a></td></tr></table>` +
+  (form ? `<form action="comment" method="post"><input type="hidden" name="parent" value="1"><input type="hidden" name="goto" value="item?id=1"><input type="hidden" name="hmac" value="secret"><textarea name="text"></textarea><input type="submit" value="add comment"></form>` : '');
+async function storyPage(canonical) {
+  const p = await lazyPage(); const api = p.dom.window.HackerViews;
+  p.dom.window.IntersectionObserver = class {constructor(callback) {this.callback = callback;} observe(target) {this.callback([{target, isIntersecting: true}]);} unobserve() {}};
+  p.dom.window.fetch = canonical;
+  const request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  api.lazyResult(request.token, [{id: 1, effect: 'visible', item: {id: 1, type: 'story', by: 'op', title: 'Topic', kids: []}}]);
+  await new Promise(r => setTimeout(r, 5));
+  return p;
+}
+
+test('the story root offers an inline comment box built from HN’s own form, posting through HN', async () => {
+  let release; const canonical = new Promise(r => { release = r; });
+  const p = await storyPage(async () => { await canonical; return {ok: true, text: async () => canonicalStory(true)}; });
+  const toggle = () => p.doc.querySelector('.hv-comment-toggle');
+  assert.ok(toggle(), 'the story has an Add a comment control');
+  assert.equal(p.doc.querySelector('a[href*="/reply?id="]'), null, 'no link to HN’s reply page, which rejects stories');
+  toggle().click();
+  assert.match(p.doc.querySelector('.hv-comment-host').textContent, /Loading the comment form/);
+  release(); await new Promise(r => setTimeout(r, 20));
+  const form = p.doc.querySelector('.hv-comment-form');
+  assert.ok(form, 'the form appears once HN’s HTML arrives');
+  assert.equal(form.method, 'post');
+  assert.equal(form.action, 'https://news.ycombinator.com/comment');
+  assert.deepEqual([...form.querySelectorAll('input[type=hidden]')].map(i => [i.name, i.value]), [['parent', '1'], ['goto', 'item?id=1'], ['hmac', 'secret']], 'HN’s hidden fields, token included, are carried over');
+  assert.ok(form.querySelector('textarea[name=text]'));
+  assert.equal(toggle().hidden, true, 'the control gives way to the box');
+  p.doc.querySelector('.hv-comment-cancel').click();
+  assert.equal(p.doc.querySelector('.hv-comment-host').hidden, true);
+  assert.equal(toggle().hidden, false);
+  p.dom.window.close();
+});
+
+test('when HN’s HTML has no comment form, the box explains and offers HN’s own page', async () => {
+  const p = await storyPage(async () => ({ok: true, text: async () => canonicalStory(false)}));
+  await new Promise(r => setTimeout(r, 20));
+  p.doc.querySelector('.hv-comment-toggle').click();
+  const note = p.doc.querySelector('.hv-comment-host .qhn-loading');
+  assert.match(note.textContent, /isn’t offering a comment form/);
+  [...note.querySelectorAll('button')].find(b => b.textContent === 'Open on Hacker News').click();
+  const message = p.messages.at(-1);
+  assert.equal(message.kind, 'canonical');
+  assert.equal(message.url, 'https://news.ycombinator.com/item?id=1');
+  p.dom.window.close();
+});
+
+test('when HN’s HTML cannot be fetched, the box says so instead of loading forever', async () => {
+  const p = await storyPage(async () => { throw new Error('offline'); });
+  await new Promise(r => setTimeout(r, 20));
+  p.doc.querySelector('.hv-comment-toggle').click();
+  assert.match(p.doc.querySelector('.hv-comment-host').textContent, /couldn’t be loaded/);
+  assert.ok([...p.doc.querySelectorAll('.hv-comment-host button')].some(b => b.textContent === 'Open on Hacker News'));
   p.dom.window.close();
 });

@@ -562,6 +562,14 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
             if current.lazyURL.flatMap(Self.topicID) == id, current.state == .ready {
                 current.webView.callAsyncJavaScript("window.HackerViews?.revealDestination()", arguments: [:], in: nil, in: Self.world, completionHandler: nil)
             }
+        case "canonical":
+            // The reader hands the discussion to HN's own page, such as when
+            // HN's HTML offers no comment form the reader can host.
+            guard let raw = body["url"] as? String, let target = URL(string: raw),
+                  let topic = Self.topicID(target), topic == lazyURL.flatMap(Self.topicID) else { return }
+            canonicalTopicURL = target
+            lazyURL = nil
+            webView.load(URLRequest(url: target))
         case "cancelLazy":
             lazyTasks.values.forEach { $0.cancel() }; lazyTasks.removeAll()
         case "collapsedState":

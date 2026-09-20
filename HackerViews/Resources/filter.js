@@ -305,9 +305,15 @@
     .comtr td.default > div:first-child { margin: 0 0 6px !important; }
     .comtr td.default > br { display: none; }
     .comhead a.hnuser { color: var(--qhn-text); font-size: 12px; font-weight: 600; }
-    .reply a, .reply a:any-link { display: inline-block; font-size: 11px; padding: 2px 9px; margin-top: 4px;
+    .reply a, .reply a:any-link, .reply button.hv-comment-toggle { display: inline-flex; align-items: center; font: inherit; font-size: 11px;
+      padding: 2px 9px; margin-top: 4px; background: transparent; cursor: pointer;
       border: 1px solid var(--qhn-line); border-radius: 5px; text-decoration: none; color: var(--qhn-muted); }
-    .reply a:hover { color: var(--qhn-accent); border-color: var(--qhn-accent); }
+    .reply a:hover, .reply button.hv-comment-toggle:hover { color: var(--qhn-accent); border-color: var(--qhn-accent); }
+    .hv-comment .qhn-composer { margin: 10px 0 4px; }
+    .hv-comment .qhn-composer p { display: flex; gap: 10px; align-items: center; }
+    .hv-comment .hv-comment-cancel, .hv-comment .qhn-loading button { font: inherit; font-size: 12px; min-height: 32px; padding: 4px 10px; cursor: pointer;
+      color: var(--qhn-text); background: var(--qhn-hover); border: 1px solid var(--qhn-line); border-radius: 5px; }
+    .hv-comment .qhn-loading { padding-left: 0; }
     .comment, .commtext, .toptext { color: var(--qhn-text); font-size: 14px; line-height: 1.6; }
     .commtext, .toptext { max-width: 88ch; overflow-wrap: anywhere; }
     /* HN's score classes (.c00 a:link, .c5a a:visited, etc.) otherwise
@@ -383,7 +389,7 @@
       font: 15px/15px -apple-system, sans-serif; padding: 3px 6px; min-width: 28px; min-height: 26px; box-sizing: border-box;
       vertical-align: middle; cursor: pointer; border-radius: 4px; }
     .qhn-record:hover, .qhn-record:focus-visible { background: var(--qhn-hover); color: var(--qhn-accent); }
-    #qhn-profile-record button, .qhn-profile-effect button, .qhn-note summary, .reply a {
+    #qhn-profile-record button, .qhn-profile-effect button, .qhn-note summary, .reply a, .reply button.hv-comment-toggle {
       min-height: 32px; min-width: 32px; box-sizing: border-box;
     }
     .qhn-note summary { padding: 6px 8px; border-radius: 5px; cursor: pointer; }
@@ -392,12 +398,12 @@
     }
     .qhn-record:focus-visible { outline: 2px solid var(--qhn-accent); outline-offset: 1px; }
     .qhn-record:active, #qhn-profile-record button:active, .qhn-profile-effect button:active,
-    .qhn-note summary:active, .reply a:active {
+    .qhn-note summary:active, .reply a:active, .reply button.hv-comment-toggle:active {
       background: color-mix(in srgb, var(--qhn-accent) 22%, var(--qhn-bg));
     }
     .qhn-note summary:focus-visible { outline: 2px solid var(--qhn-accent); outline-offset: 2px; }
     @media (pointer: coarse) {
-      .qhn-record, #qhn-profile-record button, .qhn-profile-effect button, .qhn-note summary, .reply a {
+      .qhn-record, #qhn-profile-record button, .qhn-profile-effect button, .qhn-note summary, .reply a, .reply button.hv-comment-toggle {
         min-width: 44px !important; min-height: 44px !important;
       }
     }
@@ -1246,6 +1252,64 @@
     } finally {post({kind:'networkRelease',token});}
   }
   const canonicalItems = new Map();
+  // HN's own comment form for this discussion, taken from its authenticated
+  // HTML: the hidden fields carry the token HN requires, so the reader can
+  // offer the box inline and post through HN like the real page does.
+  let canonicalCommentForm = null, canonicalCommentState = 'pending', commentControl = null;
+  function rememberCommentForm(doc, target) {
+    if (canonicalCommentState !== 'pending' || new URL(target).searchParams.get('id') !== document.body.dataset.hvTopic) return;
+    const topic = document.body.dataset.hvTopic;
+    const form = [...doc.querySelectorAll('form[action]')].find(candidate => {
+      let action; try { action = new URL(candidate.getAttribute('action'), target); } catch (_) { return false; }
+      return action.origin === location.origin && action.pathname === '/comment' && candidate.querySelector('input[type="hidden"][name="parent"]')?.value === topic;
+    });
+    const fields = form ? [...form.querySelectorAll('input[type="hidden"][name]')].map(input => ({name: input.name, value: input.value})) : [];
+    canonicalCommentForm = form ? {fields} : null;
+    canonicalCommentState = form ? 'ready' : 'none';
+    renderCommentBox();
+  }
+  function commentBox() {
+    const box = document.createElement('div'); box.className = 'reply hv-comment';
+    const toggle = document.createElement('button'); toggle.type = 'button'; toggle.className = 'hv-comment-toggle';
+    toggle.textContent = 'Add a comment'; toggle.setAttribute('aria-expanded', 'false');
+    const host = document.createElement('div'); host.className = 'hv-comment-host'; host.hidden = true;
+    commentControl = {toggle, host};
+    toggle.onclick = () => setCommentBoxOpen(true);
+    box.append(toggle, host); return box;
+  }
+  function setCommentBoxOpen(open) {
+    if (!commentControl) return;
+    const {toggle, host} = commentControl;
+    host.hidden = !open; toggle.hidden = open; toggle.setAttribute('aria-expanded', String(open));
+    if (open) { renderCommentBox(); host.querySelector('textarea')?.focus(); } else toggle.focus();
+  }
+  function renderCommentBox() {
+    const host = commentControl?.host;
+    if (!host || host.hidden) return;
+    host.replaceChildren();
+    if (canonicalCommentState === 'ready') {
+      const form = document.createElement('form'); form.className = 'qhn-composer hv-comment-form'; form.method = 'post';
+      form.action = new URL('/comment', 'https://news.ycombinator.com/').href;
+      for (const field of canonicalCommentForm.fields) {
+        const input = document.createElement('input'); input.type = 'hidden'; input.name = field.name; input.value = field.value; form.append(input);
+      }
+      const text = document.createElement('textarea'); text.name = 'text'; text.rows = 6; text.required = true; text.setAttribute('aria-label', 'Comment');
+      const actions = document.createElement('p');
+      const submit = document.createElement('input'); submit.type = 'submit'; submit.value = 'add comment';
+      const cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'hv-comment-cancel'; cancel.textContent = 'Cancel';
+      cancel.onclick = () => setCommentBoxOpen(false);
+      actions.append(submit, cancel); form.append(text, actions); host.append(form);
+      return;
+    }
+    const note = document.createElement('div'); note.className = 'qhn-loading';
+    if (canonicalCommentState === 'pending') { note.textContent = 'Loading the comment form…'; host.append(note); return; }
+    note.append(canonicalCommentState === 'none' ? 'Hacker News isn’t offering a comment form for this story.' : 'The comment form couldn’t be loaded.');
+    const open = document.createElement('button'); open.type = 'button'; open.textContent = 'Open on Hacker News';
+    open.onclick = () => post({kind: 'canonical', url: new URL('/item?id=' + document.body.dataset.hvTopic, 'https://news.ycombinator.com/').href});
+    const cancel = document.createElement('button'); cancel.type = 'button'; cancel.className = 'hv-comment-cancel'; cancel.textContent = 'Cancel';
+    cancel.onclick = () => setCommentBoxOpen(false);
+    note.append(open, cancel); host.append(note);
+  }
   function relativeTime(seconds) {
     const age=Math.max(0,Math.floor(Date.now()/1000-seconds));
     for(const [unit,size] of [['year',31536000],['month',2592000],['day',86400],['hour',3600],['minute',60]]) {
@@ -1383,7 +1447,7 @@
         const parsed=readHeader(doc,target);
         if(parsed){if(parsed.links.length)headerModel.links=parsed.links;headerModel.identity=parsed.identity;renderHeader();}
       }
-      rememberCanonicalItems(doc,target);
+      rememberCanonicalItems(doc,target);rememberCommentForm(doc,target);
       for(const row of doc.querySelectorAll('tr.athing[id]')) {
         const id=Number(row.id);if(!Number.isSafeInteger(id))continue;
         const actions=readVoteActions(doc,row,target);
@@ -1396,6 +1460,7 @@
     } catch (_) {
       // Unknown eligibility stays hidden. A later viewport entry can retry.
       if(headerModel.identity.state==='pending'){headerModel.identity={state:'unknown'};renderHeader();}
+      if(canonicalCommentState==='pending'){canonicalCommentState='failed';renderCommentBox();}
       return;
     } finally {voteFetching=false;trace('votes.end',{ms:performance.now()-voteStarted});}
     void loadVoteActions();
@@ -1583,9 +1648,9 @@
       const link=hnLink('',target.href);link.append(safeBody(item.title || 'Discussion'));title.append(link);if(target.hostname!=='news.ycombinator.com'){const domain=document.createElement('span');domain.className='sitebit comhead';domain.append(' (',hnLink(target.hostname.replace(/^www\./,''),'/from?site='+encodeURIComponent(target.hostname)),')');title.append(domain);}cell.append(title);row.append(cell);tbody.append(row);
       const meta=document.createElement('tr');const md=document.createElement('td');md.className='subtext';if(item.by)md.append((item.score ?? 0)+' points by ',heading,' | '+(item.descendants ?? 0)+' comments');else if(item.time)md.append(relativeTime(item.time));meta.append(md);tbody.append(meta);
       if(item.text){const textRow=document.createElement('tr');const text=document.createElement('td');text.className='toptext';text.append(safeBody(item.text));textRow.append(text);tbody.append(textRow);}
-      const actions=document.createElement('div');actions.className='reply';actions.append(hnLink('Add a comment','/reply?id='+item.id+'&goto='+encodeURIComponent('item?id='+document.body.dataset.hvTopic+'#'+item.id)));
       const votes=document.createElement('td');votes.className='votelinks';votes.append(lazyVoteControl(item,'up'));row.prepend(votes);md.colSpan=2;
-      const textCell=tbody.querySelector('.toptext');if(textCell)textCell.colSpan=2;if(item.type!=='job')own.append(actions);
+      const textCell=tbody.querySelector('.toptext');if(textCell)textCell.colSpan=2;
+      if(item.type!=='job' && root && effect!=='hidden-item')own.append(commentBox());
     }
     if(effect!=='hidden-item') {
       own.prepend(table);paintOrdered(row,effect,item.type==='comment'?null:row.nextElementSibling,entry.label);
