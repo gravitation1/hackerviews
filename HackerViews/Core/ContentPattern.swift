@@ -5,21 +5,50 @@ public struct ContentPattern: Codable, Equatable, Sendable {
     public enum Mode: String, Codable, CaseIterable, Sendable { case contains, regex }
     public var field: Field = .body
     public var mode: Mode = .contains
+    /// The first pattern. Further ones live in `alternates`; a contribution
+    /// matches when any pattern does. Kept as one field so saved filters from
+    /// before alternates existed still decode.
     public var pattern = ""
+    public var alternates: [String] = []
     public var ignoreCase = true
     public init() {}
+    private enum CodingKeys: String, CodingKey { case field, mode, pattern, alternates, ignoreCase }
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        field = try container.decodeIfPresent(Field.self, forKey: .field) ?? .body
+        mode = try container.decodeIfPresent(Mode.self, forKey: .mode) ?? .contains
+        pattern = try container.decodeIfPresent(String.self, forKey: .pattern) ?? ""
+        alternates = try container.decodeIfPresent([String].self, forKey: .alternates) ?? []
+        ignoreCase = try container.decodeIfPresent(Bool.self, forKey: .ignoreCase) ?? true
+    }
+    /// Every entry as edited, the first included, so a list control can bind to it.
+    public var patterns: [String] {
+        get { [pattern] + alternates }
+        set { pattern = newValue.first ?? ""; alternates = Array(newValue.dropFirst()) }
+    }
+    /// The entries that take part in matching.
+    public var activePatterns: [String] { patterns.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty } }
+    /// How the patterns read in labels and summaries.
+    public var summary: String {
+        let active = activePatterns
+        return active.count <= 1 ? (active.first ?? "") : active.map { "“" + $0 + "”" }.joined(separator: ", ")
+    }
     public var error: String? {
-        if pattern.isEmpty { return "Enter a pattern." }
-        if pattern.utf8.count > 2000 { return "Limit patterns to 2,000 bytes." }
-        if mode == .regex {
-            do { _ = try NSRegularExpression(pattern: pattern) }
-            catch { return "Invalid regular expression: \(error.localizedDescription)" }
+        let active = activePatterns
+        if active.isEmpty { return patterns.count > 1 ? "Enter at least one pattern." : "Enter a pattern." }
+        for (index, entry) in active.enumerated() {
+            let name = active.count > 1 ? "Pattern \(index + 1)" : "The pattern"
+            if entry.utf8.count > 2000 { return name + " is over 2,000 bytes." }
+            if mode == .regex {
+                do { _ = try NSRegularExpression(pattern: entry) }
+                catch { return name + " is not a valid regular expression: \(error.localizedDescription)" }
+            }
         }
         return nil
     }
     public func test(_ text: String) -> (decision: BranchDecision, range: NSRange?) {
         guard error == nil, text.utf16.count <= 200_000 else { return (.unresolved, nil) }
-        let expression = mode == .contains ? NSRegularExpression.escapedPattern(for: pattern) : pattern
+        let expression = activePatterns.map { mode == .contains ? NSRegularExpression.escapedPattern(for: $0) : "(?:" + $0 + ")" }.joined(separator: "|")
         guard let regex = try? NSRegularExpression(pattern: expression, options: ignoreCase ? [.caseInsensitive] : []) else { return (.unresolved, nil) }
         let deadline = Date().addingTimeInterval(0.025)
         var found: NSRange?

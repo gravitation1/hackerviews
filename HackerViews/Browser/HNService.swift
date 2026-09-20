@@ -422,7 +422,7 @@ actor HNService {
         let label = rule.map { rule in
             let name = rule.name.isEmpty ? "Unnamed filter" : rule.name
             if rule.itemIDs?.contains(id) == true { return name + " · Assigned directly" }
-            if let content = rule.content { return name + " · " + content.field.rawValue + ": " + content.pattern }
+            if let content = rule.content { return name + " · " + content.field.rawValue + ": " + content.summary }
             return rule.contributionLabel(for: item.by ?? "") ?? name
         }
         // Keep a directly opened discussion available when only its post/comment is hidden.

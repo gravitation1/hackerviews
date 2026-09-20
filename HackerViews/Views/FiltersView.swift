@@ -318,7 +318,7 @@ extension FilterRule {
         var groups: [String] = []
         if !assignedUsers.isEmpty { groups.append("\(assignedUsers.count) assigned users") }
         if !predicate.isEmpty { groups.append("(" + predicate + ")") }
-        if let content { groups.append(content.field.rawValue + " " + content.mode.rawValue + " “" + content.pattern + "”") }
+        if let content { groups.append(content.field.rawValue + " " + content.mode.rawValue + " " + (content.activePatterns.count > 1 ? content.summary : "“" + content.summary + "”")) }
         var result = groups.joined(separator: combine == .all ? " AND " : " OR ")
         if !(itemIDs ?? []).isEmpty { result = "\((itemIDs ?? []).count) direct items" + (result.isEmpty ? "" : "; " + result) }
         if result.isEmpty { result = "No users, items, or conditions" }

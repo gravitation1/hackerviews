@@ -18,13 +18,23 @@ struct ContentPatternEditor: View {
                 Text("Regular expression").tag(ContentPattern.Mode.regex)
             }
             VStack(alignment: .leading, spacing: 8) {
-                Text("Pattern").font(.caption).foregroundStyle(.secondary)
-                // Laid out like the filter name: a full-width box, text from the left.
-                TextField("Pattern", text: $pattern.pattern, prompt: Text(pattern.mode == .regex ? "Regular expression, e.g. (^|\\.)youtube\\.com$" : "Text to look for, e.g. youtube.com"))
-                    .labelsHidden().textFieldStyle(.plain).multilineTextAlignment(.leading).autocorrectionDisabled()
-                    .padding(8)
-                    .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
-                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.3)))
+                Text(pattern.patterns.count > 1 ? "Patterns · a post matches any of these" : "Pattern").font(.caption).foregroundStyle(.secondary)
+                // One box per pattern, laid out like the filter name: full width, text from the left.
+                ForEach(Array(pattern.patterns.indices), id: \.self) { index in
+                    HStack(spacing: 8) {
+                        TextField("Pattern \(index + 1)", text: entry(index), prompt: Text(pattern.mode == .regex ? "Regular expression, e.g. (^|\\.)youtube\\.com$" : "Text to look for, e.g. youtube.com"))
+                            .labelsHidden().textFieldStyle(.plain).multilineTextAlignment(.leading).autocorrectionDisabled()
+                            .padding(8)
+                            .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
+                            .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.3)))
+                        if pattern.patterns.count > 1 {
+                            Button { pattern.patterns.remove(at: index) } label: { Image(systemName: "minus.circle") }
+                                .buttonStyle(ControlSurfaceStyle()).accessibilityLabel("Remove pattern \(index + 1)")
+                        }
+                    }
+                }
+                Button { pattern.patterns.append("") } label: { Label("Add another pattern", systemImage: "plus") }
+                    .buttonStyle(.borderless)
             }
             Toggle("Ignore case", isOn: $pattern.ignoreCase)
             if let error = pattern.error { Text(error).foregroundStyle(.red) }
@@ -39,7 +49,7 @@ struct ContentPatternEditor: View {
                 }
             }
         }
-        .task(id: pattern.pattern + pattern.mode.rawValue + String(pattern.ignoreCase) + sample) {
+        .task(id: pattern.patterns.joined(separator: "\u{1F}") + pattern.mode.rawValue + String(pattern.ignoreCase) + sample) {
             let input = sample, current = pattern
             let tested = await Task.detached { current.test(input) }.value
             guard !Task.isCancelled else { return }
@@ -52,5 +62,9 @@ struct ContentPatternEditor: View {
             }
             marked = styled
         }
+    }
+    private func entry(_ index: Int) -> Binding<String> {
+        Binding(get: { pattern.patterns.indices.contains(index) ? pattern.patterns[index] : "" },
+                set: { value in var all = pattern.patterns; if all.indices.contains(index) { all[index] = value; pattern.patterns = all } })
     }
 }

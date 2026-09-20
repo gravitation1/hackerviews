@@ -250,7 +250,9 @@ struct FilterEditor: View {
         }
         if let content = rule.content {
             let field = content.field == .body ? "body text" : "post " + content.field.rawValue
-            clauses.append("the " + field + (content.mode == .regex ? " matches the pattern “" : " contains “") + content.pattern + "”")
+            let several = content.activePatterns.count > 1
+            let joined = several ? "any of " + content.summary : "“" + content.summary + "”"
+            clauses.append("the " + field + (content.mode == .regex ? (several ? " matches " : " matches the pattern ") : " contains ") + joined)
         }
         guard !clauses.isEmpty else { return "Add a condition to match automatically, or assign individual contributions below." }
         let action: String
