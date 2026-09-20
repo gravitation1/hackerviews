@@ -1546,6 +1546,7 @@ test('the story line reads like HN’s with the score in the gutter, and a vote 
   assert.equal(subtext.querySelector('.qhn-record:not(.qhn-record-text)'), null, 'the story author gets the note action, not the ellipsis');
   assert.equal(subtext.querySelector('.qhn-record-text').textContent, 'note');
   assert.equal(p.doc.querySelector('.hv-visit').hidden, true, 'no visit line on a first visit');
+  assert.deepEqual(p.messages.filter(m => m.kind === 'visitCount').map(m => [m.id, m.count]), [[1, 7]], 'HN’s live count is reported for the visit record');
   const arrow = p.doc.querySelector('.fatitem .hv-vote');
   arrow.click();
   await new Promise(r => setTimeout(r, 10));
@@ -1556,7 +1557,7 @@ test('the story line reads like HN’s with the score in the gutter, and a vote 
   p.dom.window.close();
 });
 
-test('a revisited discussion says what is new, marks new comments, counts them on collapsed branches, and steps through them', async () => {
+test('a revisited discussion counts new comments as they load, marks them, counts them on collapsed branches, and steps through them', async () => {
   const viewedAt = 1700000000;
   const p = await lazyPage(undefined, {visit: {viewedAt, leftAt: viewedAt + 600, descendants: 3, anchor: {id: 2, top: 10, y: 400, ancestors: [1]}}});
   const api = p.dom.window.HackerViews;
@@ -1566,11 +1567,13 @@ test('a revisited discussion says what is new, marks new comments, counts them o
   api.lazyResult(request.token, [{id: 1, effect: 'visible', item: {id: 1, type: 'story', by: 'op', title: 'Topic', descendants: 5, score: 12, kids: [2, 3]}}]);
   await new Promise(r => setTimeout(r, 5));
   const line = () => p.doc.querySelector('.hv-visit');
+  const text = () => line().querySelector('.hv-visit-text').textContent;
   assert.equal(line().hidden, false);
-  assert.equal(line().querySelector('.hv-visit-text').textContent, '2 new comments since your last visit', 'the count comes from the comment total before any reply loads');
-  assert.ok(line().querySelector('.hv-visit-text').classList.contains('hv-visit-new'));
-  assert.ok(line().querySelector('.hv-next-new'));
+  assert.equal(text(), 'Looking for new comments since your last visit', 'no promise before comments load');
+  assert.equal(line().querySelector('.hv-visit-new'), null);
   assert.ok(line().querySelector('.hv-resume'));
+  line().querySelector('.hv-next-new').click();
+  assert.equal(line().querySelector('.hv-next-new').textContent, 'Loading…', 'asking for the next new one before any is loaded waits');
   request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
   api.lazyResult(request.token, [
     {id: 2, effect: 'visible', item: {id: 2, type: 'comment', by: 'old', parent: 1, time: viewedAt - 100, text: 'Seen before', kids: [4]}},
@@ -1579,20 +1582,25 @@ test('a revisited discussion says what is new, marks new comments, counts them o
   assert.equal(p.doc.getElementById('2').classList.contains('hv-new'), false, 'a comment from before the last view is not new');
   assert.ok(p.doc.getElementById('3').classList.contains('hv-new'));
   assert.ok(p.doc.getElementById('3').querySelector('.comhead .hv-new-dot'), 'a new comment carries one dot before its author');
+  assert.equal(scrolled.at(-1), '3', 'the waiting jump lands on the first new comment to arrive');
+  assert.equal(text(), '1 new comment since your last visit');
+  assert.ok(line().querySelector('.hv-visit-new'));
+  assert.ok(line().querySelector('.hv-visit-loading'), 'the count says it is still loading while replies remain');
+  assert.equal(line().querySelector('.hv-next-new').textContent, 'Next new');
   request = p.messages.filter(m => m.kind === 'lazyItems').find(m => m.ids.includes(4));
   api.lazyResult(request.token, [{id: 4, effect: 'visible', item: {id: 4, type: 'comment', by: 'fresh', parent: 2, time: viewedAt + 200, text: 'Nested new'}}]);
   await new Promise(r => setTimeout(r, 5));
+  assert.equal(text(), '2 new comments since your last visit');
+  assert.equal(line().querySelector('.hv-visit-loading'), null, 'complete once every comment is loaded');
   const toggle = p.doc.getElementById('2').querySelector('.hv-collapse');
-  assert.equal(toggle.textContent, '[-]');
   toggle.click();
   assert.equal(toggle.textContent, '[+] 1 new', 'a collapsed branch says how many new replies it holds');
   assert.equal(toggle.getAttribute('aria-label'), 'Expand thread, 1 new comment');
-  toggle.click();
-  assert.equal(toggle.textContent, '[-]');
   line().querySelector('.hv-next-new').click();
-  assert.equal(scrolled.at(-1), '4', 'next new goes to the first new comment in thread order');
+  assert.equal(scrolled.at(-1), '4', 'next new goes to the first new comment in thread order, opening its collapsed branch');
+  assert.equal(toggle.textContent, '[-]');
   p.doc.dispatchEvent(new p.dom.window.KeyboardEvent('keydown', {key: 'n', bubbles: true}));
-  assert.equal(scrolled.length, 2, 'the N key does the same');
+  assert.equal(scrolled.length, 3, 'the N key does the same');
   line().querySelector('.hv-resume').click();
   assert.equal(jumps.length, 1, 'jumping to where you left off scrolls to the saved comment');
   p.dom.window.close();

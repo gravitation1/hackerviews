@@ -216,6 +216,7 @@
     .hv-reader-actions button:hover, .qhn-record-text:hover, .hv-reader-actions button.hv-open { color: var(--qhn-accent); text-decoration: underline; }
     .hv-visit { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin: 8px 0 2px; font-size: 12px; color: var(--qhn-muted); }
     .hv-visit-new { color: var(--qhn-accent); font-weight: 600; }
+    .hv-visit-loading { color: var(--qhn-muted); }
     .hv-visit button { font: inherit; font-size: 12px; min-height: 28px; padding: 3px 10px; cursor: pointer;
       color: var(--qhn-text); background: transparent; border: 1px solid var(--qhn-line); border-radius: 6px; }
     .hv-visit button:hover { border-color: var(--qhn-accent); color: var(--qhn-accent); }
@@ -1180,6 +1181,7 @@
       }
     }
     ready = true; document.documentElement.removeAttribute('data-qhn-pending');
+    renderVisitLine();
     const {hidden:hiddenNodes, unresolved}=lazyHeaderStatus();
     post({kind:'ready', complete:true, hidden:hiddenNodes, unresolved, title:document.title, destinationHidden:false});
     rememberViewportAnchor();
@@ -1317,21 +1319,30 @@
     const line = document.createElement('div'); line.className = 'hv-visit'; line.hidden = !visitBaseline;
     visitLineHost = line; visitLineText = ''; renderVisitLine(); return line;
   }
+  // Every comment is loaded and rendered, so the new-comment count is final.
+  function threadComplete() {
+    return lazyGroups.size === 0 && lazyPending.size === 0 && queuedResults.size === 0 && [...lazyNodes.values()].every(n => n.entry);
+  }
+  let pendingNextNew = false;
   function renderVisitLine() {
     const line = visitLineHost;
     if (!line || !visitBaseline) return;
     const topic = Number(document.body.dataset.hvTopic);
-    const total = lazyNodes.get(topic)?.entry?.item?.descendants;
-    const known = Number.isFinite(visitBaseline.descendants) && Number.isFinite(total);
-    const count = known ? Math.max(0, total - visitBaseline.descendants) : newComments().length;
-    const text = (count ? pluralize(count, 'new comment') : 'Nothing new') + ' since your last visit';
-    if (text === visitLineText) return;
-    visitLineText = text; line.replaceChildren();
+    // Counted from the comments themselves, the same test that marks them, so
+    // the line never promises a comment the marks cannot find.
+    const count = newComments().length, complete = threadComplete();
+    const text = count ? pluralize(count, 'new comment') + ' since your last visit'
+      : complete ? 'Nothing new since your last visit' : 'Looking for new comments since your last visit';
+    const key = text + (complete ? '' : '…');
+    if (key === visitLineText) return;
+    visitLineText = key; line.replaceChildren();
     const label = document.createElement('span'); label.className = 'hv-visit-text' + (count ? ' hv-visit-new' : ''); label.textContent = text;
     const when = document.createElement('span'); when.className = 'hv-visit-when'; when.textContent = '(' + relativeTime(visitBaseline.viewedAt) + ')';
     line.append(label, when);
-    if (count) {
-      const next = document.createElement('button'); next.type = 'button'; next.className = 'hv-next-new'; next.textContent = 'Next new';
+    if (!complete && count) { const loading = document.createElement('span'); loading.className = 'hv-visit-loading'; loading.textContent = '· still loading'; line.append(loading); }
+    if (count || !complete) {
+      const next = document.createElement('button'); next.type = 'button'; next.className = 'hv-next-new';
+      next.textContent = pendingNextNew ? 'Loading…' : 'Next new'; next.disabled = pendingNextNew;
       next.title = 'Jump to the next new comment (N)'; next.onclick = () => jumpToNextNew(next); line.append(next);
     }
     const anchor = visitBaseline.anchor;
@@ -1347,13 +1358,30 @@
     lazyRestoreY = anchor.y || 0; localPaused = false; lazyPump();
   }
   function jumpToNextNew(button) {
-    const rows = [...document.querySelectorAll('tr.comtr.hv-new')].filter(row => row.getClientRects().length);
-    const target = rows.find(row => row.getBoundingClientRect().top > 60) || rows[0];
+    // Thread order, including comments inside collapsed branches, which sit
+    // where their collapsed ancestor sits on screen.
+    const rowTop = row => {
+      if (row.getClientRects().length) return row.getBoundingClientRect().top;
+      let host = row.closest('.hv-node');
+      while (host && !host.getClientRects().length) host = host.parentElement?.closest('.hv-node');
+      return host ? host.getBoundingClientRect().top : Infinity;
+    };
+    const rows = [...document.querySelectorAll('tr.comtr.hv-new')];
+    const target = rows.find(row => rowTop(row) > 60) || rows[0];
     if (target) {
+      // A new comment inside a collapsed branch opens its branch first.
+      const node = lazyNodes.get(Number(target.id));
+      for (const id of node ? node.ancestors : []) { const ancestor = lazyNodes.get(id); if (ancestor?.collapsed) ancestor.expand?.(); }
       target.closest('.hv-node')?.style.setProperty('content-visibility', 'visible');
-      target.scrollIntoView({block: 'start'}); target.classList.add('hv-flash'); setTimeout(() => target.classList.remove('hv-flash'), 1200); return;
+      target.scrollIntoView({block: 'start'}); target.classList.add('hv-flash'); setTimeout(() => target.classList.remove('hv-flash'), 1200);
+      pendingNextNew = false;
+      const control = visitLineHost?.querySelector('.hv-next-new'); if (control) { control.textContent = 'Next new'; control.disabled = false; }
+      return;
     }
-    if (button) { button.textContent = 'Loading…'; setTimeout(() => { button.textContent = 'Next new'; }, 1500); }
+    if (threadComplete()) return;
+    // Nothing new is loaded yet: keep loading and jump when one arrives.
+    pendingNextNew = true;
+    if (button) { button.textContent = 'Loading…'; button.disabled = true; }
     localPaused = false; lazyPump();
   }
   document.addEventListener('keydown', event => {
@@ -1431,6 +1459,8 @@
       const text=row.querySelector('.commtext,.titleline');
       const shade=[...(text?.classList||[])].find(name=>/^c[0-9a-f]{2}$/.test(name));
       const countText=row.matches('.comtr')?null:[...(row.nextElementSibling?.querySelectorAll('a[href]')||[])].map(a=>a.textContent).find(t=>/^\s*\d+\s*comments?\s*$/.test(t));
+      // HN's live count is what the visit record should remember, not the API's cached total.
+      if(countText && id===Number(document.body.dataset.hvTopic))post({kind:'visitCount',id,count:Number(/\d+/.exec(countText)[0])});
       canonicalItems.set(id,{actions,showDead:!!text && !/^\s*\[(dead|deleted)\]\s*$/.test(text.textContent),
         fade:shade?Math.max(.35,1-parseInt(shade.slice(1),16)/255):null,comments:countText?Number(/\d+/.exec(countText)[0]):null});
       const node=lazyNodes.get(id);
@@ -1630,7 +1660,7 @@
       const label=node.collapsed?'Expand thread'+(fresh?', '+pluralize(fresh,'new comment'):''):'Collapse thread';
       toggle.setAttribute('aria-label',label);toggle.title=label;
     };
-    node.updateToggle=update;update();
+    node.updateToggle=update;node.expand=()=>{if(node.collapsed)toggle.click();};update();
     toggle.onclick=()=>{
       node.collapsed=!node.collapsed;
       if(node.collapsed)lazyCollapsed.add(node.id);else lazyCollapsed.delete(node.id);
@@ -1776,7 +1806,11 @@
       node.children=lazyGroup(host,item.kids,item.type==='comment'?node.depth+1:0,new Set([...node.ancestors,node.id]));
     }
     if(node.children) node.children.host.hidden=!!node.collapsed;
-    if(item.type==='comment' && visitBaseline){for(const id of node.ancestors)lazyNodes.get(id)?.updateToggle?.();renderVisitLine();}
+    if(item.type==='comment' && visitBaseline){
+      for(const id of node.ancestors)lazyNodes.get(id)?.updateToggle?.();
+      renderVisitLine();
+      if(fresh && pendingNextNew)setTimeout(()=>{if(pendingNextNew)jumpToNextNew(visitLineHost?.querySelector('.hv-next-new'));},0);
+    }
     if(root && revealedID===node.id && filteredEffect(entry.effect)) { const notice=document.createElement('div');notice.className='qhn-loading';
       notice.append('Temporarily revealed · Hidden by '+(entry.label || 'your filters')+' · '); const hide=document.createElement('button');hide.textContent='Hide again';hide.onclick=()=>setRootRevealed(false);notice.append(hide);own.prepend(notice); }
     addControls();paintOP();applyCanonicalMetadata(node);

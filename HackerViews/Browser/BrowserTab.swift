@@ -591,6 +591,10 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
             if current.lazyURL.flatMap(Self.topicID) == id, current.state == .ready {
                 current.webView.callAsyncJavaScript("window.HackerViews?.revealDestination()", arguments: [:], in: nil, in: Self.world, completionHandler: nil)
             }
+        case "visitCount":
+            // HN's HTML carries the live comment count; the API item may be a minute stale.
+            guard let id = body["id"] as? Int, let count = body["count"] as? Int, count >= 0, visit?.id == id else { return }
+            visit?.descendants = count
         case "visits":
             guard let ids = body["ids"] as? [Int], ids.count <= 500, ids.allSatisfy({ $0 > 0 }) else { return }
             var results: [String: Any] = [:]
