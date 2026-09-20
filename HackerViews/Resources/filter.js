@@ -204,7 +204,8 @@
        the scroll geometry as WebKit skips and reactivates nested comments. */
     body[data-hv-topic] { overflow-anchor: none; }
     .hv-own > button { cursor: pointer; color: var(--qhn-text); background: var(--qhn-hover); border: 1px solid var(--qhn-line); border-radius: 5px; min-height: 32px; }
-    .hv-undo-vote { font: inherit; color: inherit; background: transparent; border: 0; padding: 0; min-height: 0; cursor: pointer; text-decoration: underline; }
+    .hv-undo-vote { font: inherit; color: var(--qhn-muted); background: transparent; border: 0; padding: 0; min-height: 0; cursor: pointer; text-decoration: none; }
+    .hv-undo-vote:hover, .hv-undo-vote:focus-visible { color: var(--qhn-accent); text-decoration: underline; }
     .hv-own .hv-collapse { position: relative; font: inherit; color: var(--qhn-muted); background: transparent; border: 0; min-height: 0; padding: 0 3px; }
     .hv-collapse::before { content: ''; position: absolute; inset: -7px -3px; border-radius: 4px; }
     .hv-own .hv-collapse:hover, .hv-own .hv-collapse:focus-visible { color: var(--qhn-text); background: var(--qhn-hover); outline: 1px solid var(--qhn-line); }
@@ -220,7 +221,7 @@
     .hv-vote .rotate180 { transform: rotate(180deg); }
     .hv-own .hv-vote:hover, .hv-own .hv-vote:focus-visible { color: var(--qhn-text); background: var(--qhn-hover); }
     .hv-own .hv-vote:disabled { opacity: .45; }
-    .hv-own td.votelinks { vertical-align: top; padding-top: 6px; }
+    .hv-own td.votelinks { vertical-align: top; padding-top: 6px; width: 20px; min-width: 20px; }
     [hidden] { display: none !important; }
     html, body { margin: 0; padding: 0; background: var(--qhn-bg); color: var(--qhn-text); }
     body, td, .title, .comment, .comhead, .subtext, .pagetop {
@@ -1363,18 +1364,22 @@
   function updateVoteControls(id) {
     const actions=voteActions.get(id);
     for(const {button,direction} of voteControls.get(id)||[]){button.hidden=!!actions?.voted || !actions?.[direction];button.disabled=pendingVotes.has(id);}
-    const heading=lazyNodes.get(id)?.host.querySelector(':scope > .hv-own .comhead, :scope > .hv-own .subtext');
+    // The state reads with the rest of the metadata: a story's subtext line
+    // (never its title line), a comment's header ahead of its navigation.
+    const own=lazyNodes.get(id)?.host.querySelector(':scope > .hv-own');
+    const heading=own?.querySelector('.subtext') || own?.querySelector('.comtr .comhead');
     if(heading) {
       let status=heading.querySelector('.hv-vote-status');
       if(actions?.voted) {
-        if(!status){status=document.createElement('span');status.className='hv-vote-status';heading.append(status);}
+        if(!status){status=document.createElement('span');status.className='hv-vote-status';const tail=heading.querySelector(':scope > .hv-comment-tail');if(tail)tail.before(status);else heading.append(status);}
         const label=actions.voted==='up'?'Upvoted':'Downvoted';
-        status.replaceChildren(document.createTextNode(' · '));
+        const state=document.createElement('span');state.className='hv-vote-state';state.textContent=label;
+        status.replaceChildren(document.createTextNode(' · '),state);
         if(actions.undo) {
-          const undo=document.createElement('button');undo.type='button';undo.className='hv-undo-vote';undo.textContent=label;
-          undo.title=actions.voted==='up'?'Undo upvote':'Undo downvote';if(actions.undoFailed){undo.textContent=label+' — retry undo';undo.title='Retry '+undo.title.toLowerCase();}undo.setAttribute('aria-label',undo.title);
-          undo.disabled=pendingVotes.has(id);undo.onclick=()=>undoVote(id);status.append(undo);
-        } else status.append(label);
+          const undo=document.createElement('button');undo.type='button';undo.className='hv-undo-vote';undo.textContent='undo';
+          undo.title=actions.voted==='up'?'Undo upvote':'Undo downvote';if(actions.undoFailed){undo.textContent='retry undo';undo.title='Retry '+undo.title.toLowerCase();}undo.setAttribute('aria-label',undo.title);
+          undo.disabled=pendingVotes.has(id);undo.onclick=()=>undoVote(id);status.append(' · ',undo);
+        }
       } else status?.remove();
     }
   }

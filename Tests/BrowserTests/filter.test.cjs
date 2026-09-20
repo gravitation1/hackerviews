@@ -1517,3 +1517,35 @@ test('when HN’s HTML cannot be fetched, the box says so instead of loading for
   assert.ok([...p.doc.querySelectorAll('.hv-comment-host button')].some(b => b.textContent === 'Open on Hacker News'));
   p.dom.window.close();
 });
+
+test('a vote on a story reports in its subtext line, never beside the title, and a comment’s ahead of its navigation', async () => {
+  for (const kind of ['story', 'comment']) {
+    const p = await lazyPage(); const w = p.dom.window;
+    w.IntersectionObserver = class {constructor(callback) {this.callback = callback;} observe(target) {this.callback([{target, isIntersecting: true}]);} unobserve() {}};
+    let voted = false;
+    w.fetch = async url => {
+      if (new URL(url).pathname === '/vote') { voted = true; return {ok: true}; }
+      return {ok: true, text: async () => `<table><tr class="athing${kind === 'comment' ? ' comtr' : ''}" id="1"><td class="votelinks"><a id="up_1" class="${voted ? 'nosee' : ''}" href="vote?id=1&how=up&auth=fixture">up</a></td><td><span class="comhead">author ${voted ? '<a id="un_1" href="vote?id=1&how=un&auth=fixture">unvote</a>' : ''}</span></td></tr></table>`};
+    };
+    const request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+    const item = kind === 'story' ? {id: 1, type: 'story', by: 'author', title: 'Topic', url: 'https://example.com/a', kids: []} : {id: 1, type: 'comment', by: 'author', parent: 99, text: 'Comment', kids: []};
+    w.HackerViews.lazyResult(request.token, [{id: 1, effect: 'visible', item}]);
+    await new Promise(r => setTimeout(r, 20));
+    p.doc.querySelector('.hv-vote').click();
+    await new Promise(r => setTimeout(r, 10));
+    const status = p.doc.querySelector('.hv-vote-status');
+    assert.ok(status, kind + ': the vote is reported');
+    assert.equal(status.querySelector('.hv-vote-state').textContent, 'Upvoted');
+    assert.equal(status.querySelector('.hv-undo-vote').textContent, 'undo');
+    assert.equal(status.querySelector('.hv-undo-vote').getAttribute('aria-label'), 'Undo upvote');
+    if (kind === 'story') {
+      assert.ok(status.closest('.subtext'), 'a story reports in its subtext line');
+      assert.equal(status.closest('.titleline'), null, 'never beside the title');
+      assert.ok(p.doc.querySelector('.fatitem td.votelinks'), 'the vote column stays in the row');
+    } else {
+      assert.ok(status.closest('.comhead'));
+      assert.equal(status.nextElementSibling?.className, 'hv-comment-tail', 'a comment reports ahead of its navigation and toggle');
+    }
+    p.dom.window.close();
+  }
+});
