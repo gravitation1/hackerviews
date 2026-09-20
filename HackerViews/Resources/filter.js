@@ -1181,7 +1181,7 @@
       }
     }
     ready = true; document.documentElement.removeAttribute('data-qhn-pending');
-    renderVisitLine();
+    renderVisitLine();if(visitBaseline)refreshNewNavigation();
     const {hidden:hiddenNodes, unresolved}=lazyHeaderStatus();
     post({kind:'ready', complete:true, hidden:hiddenNodes, unresolved, title:document.title, destinationHidden:false});
     rememberViewportAnchor();
@@ -1323,7 +1323,34 @@
   function threadComplete() {
     return lazyGroups.size === 0 && lazyPending.size === 0 && queuedResults.size === 0 && [...lazyNodes.values()].every(n => n.entry);
   }
-  let pendingNextNew = false;
+  let pendingNextNew = false, pendingLink = null;
+  function goToRow(target) {
+    const node = lazyNodes.get(Number(target.id));
+    for (const id of node ? node.ancestors : []) { const ancestor = lazyNodes.get(id); if (ancestor?.collapsed) ancestor.expand?.(); }
+    target.closest('.hv-node')?.style.setProperty('content-visibility', 'visible');
+    target.scrollIntoView({block: 'start'}); target.classList.add('hv-flash'); setTimeout(() => target.classList.remove('hv-flash'), 1200);
+    pendingNextNew = false; pendingLink = null;
+    const control = visitLineHost?.querySelector('.hv-next-new'); if (control) { control.textContent = 'Next new'; control.disabled = false; }
+    refreshNewNavigation();
+  }
+  function jumpFromNew(node, link) {
+    const rows = [...document.querySelectorAll('tr.comtr.hv-new')];
+    const index = rows.findIndex(row => Number(row.id) === node.id);
+    const target = rows[index + 1] || (threadComplete() && rows.length > 1 ? rows[0] : null);
+    if (target) { goToRow(target); return; }
+    if (threadComplete()) return;
+    pendingNextNew = true; pendingLink = link; link.textContent = 'loading…'; localPaused = false; lazyPump();
+  }
+  function refreshNewNavigation() {
+    const rows = [...document.querySelectorAll('tr.comtr.hv-new')], complete = threadComplete();
+    rows.forEach((row, index) => {
+      const wrap = row.querySelector('.hv-new-nav'); if (!wrap) return;
+      const link = wrap.querySelector('a');
+      const label = index < rows.length - 1 ? 'next new' : complete ? (rows.length > 1 ? 'first new' : '') : 'next new';
+      wrap.hidden = !label;
+      if (label) link.textContent = pendingNextNew && link === pendingLink ? 'loading…' : label;
+    });
+  }
   function renderVisitLine() {
     const line = visitLineHost;
     if (!line || !visitBaseline) return;
@@ -1368,19 +1395,10 @@
     };
     const rows = [...document.querySelectorAll('tr.comtr.hv-new')];
     const target = rows.find(row => rowTop(row) > 60) || rows[0];
-    if (target) {
-      // A new comment inside a collapsed branch opens its branch first.
-      const node = lazyNodes.get(Number(target.id));
-      for (const id of node ? node.ancestors : []) { const ancestor = lazyNodes.get(id); if (ancestor?.collapsed) ancestor.expand?.(); }
-      target.closest('.hv-node')?.style.setProperty('content-visibility', 'visible');
-      target.scrollIntoView({block: 'start'}); target.classList.add('hv-flash'); setTimeout(() => target.classList.remove('hv-flash'), 1200);
-      pendingNextNew = false;
-      const control = visitLineHost?.querySelector('.hv-next-new'); if (control) { control.textContent = 'Next new'; control.disabled = false; }
-      return;
-    }
+    if (target) { goToRow(target); return; }
     if (threadComplete()) return;
     // Nothing new is loaded yet: keep loading and jump when one arrives.
-    pendingNextNew = true;
+    pendingNextNew = true; pendingLink = null;
     if (button) { button.textContent = 'Loading…'; button.disabled = true; }
     localPaused = false; lazyPump();
   }
@@ -1646,6 +1664,14 @@
     const available=id=>{const entry=lazyNodes.get(id)?.entry;return !['blocked','hidden-item','unresolved'].includes(entry?.effect) && !(entry?.item?.deleted && !entry.item.kids?.length);};
     link('prev',siblings.slice(0,index).reverse().find(available));
     link('next',siblings.slice(index+1).find(available));
+    if(node.isNew) {
+      // A new comment carries the way to the next one, so after a jump the
+      // control is where the reader is looking. Labels follow the loaded set.
+      const wrap=document.createElement('span');wrap.className='hv-new-nav';
+      const a=document.createElement('a');a.href='#';a.className='hv-new-link';a.textContent='next new';a.title='Jump to the next new comment (N)';
+      a.onclick=event=>{event.preventDefault();jumpFromNew(node,a);};
+      if(nav.childNodes.length)wrap.append(' | ');wrap.append(a);nav.append(wrap);
+    }
     let tail=heading.querySelector(':scope > .hv-comment-tail');
     if(!tail){tail=document.createElement('span');tail.className='hv-comment-tail';heading.append(tail);}
     if(nav.childNodes.length){nav.prepend(' | ');tail.append(nav,' ');}
@@ -1808,8 +1834,12 @@
     if(node.children) node.children.host.hidden=!!node.collapsed;
     if(item.type==='comment' && visitBaseline){
       for(const id of node.ancestors)lazyNodes.get(id)?.updateToggle?.();
-      renderVisitLine();
-      if(fresh && pendingNextNew)setTimeout(()=>{if(pendingNextNew)jumpToNextNew(visitLineHost?.querySelector('.hv-next-new'));},0);
+      renderVisitLine();if(fresh)refreshNewNavigation();
+      if(fresh && pendingNextNew)setTimeout(()=>{
+        if(!pendingNextNew)return;
+        const from=pendingLink && lazyNodes.get(Number(pendingLink.closest('tr.comtr')?.id));
+        if(from)jumpFromNew(from,pendingLink);else jumpToNextNew(visitLineHost?.querySelector('.hv-next-new'));
+      },0);
     }
     if(root && revealedID===node.id && filteredEffect(entry.effect)) { const notice=document.createElement('div');notice.className='qhn-loading';
       notice.append('Temporarily revealed · Hidden by '+(entry.label || 'your filters')+' · '); const hide=document.createElement('button');hide.textContent='Hide again';hide.onclick=()=>setRootRevealed(false);notice.append(hide);own.prepend(notice); }
@@ -2131,6 +2161,7 @@
             nav.replaceWith(holder.querySelector('.hv-comment-nav'));
           }
         }
+        if(lazyThread && visitBaseline)refreshNewNavigation();
       }
     },
     profileRecord, profileSaveStatus,
