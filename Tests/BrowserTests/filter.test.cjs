@@ -1065,7 +1065,7 @@ test('upvote state survives a fresh reader document without resurrecting hidden 
   await new Promise(r=>setTimeout(r,10));
   assert.ok(!up.hidden && up.classList.contains('hv-voted') && up.getAttribute('aria-pressed')==='true','the cast arrow stays, marked');
   assert.equal(up.getAttribute('aria-label'),'Upvoted. Click to undo');
-  assert.equal(down.hidden,true,'the other arrow goes');
+  assert.ok(!down.hidden && down.classList.contains('hv-vacant') && down.disabled && down.getAttribute('aria-hidden')==='true','the other arrow keeps its place, unseen');
   assert.equal(first.doc.querySelector('.hv-vote-status'),null,'no text is appended to the row');
   up.click();
   await new Promise(r=>setTimeout(r,10));
@@ -1076,7 +1076,7 @@ test('upvote state survives a fresh reader document without resurrecting hidden 
   const refreshed=await open();
   [up,down]=refreshed.doc.querySelectorAll('.hv-vote');
   assert.ok(!up.hidden && up.classList.contains('hv-voted'),'a fresh document shows the vote HN reports');
-  assert.equal(down.hidden,true);
+  assert.ok(!down.hidden && down.classList.contains('hv-vacant'));
   assert.equal(up.getAttribute('aria-label'),'Upvoted. Click to undo');
   up.click();up.click();
   await new Promise(r=>setTimeout(r,10));
@@ -1110,7 +1110,7 @@ test('failed undo stays retryable and restored controls respect current eligibil
   p.dom.window.HackerViews.lazyResult(request.token,[{id:1,effect:'visible',item:{id:1,type:'comment',by:'author',text:'Comment'}}]);
   await new Promise(r=>setTimeout(r,20));
   const [up,down]=p.doc.querySelectorAll('.hv-vote');
-  assert.equal(up.hidden,true);
+  assert.ok(!up.hidden && up.classList.contains('hv-vacant'),'the upvote arrow holds its slot above the cast downvote');
   assert.ok(!down.hidden && down.classList.contains('hv-voted'));
   assert.equal(down.getAttribute('aria-label'),'Downvoted. Click to undo');
   down.click();
@@ -1121,7 +1121,7 @@ test('failed undo stays retryable and restored controls respect current eligibil
   fail=false;down.click();
   await new Promise(r=>setTimeout(r,10));
   assert.equal(undoRequests,2);
-  assert.equal(up.hidden,false);assert.equal(up.disabled,false);assert.equal(down.hidden,true);
+  assert.equal(up.hidden,false);assert.equal(up.disabled,false);assert.equal(up.classList.contains('hv-vacant'),false);assert.equal(down.hidden,true);
   assert.equal(up.classList.contains('hv-voted'),false);
   p.dom.window.close();
 });

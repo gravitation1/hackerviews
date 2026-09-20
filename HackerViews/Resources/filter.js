@@ -205,6 +205,7 @@
     body[data-hv-topic] { overflow-anchor: none; }
     .hv-own > button { cursor: pointer; color: var(--qhn-text); background: var(--qhn-hover); border: 1px solid var(--qhn-line); border-radius: 5px; min-height: 32px; }
     .hv-own .hv-vote.hv-voted { color: var(--qhn-accent); }
+    .hv-own .hv-vote.hv-vacant { visibility: hidden; pointer-events: none; }
     .hv-own .hv-vote.hv-voted:hover, .hv-own .hv-vote.hv-voted:focus-visible { color: var(--qhn-text); }
     .hv-own .fatitem td.votelinks { width: 34px; min-width: 34px; text-align: center; padding-top: 8px; }
     .fatitem .hv-vote { margin: 0 auto; }
@@ -1449,14 +1450,20 @@
     // clicking it again undoes. Nothing else in the row changes.
     for(const {button,direction} of voteControls.get(id)||[]) {
       const cast=actions?.voted===direction;
-      button.hidden=actions?.voted ? !cast : !actions?.[direction];
+      // While a vote stands the other arrow keeps its place, unseen, so the
+      // cast arrow does not slide into its slot.
+      const vacant=!!actions?.voted && !cast;
+      button.hidden=actions?.voted ? false : !actions?.[direction];
       button.classList.toggle('hv-voted',cast);
+      button.classList.toggle('hv-vacant',vacant);
       button.setAttribute('aria-pressed',String(cast));
+      button.setAttribute('aria-hidden',String(vacant));
+      button.tabIndex=vacant?-1:0;
       const verb=direction==='up'?'Upvote':'Downvote', state=direction==='up'?'Upvoted':'Downvoted';
       const label=cast ? (!actions.undo ? state : actions.undoFailed ? 'Undo failed. Click to retry' : state+'. Click to undo')
         : (button.dataset.hvRetry ? 'Retry vote' : verb);
       button.title=label;button.setAttribute('aria-label',label);
-      button.disabled=pendingVotes.has(id) || (cast && !actions.undo);
+      button.disabled=pendingVotes.has(id) || vacant || (cast && !actions.undo);
     }
   }
   function voteLinkHidden(link) {
