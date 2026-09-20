@@ -469,12 +469,13 @@ test('a discussion over 1000 comments requests every item and renders progressiv
   p.dom.window.close();
 });
 
-async function lazyPage(anchor, {reveal = false} = {}) {
+async function lazyPage(anchor, {reveal = false, visit = null} = {}) {
   const p=await page('<main id="hv-topic"><header id="hv-header" class="hv-header"></header><div id="hv-topic-root"></div></main>',{blocked:[],url:'https://news.ycombinator.com/item?id=1'});
   p.dom.window.Element.prototype.getClientRects=function(){return this.closest('[hidden]')?[]:[{}];};
   p.dom.window.Element.prototype.getBoundingClientRect=function(){return {top:0,bottom:100};};
   p.doc.body.dataset.hvTopic='1';
   if(reveal)p.doc.body.dataset.hvReveal='1';
+  if(visit)p.doc.body.dataset.hvVisit=Buffer.from(JSON.stringify(visit)).toString('base64');
   if(anchor) {p.doc.body.dataset.hvAnchor=Buffer.from(JSON.stringify(anchor)).toString('base64');p.doc.body.dataset.hvScroll=String(anchor.y);}
   p.dom.window.HackerViews.retry();
   return p;
@@ -852,7 +853,7 @@ test('a filter edit invalidates results waiting for an animation frame',async()=
 test('nested replies and story comments return to their containing topic',async()=>{
   const p=await lazyPage();const api=p.dom.window.HackerViews;
   let request=p.messages.filter(m=>m.kind==='lazyItems').at(-1);
-  api.lazyResult(request.token,[{id:1,effect:'visible',item:{id:1,type:'story',title:'Topic',kids:[2]}}]);
+  api.lazyResult(request.token,[{id:1,effect:'visible',item:{id:1,type:'story',by:'op',title:'Topic',kids:[2]}}]);
   assert.ok(p.doc.querySelector('.hv-comment-toggle'),'the story comments inline rather than through HN\u2019s reply page');
   assert.equal(p.doc.querySelector('.reply a'),null);
   await new Promise(r=>setTimeout(r,5));
@@ -1058,27 +1059,28 @@ test('upvote state survives a fresh reader document without resurrecting hidden 
     await new Promise(r=>setTimeout(r,20));return p;
   }
   const first=await open();
-  assert.ok([...first.doc.querySelectorAll('.hv-vote')].every(button=>!button.hidden));
-  first.doc.querySelector('.hv-vote').click();
+  let [up,down]=first.doc.querySelectorAll('.hv-vote');
+  assert.ok(!up.hidden && !down.hidden);
+  up.click();
   await new Promise(r=>setTimeout(r,10));
-  assert.ok([...first.doc.querySelectorAll('.hv-vote')].every(button=>button.hidden));
-  assert.match(first.doc.querySelector('.hv-vote-status').textContent,/Upvoted/);
-  first.doc.querySelector('.hv-undo-vote').click();
+  assert.ok(!up.hidden && up.classList.contains('hv-voted') && up.getAttribute('aria-pressed')==='true','the cast arrow stays, marked');
+  assert.equal(up.getAttribute('aria-label'),'Upvoted. Click to undo');
+  assert.equal(down.hidden,true,'the other arrow goes');
+  assert.equal(first.doc.querySelector('.hv-vote-status'),null,'no text is appended to the row');
+  up.click();
   await new Promise(r=>setTimeout(r,10));
-  assert.equal(first.doc.querySelector('.hv-vote-status'),null);
-  assert.ok([...first.doc.querySelectorAll('.hv-vote')].every(button=>!button.hidden && !button.disabled));
-  first.doc.querySelector('.hv-vote').click();
+  assert.ok([...first.doc.querySelectorAll('.hv-vote')].every(button=>!button.hidden && !button.disabled && !button.classList.contains('hv-voted')));
+  up.click();
   await new Promise(r=>setTimeout(r,10));
   first.dom.window.close();
   const refreshed=await open();
-  assert.ok([...refreshed.doc.querySelectorAll('.hv-vote')].every(button=>button.hidden));
-  assert.match(refreshed.doc.querySelector('.hv-vote-status').textContent,/Upvoted/);
-  const undo=refreshed.doc.querySelector('.hv-undo-vote');
-  assert.equal(undo.getAttribute('aria-label'),'Undo upvote');
-  undo.click();undo.click();
+  [up,down]=refreshed.doc.querySelectorAll('.hv-vote');
+  assert.ok(!up.hidden && up.classList.contains('hv-voted'),'a fresh document shows the vote HN reports');
+  assert.equal(down.hidden,true);
+  assert.equal(up.getAttribute('aria-label'),'Upvoted. Click to undo');
+  up.click();up.click();
   await new Promise(r=>setTimeout(r,10));
-  assert.equal(refreshed.doc.querySelector('.hv-vote-status'),null);
-  assert.ok([...refreshed.doc.querySelectorAll('.hv-vote')].every(button=>!button.hidden && !button.disabled));
+  assert.ok([...refreshed.doc.querySelectorAll('.hv-vote')].every(button=>!button.hidden && !button.disabled && !button.classList.contains('hv-voted')));
   assert.equal(requests.filter(r=>new URL(r.url).pathname==='/vote').length,4);
   assert.deepEqual(requests.filter(r=>new URL(r.url).pathname==='/vote').map(r=>new URL(r.url).searchParams.get('how')),['up','un','up','un']);
   assert.ok(requests.every(r=>r.options.cache==='no-store'));
@@ -1107,18 +1109,20 @@ test('failed undo stays retryable and restored controls respect current eligibil
   const request=p.messages.filter(m=>m.kind==='lazyItems').at(-1);
   p.dom.window.HackerViews.lazyResult(request.token,[{id:1,effect:'visible',item:{id:1,type:'comment',by:'author',text:'Comment'}}]);
   await new Promise(r=>setTimeout(r,20));
-  assert.equal(p.doc.querySelector('.hv-undo-vote').getAttribute('aria-label'),'Undo downvote');
-  p.doc.querySelector('.hv-undo-vote').click();
+  const [up,down]=p.doc.querySelectorAll('.hv-vote');
+  assert.equal(up.hidden,true);
+  assert.ok(!down.hidden && down.classList.contains('hv-voted'));
+  assert.equal(down.getAttribute('aria-label'),'Downvoted. Click to undo');
+  down.click();
   await new Promise(r=>setTimeout(r,10));
-  assert.match(p.doc.querySelector('.hv-undo-vote').textContent,/retry undo/);
-  assert.equal(p.doc.querySelector('.hv-undo-vote').disabled,false);
-  assert.ok([...p.doc.querySelectorAll('.hv-vote')].every(b=>b.hidden));
-  fail=false;p.doc.querySelector('.hv-undo-vote').click();
+  assert.equal(down.getAttribute('aria-label'),'Undo failed. Click to retry');
+  assert.equal(down.disabled,false);
+  assert.ok(!down.hidden && down.classList.contains('hv-voted'),'the vote stays shown until the undo succeeds');
+  fail=false;down.click();
   await new Promise(r=>setTimeout(r,10));
   assert.equal(undoRequests,2);
-  const [up,down]=p.doc.querySelectorAll('.hv-vote');
   assert.equal(up.hidden,false);assert.equal(up.disabled,false);assert.equal(down.hidden,true);
-  assert.equal(p.doc.querySelector('.hv-vote-status'),null);
+  assert.equal(up.classList.contains('hv-voted'),false);
   p.dom.window.close();
 });
 
@@ -1478,7 +1482,9 @@ test('the story root offers an inline comment box built from HN’s own form, po
   let release; const canonical = new Promise(r => { release = r; });
   const p = await storyPage(async () => { await canonical; return {ok: true, text: async () => canonicalStory(true)}; });
   const toggle = () => p.doc.querySelector('.hv-comment-toggle');
-  assert.ok(toggle(), 'the story has an Add a comment control');
+  assert.ok(toggle(), 'the story has a comment control');
+  assert.equal(toggle().textContent, 'comment');
+  assert.ok(toggle().closest('.subtext'), 'it sits in the story’s own line');
   assert.equal(p.doc.querySelector('a[href*="/reply?id="]'), null, 'no link to HN’s reply page, which rejects stories');
   toggle().click();
   assert.match(p.doc.querySelector('.hv-comment-host').textContent, /Loading the comment form/);
@@ -1489,10 +1495,14 @@ test('the story root offers an inline comment box built from HN’s own form, po
   assert.equal(form.action, 'https://news.ycombinator.com/comment');
   assert.deepEqual([...form.querySelectorAll('input[type=hidden]')].map(i => [i.name, i.value]), [['parent', '1'], ['goto', 'item?id=1'], ['hmac', 'secret']], 'HN’s hidden fields, token included, are carried over');
   assert.ok(form.querySelector('textarea[name=text]'));
-  assert.equal(toggle().hidden, true, 'the control gives way to the box');
+  assert.equal(toggle().getAttribute('aria-expanded'), 'true');
   p.doc.querySelector('.hv-comment-cancel').click();
   assert.equal(p.doc.querySelector('.hv-comment-host').hidden, true);
-  assert.equal(toggle().hidden, false);
+  assert.equal(toggle().getAttribute('aria-expanded'), 'false');
+  toggle().click();
+  assert.equal(p.doc.querySelector('.hv-comment-host').hidden, false, 'the action toggles the box');
+  toggle().click();
+  assert.equal(p.doc.querySelector('.hv-comment-host').hidden, true);
   p.dom.window.close();
 });
 
@@ -1518,34 +1528,100 @@ test('when HN’s HTML cannot be fetched, the box says so instead of loading for
   p.dom.window.close();
 });
 
-test('a vote on a story reports in its subtext line, never beside the title, and a comment’s ahead of its navigation', async () => {
-  for (const kind of ['story', 'comment']) {
-    const p = await lazyPage(); const w = p.dom.window;
-    w.IntersectionObserver = class {constructor(callback) {this.callback = callback;} observe(target) {this.callback([{target, isIntersecting: true}]);} unobserve() {}};
-    let voted = false;
-    w.fetch = async url => {
-      if (new URL(url).pathname === '/vote') { voted = true; return {ok: true}; }
-      return {ok: true, text: async () => `<table><tr class="athing${kind === 'comment' ? ' comtr' : ''}" id="1"><td class="votelinks"><a id="up_1" class="${voted ? 'nosee' : ''}" href="vote?id=1&how=up&auth=fixture">up</a></td><td><span class="comhead">author ${voted ? '<a id="un_1" href="vote?id=1&how=un&auth=fixture">unvote</a>' : ''}</span></td></tr></table>`};
-    };
-    const request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
-    const item = kind === 'story' ? {id: 1, type: 'story', by: 'author', title: 'Topic', url: 'https://example.com/a', kids: []} : {id: 1, type: 'comment', by: 'author', parent: 99, text: 'Comment', kids: []};
-    w.HackerViews.lazyResult(request.token, [{id: 1, effect: 'visible', item}]);
-    await new Promise(r => setTimeout(r, 20));
-    p.doc.querySelector('.hv-vote').click();
-    await new Promise(r => setTimeout(r, 10));
-    const status = p.doc.querySelector('.hv-vote-status');
-    assert.ok(status, kind + ': the vote is reported');
-    assert.equal(status.querySelector('.hv-vote-state').textContent, 'Upvoted');
-    assert.equal(status.querySelector('.hv-undo-vote').textContent, 'undo');
-    assert.equal(status.querySelector('.hv-undo-vote').getAttribute('aria-label'), 'Undo upvote');
-    if (kind === 'story') {
-      assert.ok(status.closest('.subtext'), 'a story reports in its subtext line');
-      assert.equal(status.closest('.titleline'), null, 'never beside the title');
-      assert.ok(p.doc.querySelector('.fatitem td.votelinks'), 'the vote column stays in the row');
-    } else {
-      assert.ok(status.closest('.comhead'));
-      assert.equal(status.nextElementSibling?.className, 'hv-comment-tail', 'a comment reports ahead of its navigation and toggle');
-    }
-    p.dom.window.close();
-  }
+test('the story line reads like HN’s with the score in the gutter, and a vote marks the arrow without moving anything', async () => {
+  const p = await lazyPage(); const w = p.dom.window;
+  w.IntersectionObserver = class {constructor(callback) {this.callback = callback;} observe(target) {this.callback([{target, isIntersecting: true}]);} unobserve() {}};
+  let voted = false;
+  w.fetch = async url => {
+    if (new URL(url).pathname === '/vote') { voted = true; return {ok: true}; }
+    return {ok: true, text: async () => `<table><tr class="athing" id="1"><td class="votelinks"><a id="up_1" class="${voted ? 'nosee' : ''}" href="vote?id=1&how=up&auth=fixture">up</a></td><td><span class="titleline"><a href="https://example.com/a">Topic</a></span></td></tr><tr><td class="subtext"><span class="comhead">author ${voted ? '<a id="un_1" href="vote?id=1&how=un&auth=fixture">unvote</a>' : ''}</span> | <a href="flag?id=1">flag</a> | <a href="hide?id=1">hide</a> | <a href="fave?id=1">favorite</a> | <a href="item?id=1">7 comments</a></td></tr></table>`};
+  };
+  const request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  w.HackerViews.lazyResult(request.token, [{id: 1, effect: 'visible', item: {id: 1, type: 'story', by: 'author', score: 38, descendants: 5, time: Date.now() / 1000 - 3600, title: 'Topic', url: 'https://example.com/a', kids: []}}]);
+  await new Promise(r => setTimeout(r, 20));
+  const subtext = p.doc.querySelector('.fatitem .subtext');
+  const line = () => subtext.textContent.replace(/\s+/g, ' ').trim();
+  assert.equal(line(), 'by author 1 hour ago | flag | hide | favorite | note | comment | 7 comments', 'one separator, HN’s order, HN’s count');
+  assert.equal(p.doc.querySelector('.fatitem .hv-score').textContent, '38', 'the score sits in the gutter');
+  assert.equal(subtext.querySelector('.qhn-record:not(.qhn-record-text)'), null, 'the story author gets the note action, not the ellipsis');
+  assert.equal(subtext.querySelector('.qhn-record-text').textContent, 'note');
+  assert.equal(p.doc.querySelector('.hv-visit').hidden, true, 'no visit line on a first visit');
+  const arrow = p.doc.querySelector('.fatitem .hv-vote');
+  arrow.click();
+  await new Promise(r => setTimeout(r, 10));
+  assert.ok(!arrow.hidden && arrow.classList.contains('hv-voted'), 'the arrow stays and shows the vote');
+  assert.equal(arrow.getAttribute('aria-label'), 'Upvoted. Click to undo');
+  assert.equal(p.doc.querySelector('.hv-vote-status'), null);
+  assert.equal(line(), 'by author 1 hour ago | flag | hide | favorite | note | comment | 7 comments', 'the line does not change');
+  p.dom.window.close();
+});
+
+test('a revisited discussion says what is new, marks new comments, counts them on collapsed branches, and steps through them', async () => {
+  const viewedAt = 1700000000;
+  const p = await lazyPage(undefined, {visit: {viewedAt, leftAt: viewedAt + 600, descendants: 3, anchor: {id: 2, top: 10, y: 400, ancestors: [1]}}});
+  const api = p.dom.window.HackerViews;
+  const scrolled = []; p.dom.window.Element.prototype.scrollIntoView = function () { scrolled.push(this.id); };
+  const jumps = []; p.dom.window.scrollTo = (x, y) => jumps.push(y);
+  let request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  api.lazyResult(request.token, [{id: 1, effect: 'visible', item: {id: 1, type: 'story', by: 'op', title: 'Topic', descendants: 5, score: 12, kids: [2, 3]}}]);
+  await new Promise(r => setTimeout(r, 5));
+  const line = () => p.doc.querySelector('.hv-visit');
+  assert.equal(line().hidden, false);
+  assert.equal(line().querySelector('.hv-visit-text').textContent, '2 new comments since your last visit', 'the count comes from the comment total before any reply loads');
+  assert.ok(line().querySelector('.hv-visit-text').classList.contains('hv-visit-new'));
+  assert.ok(line().querySelector('.hv-next-new'));
+  assert.ok(line().querySelector('.hv-resume'));
+  request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  api.lazyResult(request.token, [
+    {id: 2, effect: 'visible', item: {id: 2, type: 'comment', by: 'old', parent: 1, time: viewedAt - 100, text: 'Seen before', kids: [4]}},
+    {id: 3, effect: 'visible', item: {id: 3, type: 'comment', by: 'fresh', parent: 1, time: viewedAt + 100, text: 'New reply'}}]);
+  await new Promise(r => setTimeout(r, 5));
+  assert.equal(p.doc.getElementById('2').classList.contains('hv-new'), false, 'a comment from before the last view is not new');
+  assert.ok(p.doc.getElementById('3').classList.contains('hv-new'));
+  assert.ok(p.doc.getElementById('3').querySelector('.comhead .hv-new-dot'), 'a new comment carries one dot before its author');
+  request = p.messages.filter(m => m.kind === 'lazyItems').find(m => m.ids.includes(4));
+  api.lazyResult(request.token, [{id: 4, effect: 'visible', item: {id: 4, type: 'comment', by: 'fresh', parent: 2, time: viewedAt + 200, text: 'Nested new'}}]);
+  await new Promise(r => setTimeout(r, 5));
+  const toggle = p.doc.getElementById('2').querySelector('.hv-collapse');
+  assert.equal(toggle.textContent, '[-]');
+  toggle.click();
+  assert.equal(toggle.textContent, '[+] 1 new', 'a collapsed branch says how many new replies it holds');
+  assert.equal(toggle.getAttribute('aria-label'), 'Expand thread, 1 new comment');
+  toggle.click();
+  assert.equal(toggle.textContent, '[-]');
+  line().querySelector('.hv-next-new').click();
+  assert.equal(scrolled.at(-1), '4', 'next new goes to the first new comment in thread order');
+  p.doc.dispatchEvent(new p.dom.window.KeyboardEvent('keydown', {key: 'n', bubbles: true}));
+  assert.equal(scrolled.length, 2, 'the N key does the same');
+  line().querySelector('.hv-resume').click();
+  assert.equal(jumps.length, 1, 'jumping to where you left off scrolls to the saved comment');
+  p.dom.window.close();
+});
+
+test('a revisited discussion with nothing new says so, quietly', async () => {
+  const viewedAt = 1700000000;
+  const p = await lazyPage(undefined, {visit: {viewedAt, leftAt: viewedAt + 60, descendants: 5}});
+  const request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  p.dom.window.HackerViews.lazyResult(request.token, [{id: 1, effect: 'visible', item: {id: 1, type: 'story', by: 'op', title: 'Topic', descendants: 5, kids: []}}]);
+  await new Promise(r => setTimeout(r, 5));
+  const line = p.doc.querySelector('.hv-visit');
+  assert.equal(line.querySelector('.hv-visit-text').textContent, 'Nothing new since your last visit');
+  assert.equal(line.querySelector('.hv-visit-new'), null);
+  assert.equal(line.querySelector('.hv-next-new'), null);
+  assert.equal(line.querySelector('.hv-resume'), null, 'no jump without a saved position');
+  p.dom.window.close();
+});
+
+test('feed rows the reader has opened before show how many comments arrived since', async () => {
+  const feedRow = (id, count) => `<tr class="athing submission" id="${id}"><td><span class="titleline"><a href="https://example.com/${id}">Story ${id}</a></span></td></tr><tr><td class="subtext"><a class="hnuser" href="user?id=op">op</a> | <a href="item?id=${id}">${count}&nbsp;comments</a></td></tr><tr class="spacer"><td></td></tr>`;
+  const p = await page(hnHeader(signedIn) + `<table>${feedRow(101, 143)}${feedRow(102, 40)}${feedRow(103, 9)}</table>`, {blocked: []});
+  p.dom.window.HackerViews.setOrdered(true);
+  p.dom.window.HackerViews.resolve(p.messages.filter(m => m.kind === 'ancestors').at(-1).token, {101: 'visible', 102: 'visible', 103: 'visible'});
+  const asked = p.messages.find(m => m.kind === 'visits');
+  assert.ok([101, 102, 103].every(id => asked.ids.includes(id)), 'the page asks which stories were visited');
+  p.dom.window.HackerViews.visitResults({'101': {descendants: 131, viewedAt: 1700000000}, '102': {descendants: 40, viewedAt: 1700000000}});
+  assert.equal(p.doc.getElementById('101').nextElementSibling.querySelector('.hv-new-count').textContent, ' · +12 new');
+  assert.equal(p.doc.getElementById('102').nextElementSibling.querySelector('.hv-new-count'), null, 'nothing when the count has not grown');
+  assert.equal(p.doc.getElementById('103').nextElementSibling.querySelector('.hv-new-count'), null, 'nothing for a story never opened');
+  p.dom.window.close();
 });

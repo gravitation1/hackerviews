@@ -97,7 +97,10 @@ final class BrowserWorkspace: ObservableObject {
         close(selected)
         return true
     }
+    /// Saves what every open discussion has been read to, without ending the visits.
+    func recordVisits() { tabs.forEach { $0.recordVisit(ending: false) } }
     func close(_ tab: BrowserTab) {
+        tab.recordVisit(ending: true)
         let index = tabs.firstIndex { $0.id == tab.id } ?? 0
         tabs.removeAll { $0.id == tab.id }
         if selectedID == tab.id { selectedID = tabs.isEmpty ? nil : tabs[min(index, tabs.count - 1)].id }

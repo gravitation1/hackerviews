@@ -71,6 +71,7 @@ struct RootView: View {
         }
         .onChange(of: phase) { _, value in
             workspace.saveSession()
+            if value != .active { workspace.recordVisits() }
             if value == .active { Task { await store.synchronize() } }
         }
         .onOpenURL { incoming in

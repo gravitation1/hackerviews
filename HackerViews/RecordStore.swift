@@ -9,6 +9,8 @@ final class RecordStore: ObservableObject {
     @Published private(set) var isSyncing = false
     @Published private(set) var storageAvailable = true
     private let fileURL: URL
+    /// Which discussions were read, when, and how far. Local only.
+    let visits: VisitStore
     private let journal: RecordJournal
     private let sync = CloudSync()
     private var readFailed = false
@@ -19,6 +21,7 @@ final class RecordStore: ObservableObject {
     init(directory: URL? = nil) {
         let folder = directory ?? URL.applicationSupportDirectory.appendingPathComponent("HackerViews", isDirectory: true)
         fileURL = folder.appendingPathComponent("records.json")
+        visits = VisitStore(directory: folder)
         journal = RecordJournal(file: fileURL)
         recoveryNotice = try? String(contentsOf: folder.appendingPathComponent("recovery-notice.txt"), encoding: .utf8)
         do {

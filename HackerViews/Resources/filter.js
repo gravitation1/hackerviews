@@ -204,8 +204,24 @@
        the scroll geometry as WebKit skips and reactivates nested comments. */
     body[data-hv-topic] { overflow-anchor: none; }
     .hv-own > button { cursor: pointer; color: var(--qhn-text); background: var(--qhn-hover); border: 1px solid var(--qhn-line); border-radius: 5px; min-height: 32px; }
-    .hv-undo-vote { font: inherit; color: var(--qhn-muted); background: transparent; border: 0; padding: 0; min-height: 0; cursor: pointer; text-decoration: none; }
-    .hv-undo-vote:hover, .hv-undo-vote:focus-visible { color: var(--qhn-accent); text-decoration: underline; }
+    .hv-own .hv-vote.hv-voted { color: var(--qhn-accent); }
+    .hv-own .hv-vote.hv-voted:hover, .hv-own .hv-vote.hv-voted:focus-visible { color: var(--qhn-text); }
+    .hv-own .fatitem td.votelinks { width: 34px; min-width: 34px; text-align: center; padding-top: 8px; }
+    .fatitem .hv-vote { margin: 0 auto; }
+    .hv-score { display: block; font-size: 12px; font-weight: 600; color: var(--qhn-muted); margin-top: 2px; }
+    .fatitem td.votelinks:has(.hv-voted) .hv-score { color: var(--qhn-accent); }
+    .hv-reader-actions button, .qhn-record-text { display: inline; min-width: 0; min-height: 0; width: auto; height: auto; padding: 0; margin: 0; border: 0; border-radius: 0;
+      background: none; font: inherit; color: inherit; line-height: inherit; vertical-align: baseline; cursor: pointer; }
+    .hv-reader-actions button:hover, .qhn-record-text:hover, .hv-reader-actions button.hv-open { color: var(--qhn-accent); text-decoration: underline; }
+    .hv-visit { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin: 8px 0 2px; font-size: 12px; color: var(--qhn-muted); }
+    .hv-visit-new { color: var(--qhn-accent); font-weight: 600; }
+    .hv-visit button { font: inherit; font-size: 12px; min-height: 28px; padding: 3px 10px; cursor: pointer;
+      color: var(--qhn-text); background: transparent; border: 1px solid var(--qhn-line); border-radius: 6px; }
+    .hv-visit button:hover { border-color: var(--qhn-accent); color: var(--qhn-accent); }
+    .hv-new-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--qhn-accent); margin-right: 6px; vertical-align: middle; }
+    .hv-flash { animation: hv-flash 1.2s ease-out; }
+    @keyframes hv-flash { from { background: color-mix(in srgb, var(--qhn-accent) 22%, transparent); } to { background: transparent; } }
+    .hv-new-count { color: var(--qhn-accent); font-weight: 600; }
     .hv-own .hv-collapse { position: relative; font: inherit; color: var(--qhn-muted); background: transparent; border: 0; min-height: 0; padding: 0 3px; }
     .hv-collapse::before { content: ''; position: absolute; inset: -7px -3px; border-radius: 4px; }
     .hv-own .hv-collapse:hover, .hv-own .hv-collapse:focus-visible { color: var(--qhn-text); background: var(--qhn-hover); outline: 1px solid var(--qhn-line); }
@@ -306,10 +322,10 @@
     .comtr td.default > div:first-child { margin: 0 0 6px !important; }
     .comtr td.default > br { display: none; }
     .comhead a.hnuser { color: var(--qhn-text); font-size: 12px; font-weight: 600; }
-    .reply a, .reply a:any-link, .reply button.hv-comment-toggle { display: inline-flex; align-items: center; font: inherit; font-size: 11px;
+    .reply a, .reply a:any-link { display: inline-flex; align-items: center; font: inherit; font-size: 11px;
       padding: 2px 9px; margin-top: 4px; background: transparent; cursor: pointer;
       border: 1px solid var(--qhn-line); border-radius: 5px; text-decoration: none; color: var(--qhn-muted); }
-    .reply a:hover, .reply button.hv-comment-toggle:hover { color: var(--qhn-accent); border-color: var(--qhn-accent); }
+    .reply a:hover { color: var(--qhn-accent); border-color: var(--qhn-accent); }
     .hv-comment .qhn-composer { margin: 10px 0 4px; }
     .hv-comment .qhn-composer p { display: flex; gap: 10px; align-items: center; }
     .hv-comment .hv-comment-cancel, .hv-comment .qhn-loading button { font: inherit; font-size: 12px; min-height: 32px; padding: 4px 10px; cursor: pointer;
@@ -390,7 +406,7 @@
       font: 15px/15px -apple-system, sans-serif; padding: 3px 6px; min-width: 28px; min-height: 26px; box-sizing: border-box;
       vertical-align: middle; cursor: pointer; border-radius: 4px; }
     .qhn-record:hover, .qhn-record:focus-visible { background: var(--qhn-hover); color: var(--qhn-accent); }
-    #qhn-profile-record button, .qhn-profile-effect button, .qhn-note summary, .reply a, .reply button.hv-comment-toggle {
+    #qhn-profile-record button, .qhn-profile-effect button, .qhn-note summary, .reply a {
       min-height: 32px; min-width: 32px; box-sizing: border-box;
     }
     .qhn-note summary { padding: 6px 8px; border-radius: 5px; cursor: pointer; }
@@ -399,12 +415,12 @@
     }
     .qhn-record:focus-visible { outline: 2px solid var(--qhn-accent); outline-offset: 1px; }
     .qhn-record:active, #qhn-profile-record button:active, .qhn-profile-effect button:active,
-    .qhn-note summary:active, .reply a:active, .reply button.hv-comment-toggle:active {
+    .qhn-note summary:active, .reply a:active {
       background: color-mix(in srgb, var(--qhn-accent) 22%, var(--qhn-bg));
     }
     .qhn-note summary:focus-visible { outline: 2px solid var(--qhn-accent); outline-offset: 2px; }
     @media (pointer: coarse) {
-      .qhn-record, #qhn-profile-record button, .qhn-profile-effect button, .qhn-note summary, .reply a, .reply button.hv-comment-toggle {
+      .qhn-record:not(.qhn-record-text), #qhn-profile-record button, .qhn-profile-effect button, .qhn-note summary, .reply a {
         min-width: 44px !important; min-height: 44px !important;
       }
     }
@@ -722,18 +738,21 @@
         const metadata = link.closest('tr');
         if (metadata?.previousElementSibling?.matches('.athing')) row = metadata.previousElementSibling;
       }
-      const button = document.createElement('button');
-      button.className = 'qhn-record';
-      button.textContent = '⋯';
-      button.title = `Flag this user or save a note about this comment`;
-      button.setAttribute('aria-label', `Block, highlight, or annotate ${author}`);
-      button.addEventListener('click', event => {
-        event.preventDefault(); event.stopPropagation();
-        editedRow = row?.id || null;
-        post(capture(author, row, link));
-      });
-      (link.nextElementSibling?.matches('.qhn-op') ? link.nextElementSibling : link).after(button);
+      (link.nextElementSibling?.matches('.qhn-op') ? link.nextElementSibling : link).after(recordButton(author, row, link));
     });
+  }
+  function recordButton(author, row, link, label = '⋯') {
+    const button = document.createElement('button');
+    button.className = 'qhn-record' + (label === '⋯' ? '' : ' qhn-record-text');
+    button.textContent = label;
+    button.title = `Flag this user or save a note about this comment`;
+    button.setAttribute('aria-label', `Block, highlight, or annotate ${author}`);
+    button.addEventListener('click', event => {
+      event.preventDefault(); event.stopPropagation();
+      editedRow = row?.id || null;
+      post(capture(author, row, link));
+    });
+    return button;
   }
 
   function collect() {
@@ -1043,6 +1062,10 @@
   let lazyRefreshQueue = null;
   let lazyRestoreY = 0;
   let lazyJump = null;
+  // The reader's previous visit to this discussion. Comments posted after it
+  // are new; its reading anchor is where the reader left off.
+  let visitBaseline = null;
+  const pluralize = (n, noun) => n + ' ' + noun + (n === 1 ? '' : 's');
   const lazyNodes = new Map();
   const lazyCollapsed = new Set();
   const lazyGroups = new Map();
@@ -1269,21 +1292,74 @@
     canonicalCommentState = form ? 'ready' : 'none';
     renderCommentBox();
   }
-  function commentBox() {
-    const box = document.createElement('div'); box.className = 'reply hv-comment';
+  function commentToggle() {
     const toggle = document.createElement('button'); toggle.type = 'button'; toggle.className = 'hv-comment-toggle';
-    toggle.textContent = 'Add a comment'; toggle.setAttribute('aria-expanded', 'false');
-    const host = document.createElement('div'); host.className = 'hv-comment-host'; host.hidden = true;
-    commentControl = {toggle, host};
-    toggle.onclick = () => setCommentBoxOpen(true);
-    box.append(toggle, host); return box;
+    toggle.textContent = 'comment'; toggle.title = 'Add a comment'; toggle.setAttribute('aria-expanded', 'false');
+    toggle.onclick = () => setCommentBoxOpen(commentControl?.host?.hidden !== false);
+    commentControl = {...(commentControl || {}), toggle}; return toggle;
+  }
+  function commentHost() {
+    const host = document.createElement('div'); host.className = 'hv-comment-host hv-comment'; host.hidden = true;
+    commentControl = {...(commentControl || {}), host}; return host;
   }
   function setCommentBoxOpen(open) {
-    if (!commentControl) return;
-    const {toggle, host} = commentControl;
-    host.hidden = !open; toggle.hidden = open; toggle.setAttribute('aria-expanded', String(open));
-    if (open) { renderCommentBox(); host.querySelector('textarea')?.focus(); } else toggle.focus();
+    const {toggle, host} = commentControl || {};
+    if (!host) return;
+    host.hidden = !open; toggle?.setAttribute('aria-expanded', String(open)); toggle?.classList.toggle('hv-open', open);
+    if (open) { renderCommentBox(); host.querySelector('textarea')?.focus(); } else toggle?.focus();
   }
+  // What changed since the reader's last visit, and where they left off.
+  let visitLineHost = null, visitLineText = '';
+  function newComments() { return [...lazyNodes.values()].filter(n => n.isNew); }
+  function newBelow(node) { return [...lazyNodes.values()].filter(n => n.isNew && n.ancestors.has(node.id)).length; }
+  function visitLine() {
+    const line = document.createElement('div'); line.className = 'hv-visit'; line.hidden = !visitBaseline;
+    visitLineHost = line; visitLineText = ''; renderVisitLine(); return line;
+  }
+  function renderVisitLine() {
+    const line = visitLineHost;
+    if (!line || !visitBaseline) return;
+    const topic = Number(document.body.dataset.hvTopic);
+    const total = lazyNodes.get(topic)?.entry?.item?.descendants;
+    const known = Number.isFinite(visitBaseline.descendants) && Number.isFinite(total);
+    const count = known ? Math.max(0, total - visitBaseline.descendants) : newComments().length;
+    const text = (count ? pluralize(count, 'new comment') : 'Nothing new') + ' since your last visit';
+    if (text === visitLineText) return;
+    visitLineText = text; line.replaceChildren();
+    const label = document.createElement('span'); label.className = 'hv-visit-text' + (count ? ' hv-visit-new' : ''); label.textContent = text;
+    const when = document.createElement('span'); when.className = 'hv-visit-when'; when.textContent = '(' + relativeTime(visitBaseline.viewedAt) + ')';
+    line.append(label, when);
+    if (count) {
+      const next = document.createElement('button'); next.type = 'button'; next.className = 'hv-next-new'; next.textContent = 'Next new';
+      next.title = 'Jump to the next new comment (N)'; next.onclick = () => jumpToNextNew(next); line.append(next);
+    }
+    const anchor = visitBaseline.anchor;
+    if (anchor && Number.isSafeInteger(anchor.id) && anchor.id > 0 && anchor.id !== topic) {
+      const jump = document.createElement('button'); jump.type = 'button'; jump.className = 'hv-resume'; jump.textContent = 'Jump to where you left off';
+      jump.onclick = () => resumeReading(anchor); line.append(jump);
+    }
+  }
+  function resumeReading(anchor) {
+    const node = lazyNodes.get(anchor.id);
+    if (node?.entry && node.host.getClientRects().length) { node.host.style.contentVisibility = 'visible'; restoreReadingPosition(anchor, anchor.y || 0); return; }
+    lazyRestoreAnchor = {id: anchor.id, top: anchor.top || 0, ancestors: Array.isArray(anchor.ancestors) ? anchor.ancestors : []};
+    lazyRestoreY = anchor.y || 0; localPaused = false; lazyPump();
+  }
+  function jumpToNextNew(button) {
+    const rows = [...document.querySelectorAll('tr.comtr.hv-new')].filter(row => row.getClientRects().length);
+    const target = rows.find(row => row.getBoundingClientRect().top > 60) || rows[0];
+    if (target) {
+      target.closest('.hv-node')?.style.setProperty('content-visibility', 'visible');
+      target.scrollIntoView({block: 'start'}); target.classList.add('hv-flash'); setTimeout(() => target.classList.remove('hv-flash'), 1200); return;
+    }
+    if (button) { button.textContent = 'Loading…'; setTimeout(() => { button.textContent = 'Next new'; }, 1500); }
+    localPaused = false; lazyPump();
+  }
+  document.addEventListener('keydown', event => {
+    if (!lazyThread || event.key !== 'n' || event.metaKey || event.ctrlKey || event.altKey) return;
+    if (event.target.closest?.('input, textarea, select, [contenteditable]')) return;
+    if (document.querySelector('tr.comtr.hv-new')) { event.preventDefault(); jumpToNextNew(null); }
+  });
   function renderCommentBox() {
     const host = commentControl?.host;
     if (!host || host.hidden) return;
@@ -1322,12 +1398,17 @@
     const data=canonicalItems.get(node.id),own=node.host.querySelector(':scope > .hv-own');
     if(!data || !own)return;
     const heading=own.querySelector('.subtext .comhead, .comtr .comhead');
-    if(heading && !own.querySelector('.hv-hn-actions') && data.actions.length) {
-      const actions=document.createElement('span');actions.className='hv-hn-actions';
+    let actions=own.querySelector('.hv-hn-actions');
+    if(heading && data.actions.length && !actions?.childNodes.length) {
+      if(!actions) {
+        actions=document.createElement('span');actions.className='hv-hn-actions';
+        if(heading.closest('.subtext'))heading.after(actions);
+        else {const toggle=heading.querySelector('.hv-collapse');if(toggle)toggle.before(actions,'\u00a0');else heading.append(actions);}
+      }
       for(const action of data.actions)actions.append(' | ',hnLink(action.label,action.url));
-      if(heading.closest('.subtext'))heading.after(actions);
-      else {const toggle=heading.querySelector('.hv-collapse');if(toggle)toggle.before(actions,'\u00a0');else heading.append(actions);}
     }
+    const count=own.querySelector('.hv-comment-count');
+    if(count && Number.isFinite(data.comments))count.textContent=pluralize(data.comments,'comment');
     const text=own.querySelector('.commtext');
     if(text && data.fade)text.style.opacity=String(data.fade);
   }
@@ -1348,8 +1429,9 @@
       }
       const text=row.querySelector('.commtext,.titleline');
       const shade=[...(text?.classList||[])].find(name=>/^c[0-9a-f]{2}$/.test(name));
+      const countText=row.matches('.comtr')?null:[...(row.nextElementSibling?.querySelectorAll('a[href]')||[])].map(a=>a.textContent).find(t=>/^\s*\d+\s*comments?\s*$/.test(t));
       canonicalItems.set(id,{actions,showDead:!!text && !/^\s*\[(dead|deleted)\]\s*$/.test(text.textContent),
-        fade:shade?Math.max(.35,1-parseInt(shade.slice(1),16)/255):null});
+        fade:shade?Math.max(.35,1-parseInt(shade.slice(1),16)/255):null,comments:countText?Number(/\d+/.exec(countText)[0]):null});
       const node=lazyNodes.get(id);
       if(node?.entry?.item?.dead)lazyRender(node,node.entry);
       else if(node)applyCanonicalMetadata(node);
@@ -1363,24 +1445,18 @@
   let voteObserver;
   function updateVoteControls(id) {
     const actions=voteActions.get(id);
-    for(const {button,direction} of voteControls.get(id)||[]){button.hidden=!!actions?.voted || !actions?.[direction];button.disabled=pendingVotes.has(id);}
-    // The state reads with the rest of the metadata: a story's subtext line
-    // (never its title line), a comment's header ahead of its navigation.
-    const own=lazyNodes.get(id)?.host.querySelector(':scope > .hv-own');
-    const heading=own?.querySelector('.subtext') || own?.querySelector('.comtr .comhead');
-    if(heading) {
-      let status=heading.querySelector('.hv-vote-status');
-      if(actions?.voted) {
-        if(!status){status=document.createElement('span');status.className='hv-vote-status';const tail=heading.querySelector(':scope > .hv-comment-tail');if(tail)tail.before(status);else heading.append(status);}
-        const label=actions.voted==='up'?'Upvoted':'Downvoted';
-        const state=document.createElement('span');state.className='hv-vote-state';state.textContent=label;
-        status.replaceChildren(document.createTextNode(' · '),state);
-        if(actions.undo) {
-          const undo=document.createElement('button');undo.type='button';undo.className='hv-undo-vote';undo.textContent='undo';
-          undo.title=actions.voted==='up'?'Undo upvote':'Undo downvote';if(actions.undoFailed){undo.textContent='retry undo';undo.title='Retry '+undo.title.toLowerCase();}undo.setAttribute('aria-label',undo.title);
-          undo.disabled=pendingVotes.has(id);undo.onclick=()=>undoVote(id);status.append(' · ',undo);
-        }
-      } else status?.remove();
+    // State lives on the arrow: a cast vote keeps its arrow, in accent, and
+    // clicking it again undoes. Nothing else in the row changes.
+    for(const {button,direction} of voteControls.get(id)||[]) {
+      const cast=actions?.voted===direction;
+      button.hidden=actions?.voted ? !cast : !actions?.[direction];
+      button.classList.toggle('hv-voted',cast);
+      button.setAttribute('aria-pressed',String(cast));
+      const verb=direction==='up'?'Upvote':'Downvote', state=direction==='up'?'Upvoted':'Downvoted';
+      const label=cast ? (!actions.undo ? state : actions.undoFailed ? 'Undo failed. Click to retry' : state+'. Click to undo')
+        : (button.dataset.hvRetry ? 'Retry vote' : verb);
+      button.title=label;button.setAttribute('aria-label',label);
+      button.disabled=pendingVotes.has(id) || (cast && !actions.undo);
     }
   }
   function voteLinkHidden(link) {
@@ -1493,6 +1569,7 @@
     return button;
   }
   async function lazyVote(item, button, direction) {
+    if(voteActions.get(item.id)?.voted===direction)return undoVote(item.id);
     const action=voteActions.get(item.id)?.[direction];if(!action || pendingVotes.has(item.id))return;
     pendingVotes.add(item.id);updateVoteControls(item.id);
     try {
@@ -1500,8 +1577,9 @@
       const voted=await pooledFetch(url.href,{credentials:'same-origin',cache:'no-store'});
       if(!voted.ok)throw new Error();
       url.searchParams.set('how','un');
+      delete button.dataset.hvRetry;
       voteActions.set(item.id,{voted:direction,undo:url.href});updateVoteControls(item.id);
-    } catch (_) {button.title='Retry vote';button.setAttribute('aria-label','Retry vote');}
+    } catch (_) {button.dataset.hvRetry='1';}
     finally {pendingVotes.delete(item.id);updateVoteControls(item.id);}
   }
   function lazyNavigation(node, item, heading) {
@@ -1538,8 +1616,14 @@
   function headingTail(heading) { return heading.querySelector(':scope > .hv-comment-tail') || heading; }
   function collapseToggle(node, onToggle) {
     const toggle=document.createElement('button');toggle.type='button';toggle.className='hv-collapse';
-    const update=()=>{toggle.textContent=node.collapsed?'[+]':'[-]';toggle.setAttribute('aria-expanded',String(!node.collapsed));toggle.setAttribute('aria-label',node.collapsed?'Expand thread':'Collapse thread');toggle.title=node.collapsed?'Expand thread':'Collapse thread';};
-    update();
+    const update=()=>{
+      const fresh=node.collapsed?newBelow(node):0;
+      toggle.textContent=node.collapsed?'[+]'+(fresh?' '+fresh+' new':''):'[-]';
+      toggle.setAttribute('aria-expanded',String(!node.collapsed));
+      const label=node.collapsed?'Expand thread'+(fresh?', '+pluralize(fresh,'new comment'):''):'Collapse thread';
+      toggle.setAttribute('aria-label',label);toggle.title=label;
+    };
+    node.updateToggle=update;update();
     toggle.onclick=()=>{
       node.collapsed=!node.collapsed;
       if(node.collapsed)lazyCollapsed.add(node.id);else lazyCollapsed.delete(node.id);
@@ -1627,7 +1711,10 @@
     const user=hnLink(item.by || '[deleted]','/user?id='+encodeURIComponent(item.by || ''));
     user.className='hnuser';
     const heading=document.createElement('span');heading.className='comhead'; heading.append(user);
-    if(item.time) { const age=hnLink(relativeTime(item.time),'/item?id='+item.id);age.title=new Date(item.time*1000).toLocaleString();const stamp=document.createElement('span');stamp.className='hv-age';stamp.append(' · ',age);heading.append(stamp); }
+    if(item.time) { const age=hnLink(relativeTime(item.time),'/item?id='+item.id);age.title=new Date(item.time*1000).toLocaleString();const stamp=document.createElement('span');stamp.className='hv-age';stamp.append(item.type==='comment'?' · ':' ',age);heading.append(stamp); }
+    // A comment posted after the reader's last view of this discussion.
+    const fresh=!!(visitBaseline && item.type==='comment' && Number.isFinite(item.time) && item.time>visitBaseline.viewedAt && !filteredEffect(entry.effect) && !item.deleted);
+    node.isNew=fresh;
 
     if(item.type==='comment') {
       row.className='athing comtr';
@@ -1640,6 +1727,7 @@
       votes.style.visibility=node.collapsed?'hidden':'';
       const cell=document.createElement('td');cell.className='default';
       const head=document.createElement('div');head.append(heading);
+      if(fresh){row.classList.add('hv-new');const dot=document.createElement('span');dot.className='hv-new-dot';dot.title='New since your last visit';dot.setAttribute('aria-label','New since your last visit');heading.prepend(dot);}
       lazyNavigation(node,item,heading);
       const body=document.createElement('div');body.className='comment';body.hidden=!!node.collapsed;
       headingTail(heading).append(collapseToggle(node,collapsed=>{body.hidden=collapsed;votes.style.visibility=collapsed?'hidden':'';}));
@@ -1651,11 +1739,25 @@
       let target;try{target=new URL(item.url || '/item?id='+item.id,'https://news.ycombinator.com/');}catch(_){target=new URL('/item?id='+item.id,'https://news.ycombinator.com/');}
       if(!['https:','http:'].includes(target.protocol))target=new URL('/item?id='+item.id,'https://news.ycombinator.com/');
       const link=hnLink('',target.href);link.append(safeBody(item.title || 'Discussion'));title.append(link);if(target.hostname!=='news.ycombinator.com'){const domain=document.createElement('span');domain.className='sitebit comhead';domain.append(' (',hnLink(target.hostname.replace(/^www\./,''),'/from?site='+encodeURIComponent(target.hostname)),')');title.append(domain);}cell.append(title);row.append(cell);tbody.append(row);
-      const meta=document.createElement('tr');const md=document.createElement('td');md.className='subtext';if(item.by)md.append((item.score ?? 0)+' points by ',heading,' | '+(item.descendants ?? 0)+' comments');else if(item.time)md.append(relativeTime(item.time));meta.append(md);tbody.append(meta);
+      const meta=document.createElement('tr');const md=document.createElement('td');md.className='subtext';
+      const canComment=item.type!=='job' && root && effect!=='hidden-item';
+      if(item.by) {
+        // HN's line with HN's separator: author, age, HN's actions, the
+        // reader's own, the count. The score sits in the gutter with its arrow.
+        user.dataset.qhnControl='1';
+        const hnActions=document.createElement('span');hnActions.className='hv-hn-actions';
+        const ours=document.createElement('span');ours.className='hv-reader-actions';
+        if(root){ours.append(' | ',recordButton(item.by,row,user,'note'));if(canComment)ours.append(' | ',commentToggle());}
+        const count=document.createElement('span');count.className='hv-comment-count';count.textContent=pluralize(item.descendants ?? 0,'comment');
+        md.append('by ',heading,hnActions,ours,' | ',count);
+      } else if(item.time)md.append(relativeTime(item.time));
+      meta.append(md);tbody.append(meta);
       if(item.text){const textRow=document.createElement('tr');const text=document.createElement('td');text.className='toptext';text.append(safeBody(item.text));textRow.append(text);tbody.append(textRow);}
-      const votes=document.createElement('td');votes.className='votelinks';votes.append(lazyVoteControl(item,'up'));row.prepend(votes);md.colSpan=2;
+      const votes=document.createElement('td');votes.className='votelinks';
+      if(item.type!=='job'){votes.append(lazyVoteControl(item,'up'));const score=document.createElement('span');score.className='hv-score';score.textContent=String(item.score ?? 0);score.title=pluralize(item.score ?? 0,'point');votes.append(score);}
+      row.prepend(votes);md.colSpan=2;
       const textCell=tbody.querySelector('.toptext');if(textCell)textCell.colSpan=2;
-      if(item.type!=='job' && root && effect!=='hidden-item')own.append(commentBox());
+      if(root && item.by){own.append(visitLine());if(canComment)own.append(commentHost());}
     }
     if(effect!=='hidden-item') {
       own.prepend(table);paintOrdered(row,effect,item.type==='comment'?null:row.nextElementSibling,entry.label);
@@ -1667,6 +1769,7 @@
       node.children=lazyGroup(host,item.kids,item.type==='comment'?node.depth+1:0,new Set([...node.ancestors,node.id]));
     }
     if(node.children) node.children.host.hidden=!!node.collapsed;
+    if(item.type==='comment' && visitBaseline){for(const id of node.ancestors)lazyNodes.get(id)?.updateToggle?.();renderVisitLine();}
     if(root && revealedID===node.id && filteredEffect(entry.effect)) { const notice=document.createElement('div');notice.className='qhn-loading';
       notice.append('Temporarily revealed · Hidden by '+(entry.label || 'your filters')+' · '); const hide=document.createElement('button');hide.textContent='Hide again';hide.onclick=()=>setRootRevealed(false);notice.append(hide);own.prepend(notice); }
     addControls();paintOP();applyCanonicalMetadata(node);
@@ -1814,6 +1917,7 @@
     if(lazyThread) { lazyRefresh();return; }
     lazyThread=true;lazyRestoreY=Number(document.body.dataset.hvScroll)||0;
     if(document.body.dataset.hvReveal)revealedID=Number(document.body.dataset.hvTopic);
+    try { const visit=JSON.parse(atob(document.body.dataset.hvVisit||'')); if(Number.isFinite(visit?.viewedAt) && visit.viewedAt>0)visitBaseline=visit; } catch(_) {}
     try {
       const anchor=JSON.parse(atob(document.body.dataset.hvAnchor||''));
       for(const id of anchor.collapsed || [])if(Number.isSafeInteger(id) && id>0)lazyCollapsed.add(id);
@@ -1869,6 +1973,27 @@
     if(!pageID && ordered)finish(token, {}, false, {}, true);
   }
 
+  // Feed rows the reader has opened before get a count of comments added since.
+  let visitsRequested = false;
+  function requestVisits(stories) {
+    if (visitsRequested) return;
+    const ids = [...new Set(stories.map(idOf).filter(id => Number.isSafeInteger(id) && id > 0))];
+    if (!ids.length) return;
+    visitsRequested = true; post({kind: 'visits', ids: ids.slice(0, 500)});
+  }
+  function paintVisits(results) {
+    for (const [key, record] of Object.entries(results || {})) {
+      const row = document.getElementById(String(key));
+      if (!row || !Number.isFinite(record?.descendants)) continue;
+      const subtext = row.nextElementSibling?.querySelector('.subtext') || row.nextElementSibling;
+      const link = [...(subtext?.querySelectorAll('a[href]') || [])].find(a => /^\s*\d+\s*comments?\s*$/.test(a.textContent));
+      if (!link || subtext.querySelector('.hv-new-count')) continue;
+      const fresh = Number(/\d+/.exec(link.textContent)[0]) - record.descendants;
+      if (fresh <= 0) continue;
+      const badge = document.createElement('span'); badge.className = 'hv-new-count'; badge.textContent = ' · +' + fresh + ' new';
+      badge.title = pluralize(fresh, 'comment') + ' since your last visit'; link.after(badge);
+    }
+  }
   function finish(token, decisions, blockPage = false, labels = {}, partial = false, inherited = {}) {
     if (!pending || pending.token !== token) return;
     if (partial) {
@@ -1943,6 +2068,7 @@
       partial ? !pending?.decisions?.[idOf(row)] : decisions[idOf(row)] === 'unresolved');
     showProgress(boundary, !partial);
     setHeaderStatus(hiddenContributions, partial ? 0 : unresolvedCount, () => process());
+    if (!partial) requestVisits(tree.stories);
     restoreFilterAnchor();
     ready = true;
     document.documentElement.removeAttribute('data-qhn-pending');
@@ -1991,6 +2117,7 @@
     setBlocked(names) { blocked = new Set(names); process(); },
     resolvePartial(token, decisions, labels = {}, inherited = {}) { finish(token, decisions, false, labels, true, inherited); },
     resolve(token, decisions, labels = {}, inherited = {}) { finish(token, decisions, false, labels, false, inherited); },
+    visitResults(results) { paintVisits(results); },
     retry() { process(); }
   };
   const observer = new MutationObserver(mutations => {

@@ -55,6 +55,12 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
     /// A discussion the reader is about to open from a temporarily revealed
     /// contribution. The topic shell opens it revealed instead of asking again.
     private var pendingReveal: (id: Int, at: Date)?
+    /// The discussion this page is viewing. Written to the visit store when the
+    /// reader leaves; the previous record is the baseline the shell marks
+    /// new comments against, and it survives a reload of the same discussion.
+    private var visit: (id: Int, viewedAt: Date, descendants: Int?)?
+    private var visitBaseline: Visit?
+    private var expectingShellLoad = false
     @Published var blockingReason = ""
     var savedReferences: [Citation] {
         guard let url = webView.url ?? url else { return [] }
@@ -63,6 +69,15 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
     func revealDestination() {
         revealedDestination = true
         webView.callAsyncJavaScript("window.HackerViews?.revealDestination()", arguments: [:], in: nil, in: Self.world, completionHandler: nil)
+    }
+    /// Saves what this page saw of its discussion. `ending` forgets the visit;
+    /// a retained page keeps it so returning and leaving again updates the record.
+    func recordVisit(ending: Bool) {
+        if let activePage { activePage.recordVisit(ending: ending); return }
+        guard let visit else { return }
+        let anchor = history.indices.contains(historyIndex) && Self.topicID(history[historyIndex].url) == visit.id ? history[historyIndex].anchor : nil
+        store.visits.record(Visit(id: visit.id, viewedAt: visit.viewedAt, leftAt: Date(), descendants: visit.descendants, anchor: anchor))
+        if ending { self.visit = nil }
     }
     /// Takes the pending reveal for `id` from this tab and its history owner.
     /// A reveal older than a few seconds belonged to a navigation that never
@@ -200,8 +215,20 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
         let count = networkLeases.count; networkLeases.removeAll()
         Task { for _ in 0..<count { await ReaderRequestPool.shared.release() } }
     }
-    private func loadTopic(_ target: URL) {
+    private func loadTopic(_ target: URL, reloading: Bool = false) {
         guard let id = Self.topicID(target) else { return }
+        if !reloading || visit?.id != id {
+            recordVisit(ending: true)
+            visitBaseline = store.visits.visit(for: id)
+            visit = (id, Date(), nil)
+        }
+        let visitData = visitBaseline.flatMap { baseline -> String? in
+            var object: [String: Any] = ["viewedAt": Int(baseline.viewedAt.timeIntervalSince1970), "leftAt": Int(baseline.leftAt.timeIntervalSince1970)]
+            if let descendants = baseline.descendants { object["descendants"] = descendants }
+            if let anchor = baseline.anchor, let parsed = try? JSONSerialization.jsonObject(with: anchor) { object["anchor"] = parsed }
+            return (try? JSONSerialization.data(withJSONObject: object))?.base64EncodedString()
+        } ?? ""
+        expectingShellLoad = true
         lazyTasks.values.forEach { $0.cancel() }; lazyTasks.removeAll()
         cancelNetworkLeases()
         lazyURL = target
@@ -218,7 +245,7 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
         webView.loadHTMLString("""
         <!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>Hacker News</title>
         <link rel="stylesheet" href="https://news.ycombinator.com/news.css"></head>
-        <body data-hv-topic="\(id)" data-hv-scroll="\(y)" data-hv-anchor="\(anchorData)"\(reveal)><main id="hv-topic">
+        <body data-hv-topic="\(id)" data-hv-scroll="\(y)" data-hv-anchor="\(anchorData)" data-hv-visit="\(visitData)"\(reveal)><main id="hv-topic">
         <header id="hv-header" class="hv-header"></header>
         <div id="hv-topic-root"></div></main></body></html>
         """, baseURL: target)
@@ -350,6 +377,7 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
             page.load(entry.url)
             if page.history.indices.contains(page.historyIndex) { page.history[page.historyIndex].collapsed = entry.collapsed }
         }
+        if activePage !== page { activePage?.recordVisit(ending: false) }
         activePage = page
         restoreScrollY = nil
         refreshAnchor = nil
@@ -404,7 +432,7 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
                 refreshAnchor = anchor
             }
             restoreScrollY = scrollY
-            if let lazyURL { loadTopic(lazyURL) } else { webView.reload() }
+            if let lazyURL { loadTopic(lazyURL, reloading: true) } else { webView.reload() }
         }
     }
     func retry() {
@@ -542,6 +570,7 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
                             }
                             if item.type != "comment", lazyURL.flatMap(Self.topicID) == itemID {
                                 threadTitle = item.title
+                                if visit?.id == itemID { visit?.descendants = item.descendants }
                             }
                         } else { entry["effect"] = "unresolved"; entry["reason"] = "This contribution is no longer available from Hacker News." }
                         guard !Task.isCancelled, navigationID == epoch, store.archive.policy == policy else { group.cancelAll(); return }
@@ -562,6 +591,16 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
             if current.lazyURL.flatMap(Self.topicID) == id, current.state == .ready {
                 current.webView.callAsyncJavaScript("window.HackerViews?.revealDestination()", arguments: [:], in: nil, in: Self.world, completionHandler: nil)
             }
+        case "visits":
+            guard let ids = body["ids"] as? [Int], ids.count <= 500, ids.allSatisfy({ $0 > 0 }) else { return }
+            var results: [String: Any] = [:]
+            for (id, record) in store.visits.visits(for: ids) {
+                var entry: [String: Any] = ["viewedAt": Int(record.viewedAt.timeIntervalSince1970)]
+                if let descendants = record.descendants { entry["descendants"] = descendants }
+                results[String(id)] = entry
+            }
+            guard !results.isEmpty else { return }
+            webView.callAsyncJavaScript("window.HackerViews?.visitResults(results)", arguments: ["results": results], in: nil, in: Self.world, completionHandler: nil)
         case "canonical":
             // The reader hands the discussion to HN's own page, such as when
             // HN's HTML offers no comment form the reader can host.
@@ -755,6 +794,7 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
     }
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        if expectingShellLoad { expectingShellLoad = false } else { recordVisit(ending: true) }
         cancelNetworkLeases()
         destinationHidden = false; revealedDestination = false; blockingReason = ""
         presenting = false
