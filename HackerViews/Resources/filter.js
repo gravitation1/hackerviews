@@ -220,7 +220,8 @@
     .hv-visit button { font: inherit; font-size: 12px; min-height: 28px; padding: 3px 10px; cursor: pointer;
       color: var(--qhn-text); background: transparent; border: 1px solid var(--qhn-line); border-radius: 6px; }
     .hv-visit button:hover { border-color: var(--qhn-accent); color: var(--qhn-accent); }
-    .hv-new-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--qhn-accent); margin-right: 6px; vertical-align: middle; }
+    .hv-new-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--qhn-accent); margin-right: 6px; vertical-align: middle; box-sizing: border-box; }
+    .hv-new-read .hv-new-dot { background: transparent; border: 1.5px solid var(--qhn-accent); opacity: .7; }
     .hv-flash { animation: hv-flash 1.2s ease-out; }
     @keyframes hv-flash { from { background: color-mix(in srgb, var(--qhn-accent) 22%, transparent); } to { background: transparent; } }
     .hv-new-count { color: var(--qhn-accent); font-weight: 600; }
@@ -1313,8 +1314,17 @@
   }
   // What changed since the reader's last visit, and where they left off.
   let visitLineHost = null, visitLineText = '';
-  function newComments() { return [...lazyNodes.values()].filter(n => n.isNew); }
-  function newBelow(node) { return [...lazyNodes.values()].filter(n => n.isNew && n.ancestors.has(node.id)).length; }
+  // New and not yet read. Jumping on from a new comment reads it; the marks
+  // never change under a reader who is only scrolling.
+  function newComments() { return [...lazyNodes.values()].filter(n => n.isNew && !n.readNew); }
+  function newBelow(node) { return [...lazyNodes.values()].filter(n => n.isNew && !n.readNew && n.ancestors.has(node.id)).length; }
+  let currentNew = null;
+  function markRead(row) {
+    const node = lazyNodes.get(Number(row?.id));
+    if (!node?.isNew || node.readNew) return;
+    node.readNew = true; row.classList.remove('hv-new'); row.classList.add('hv-new-read');
+    for (const id of node.ancestors) lazyNodes.get(id)?.updateToggle?.();
+  }
   function visitLine() {
     const line = document.createElement('div'); line.className = 'hv-visit'; line.hidden = !visitBaseline;
     visitLineHost = line; visitLineText = ''; renderVisitLine(); return line;
@@ -1325,31 +1335,35 @@
   }
   let pendingNextNew = false, pendingLink = null;
   function goToRow(target) {
+    if (currentNew && currentNew !== target) markRead(currentNew);
+    currentNew = target;
     const node = lazyNodes.get(Number(target.id));
     for (const id of node ? node.ancestors : []) { const ancestor = lazyNodes.get(id); if (ancestor?.collapsed) ancestor.expand?.(); }
     target.closest('.hv-node')?.style.setProperty('content-visibility', 'visible');
     target.scrollIntoView({block: 'start'}); target.classList.add('hv-flash'); setTimeout(() => target.classList.remove('hv-flash'), 1200);
     pendingNextNew = false; pendingLink = null;
     const control = visitLineHost?.querySelector('.hv-next-new'); if (control) { control.textContent = 'Next new'; control.disabled = false; }
-    refreshNewNavigation();
+    renderVisitLine(); refreshNewNavigation();
   }
+  const follows = (row, other) => !!(row.compareDocumentPosition(other) & Node.DOCUMENT_POSITION_FOLLOWING);
   function jumpFromNew(node, link) {
-    const rows = [...document.querySelectorAll('tr.comtr.hv-new')];
-    const index = rows.findIndex(row => Number(row.id) === node.id);
-    const target = rows[index + 1] || (threadComplete() && rows.length > 1 ? rows[0] : null);
-    if (target) { goToRow(target); return; }
+    const row = document.getElementById(String(node.id));
+    const unread = [...document.querySelectorAll('tr.comtr.hv-new')];
+    const after = unread.filter(other => follows(row, other)), others = unread.filter(other => other !== row);
+    const target = after[0] || (threadComplete() && others.length ? others[0] : null);
+    if (target) { markRead(row); goToRow(target); return; }
     if (threadComplete()) return;
     pendingNextNew = true; pendingLink = link; link.textContent = 'loading…'; localPaused = false; lazyPump();
   }
   function refreshNewNavigation() {
-    const rows = [...document.querySelectorAll('tr.comtr.hv-new')], complete = threadComplete();
-    rows.forEach((row, index) => {
-      const wrap = row.querySelector('.hv-new-nav'); if (!wrap) return;
-      const link = wrap.querySelector('a');
-      const label = index < rows.length - 1 ? 'next new' : complete ? (rows.length > 1 ? 'first new' : '') : 'next new';
+    const unread = [...document.querySelectorAll('tr.comtr.hv-new')], complete = threadComplete();
+    for (const wrap of document.querySelectorAll('tr.comtr .hv-new-nav')) {
+      const row = wrap.closest('tr.comtr'), link = wrap.querySelector('a');
+      const after = unread.some(other => follows(row, other)), others = unread.some(other => other !== row);
+      const label = after ? 'next new' : !complete ? 'next new' : others ? 'first new' : '';
       wrap.hidden = !label;
       if (label) link.textContent = pendingNextNew && link === pendingLink ? 'loading…' : label;
-    });
+    }
   }
   function renderVisitLine() {
     const line = visitLineHost;
@@ -1373,7 +1387,7 @@
       next.title = 'Jump to the next new comment (N)'; next.onclick = () => jumpToNextNew(next); line.append(next);
     }
     const anchor = visitBaseline.anchor;
-    if (anchor && Number.isSafeInteger(anchor.id) && anchor.id > 0 && anchor.id !== topic) {
+    if (anchor && !visitBaseline.reload && Number.isSafeInteger(anchor.id) && anchor.id > 0 && anchor.id !== topic) {
       const jump = document.createElement('button'); jump.type = 'button'; jump.className = 'hv-resume'; jump.textContent = 'Jump to where you left off';
       jump.onclick = () => resumeReading(anchor); line.append(jump);
     }

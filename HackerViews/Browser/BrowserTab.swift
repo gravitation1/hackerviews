@@ -217,13 +217,14 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
     }
     private func loadTopic(_ target: URL, reloading: Bool = false) {
         guard let id = Self.topicID(target) else { return }
-        if !reloading || visit?.id != id {
-            recordVisit(ending: true)
-            visitBaseline = store.visits.visit(for: id)
-            visit = (id, Date(), nil)
-        }
+        // A refresh ends the visit and starts the next one: what was on screen
+        // counts as seen, and only what arrives after it is new.
+        let refreshing = reloading && visit?.id == id
+        recordVisit(ending: true)
+        visitBaseline = store.visits.visit(for: id)
+        visit = (id, Date(), nil)
         let visitData = visitBaseline.flatMap { baseline -> String? in
-            var object: [String: Any] = ["viewedAt": Int(baseline.viewedAt.timeIntervalSince1970), "leftAt": Int(baseline.leftAt.timeIntervalSince1970)]
+            var object: [String: Any] = ["viewedAt": Int(baseline.viewedAt.timeIntervalSince1970), "leftAt": Int(baseline.leftAt.timeIntervalSince1970), "reload": refreshing]
             if let descendants = baseline.descendants { object["descendants"] = descendants }
             if let anchor = baseline.anchor, let parsed = try? JSONSerialization.jsonObject(with: anchor) { object["anchor"] = parsed }
             return (try? JSONSerialization.data(withJSONObject: object))?.base64EncodedString()
