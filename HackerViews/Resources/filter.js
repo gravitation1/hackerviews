@@ -256,6 +256,9 @@
     .comtr td.votelinks:has(> .hv-vote:not([hidden]) ~ .hv-vote:not([hidden]))::before, .comtr td.votelinks:has(> .hv-vote:not([hidden]) ~ .hv-vote:not([hidden])) > .hv-rail-head { top: 37px; }
     .comtr.qhn-revealed td.votelinks::before { background: transparent; border-left: 2px dashed var(--qhn-accent); }
     .comtr.hv-tombstone td.votelinks::before { background: transparent; border-left: 2px dashed var(--qhn-line); }
+    /* A leaf whose text ends within a few pixels of its arrows would show a
+       stub, not a line; its coloured name already carries the highlight. */
+    .hv-node:not(:has(> .hv-children)) > .hv-own .comtr[data-hv-short-row] td.votelinks::before { display: none; }
     .hv-rail-head { position: absolute; left: 5px; top: 3px; bottom: 0; width: 12px; z-index: 1; margin: 0; padding: 0; border: 0; min-height: 0; appearance: none; -webkit-appearance: none; background: transparent; cursor: pointer; }
     .hv-children { position: relative; }
     .hv-rail { position: absolute; top: -16px; bottom: 12px; width: 12px; z-index: 1; margin: 0; padding: 0; border: 0; min-height: 0; appearance: none; -webkit-appearance: none;
@@ -1715,6 +1718,14 @@
   }
   function headingTail(heading) { return heading.querySelector(':scope > .hv-comment-tail') || heading; }
   const replyWord=n=>n+' '+(n===1?'reply':'replies');
+  // Marks rows whose vote cell has no room for a marker below the arrows.
+  const shortRowObserver=typeof ResizeObserver==='undefined'?null:new ResizeObserver(entries=>{
+    for(const entry of entries) {
+      const cell=entry.target,row=cell.closest('tr.comtr');if(!row || !cell.isConnected)continue;
+      const top=parseFloat(getComputedStyle(cell,'::before').top)||0;
+      row.toggleAttribute('data-hv-short-row',cell.clientHeight-top<10);
+    }
+  });
   // Replies under a comment: those loaded and shown, or at least the direct ones HN reports.
   function repliesBelow(node) {
     let loaded=0;
@@ -1793,7 +1804,7 @@
         inner.innerHTML='<tbody></tbody>';inner.firstChild.append(innerRow);outer.append(inner);row.append(outer);
         const ind=document.createElement('td');ind.className='ind';ind.setAttribute('indent',String(node.depth*40));
         const spacer=document.createElement('span');spacer.style.cssText='display:block;width:'+Math.min(node.depth*28,280)+'px';ind.append(spacer);
-        const votes=document.createElement('td');votes.className='votelinks';
+        const votes=document.createElement('td');votes.className='votelinks';shortRowObserver?.observe(votes);
         const cell=document.createElement('td');cell.className='default';
         const heading=document.createElement('span');heading.className='comhead';
         const label=hnLink(marker,'/item?id='+item.id);label.className='hv-tombstone-label';heading.append(label);
@@ -1844,7 +1855,7 @@
         const head=document.createElement('button');head.type='button';head.className='hv-rail-head';head.tabIndex=-1;head.setAttribute('aria-hidden','true');
         head.onmouseenter=()=>{head.title='Collapse '+replyWord(repliesBelow(node));};head.onclick=()=>node.toggleButton?.click();votes.append(head);
       }
-      votes.style.visibility=node.collapsed?'hidden':'';
+      votes.style.visibility=node.collapsed?'hidden':'';shortRowObserver?.observe(votes);
       const cell=document.createElement('td');cell.className='default';
       const head=document.createElement('div');head.append(heading);
       if(fresh){row.classList.add('hv-new');const dot=document.createElement('span');dot.className='hv-new-dot';dot.title='New since your last visit';dot.setAttribute('aria-label','New since your last visit');heading.prepend(dot);}
