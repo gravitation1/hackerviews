@@ -230,7 +230,7 @@
     .hv-own .hv-collapse:hover, .hv-own .hv-collapse:focus-visible { color: var(--qhn-text); background: var(--qhn-hover); outline: 1px solid var(--qhn-line); }
     .hv-comment-tail, .hv-age { white-space: nowrap; }
     .hv-comment-nav a { text-decoration: none; }
-    .comtr.hv-tombstone td.default { background: transparent; border-left-style: dashed; padding-top: 6px; padding-bottom: 6px; }
+    .comtr.hv-tombstone td.default { border-left: 2px dashed var(--qhn-line); padding: 2px 0 2px 6px; }
     .hv-tombstone-label { color: var(--qhn-muted); font-size: 12px; font-style: italic; }
     .hv-own .hv-vote { appearance: none; -webkit-appearance: none; display: block; box-sizing: border-box;
       width: 20px; height: 16px; min-height: 0; padding: 0; margin: 0; border: 0; border-radius: 2px;
@@ -240,7 +240,17 @@
     .hv-vote .rotate180 { transform: rotate(180deg); }
     .hv-own .hv-vote:hover, .hv-own .hv-vote:focus-visible { color: var(--qhn-text); background: var(--qhn-hover); }
     .hv-own .hv-vote:disabled { opacity: .45; }
-    .hv-own td.votelinks { vertical-align: top; padding-top: 6px; width: 20px; min-width: 20px; }
+    .hv-own td.votelinks { vertical-align: top; padding-top: 1px; width: 20px; min-width: 20px; }
+    .hv-own .hv-vote:has(> .rotate180):not(.hv-voted):not(:hover):not(:focus-visible) { opacity: .45; }
+    /* A branch draws one rail, hanging from its parent's arrows to its last
+       reply. It is the collapse control for the branch; [-] stays for keys. */
+    .hv-children { position: relative; }
+    .hv-rail { position: absolute; top: 0; bottom: 12px; width: 12px; margin: 0; padding: 0; border: 0; min-height: 0; appearance: none; -webkit-appearance: none;
+      cursor: pointer; background: linear-gradient(to right, transparent 5px, var(--qhn-line) 5px, var(--qhn-line) 6px, transparent 6px); }
+    .hv-rail:hover, .hv-rail:focus-visible { outline: 0; background: linear-gradient(to right, transparent 4px, var(--qhn-accent) 4px, var(--qhn-accent) 6px, transparent 6px); }
+    .hv-node:has(> .hv-children > .hv-rail:hover) > .hv-own .comhead .hnuser { color: var(--qhn-accent) !important; }
+    .hv-reader-actions a, .hv-reader-actions .qhn-record-text { color: var(--qhn-muted); text-decoration: none; }
+    .hv-reader-actions a:hover, .hv-reader-actions .qhn-record-text:hover { color: var(--qhn-accent); text-decoration: underline; }
     [hidden] { display: none !important; }
     html, body { margin: 0; padding: 0; background: var(--qhn-bg); color: var(--qhn-text); }
     body, td, .title, .comment, .comhead, .subtext, .pagetop {
@@ -307,35 +317,31 @@
     .fatitem .titleline > a { font-size: 18px; font-weight: 600; }
     .fatitem > tbody > tr:first-child > td { padding-top: 14px; }
     .comment-tree { width: 100%; }
-    .comtr > td { padding: 5px 0; }
-    .comtr.qhn-root > td { border-top: 1px solid var(--qhn-line); padding-top: 16px; }
+    .comtr > td { padding: 0 0 12px; }
+    .comtr.qhn-root > td { border-top: 1px solid var(--qhn-line); padding-top: 12px; }
     .comtr table { width: 100%; }
     /* Give spare table width to the content, never the indentation/vote gutters.
        Hiding the body on collapse must not redistribute column widths. */
     .comtr td.ind { width: 0; }
     .comtr td.votelinks { width: 20px; min-width: 20px; }
-    .comtr td.default { width: 100%; }
-    .comtr .ind { background: repeating-linear-gradient(to right, transparent 0 18px, var(--qhn-line) 18px 19px, transparent 19px 40px); }
-    .comtr td.default {
-      border-left: 2px solid var(--qhn-line); border-radius: 0 7px 7px 0;
-      background: var(--qhn-panel); padding: 10px 14px;
-    }
-    .comtr.qhn-root td.default { border-left-color: var(--qhn-accent); }
-    .comtr.qhn-flat td.default { border-left-color: var(--qhn-line); }
-    .comtr td.default > div:first-child { margin: 0 0 6px !important; }
+    .comtr td.default { width: calc(100% - 8px); }
+    /* A comment is its header and its text. Depth is the indent, the branch
+       rail belongs to the branch (.hv-rail), and the left edge carries a
+       marker only when there is something to mark. */
+    .comtr td.default { border-left: 2px solid transparent; background: transparent; padding: 0 0 0 6px; }
+    .comtr td.default > div:first-child { margin: 0 0 2px !important; }
     .comtr td.default > br { display: none; }
     .comhead a.hnuser { color: var(--qhn-text); font-size: 12px; font-weight: 600; }
-    .reply a, .reply a:any-link { display: inline-flex; align-items: center; font: inherit; font-size: 11px;
-      padding: 2px 9px; margin-top: 4px; background: transparent; cursor: pointer;
-      border: 1px solid var(--qhn-line); border-radius: 5px; text-decoration: none; color: var(--qhn-muted); }
-    .reply a:hover { color: var(--qhn-accent); border-color: var(--qhn-accent); }
+    .reply a, .reply a:any-link { display: inline-block; font: inherit; font-size: 12px; padding: 2px 0; margin-top: 2px;
+      background: transparent; border: 0; text-decoration: none; color: var(--qhn-muted); }
+    .reply a:hover { color: var(--qhn-accent); text-decoration: underline; }
     .hv-comment .qhn-composer { margin: 10px 0 4px; }
     .hv-comment .qhn-composer p { display: flex; gap: 10px; align-items: center; }
     .hv-comment .hv-comment-cancel, .hv-comment .qhn-loading button { font: inherit; font-size: 12px; min-height: 32px; padding: 4px 10px; cursor: pointer;
       color: var(--qhn-text); background: var(--qhn-hover); border: 1px solid var(--qhn-line); border-radius: 5px; }
     .hv-comment .qhn-loading { padding-left: 0; }
     .comment, .commtext, .toptext { color: var(--qhn-text); font-size: 14px; line-height: 1.6; }
-    .commtext, .toptext { max-width: 88ch; overflow-wrap: anywhere; }
+    .comment, .commtext, .toptext { max-width: 90ch; overflow-wrap: anywhere; }
     /* HN's score classes (.c00 a:link, .c5a a:visited, etc.) otherwise
        override the reader palette and paint links black in dark mode. */
     .commtext a:any-link, .toptext a:any-link {
@@ -367,8 +373,7 @@
     /* Story title and metadata form one continuous surface; comment gutters stay unpainted. */
     .qhn-preferred:not(.comtr) { background: color-mix(in srgb, var(--qhn-highlight, #27a99a) 12%, var(--qhn-bg)) !important; }
     .qhn-preferred:not(.comtr) > td { background: transparent !important; }
-    .qhn-preferred td.default { border-left-color: var(--qhn-highlight, #27a99a) !important;
-      background: color-mix(in srgb, var(--qhn-highlight, #27a99a) 12%, var(--qhn-panel)) !important; }
+    .qhn-preferred td.default { border-left-color: var(--qhn-highlight, #27a99a) !important; }
     .qhn-preferred-author { color: var(--qhn-highlight, #27a99a) !important; font-weight: 600; }
     .qhn-faded-author[data-qhn-filter-label]::after { content: ' ◐ ' attr(data-qhn-filter-label); font-size: 10px; font-weight: 600; color: var(--qhn-muted); }
     .qhn-preferred-author::after { content: ' ★'; font-size: 10px; font-weight: 600; }
@@ -436,7 +441,11 @@
       .hv-header .hv-nav { margin-left: -5px; }
       .hv-header .hv-side { margin-right: -5px; }
       .title { font-size: 15px; }
-      .comtr td.default { padding: 8px 10px; }
+      .comtr td.default { padding: 0 0 0 6px; }
+      /* A deep comment's header is wider than the screen if its tail cannot
+         wrap. Let it break between its groups, never inside one. */
+      .hv-comment-tail { white-space: normal; }
+      .hv-comment-nav, .hv-reader-actions, .hv-hn-actions { white-space: nowrap; }
       .qhn-composer { padding: 10px; }
       .qhn-record { min-height: 32px; min-width: 32px; }
       .votearrow { margin: 6px 4px; }
@@ -1464,7 +1473,7 @@
       if(!actions) {
         actions=document.createElement('span');actions.className='hv-hn-actions';
         if(heading.closest('.subtext'))heading.after(actions);
-        else {const toggle=heading.querySelector('.hv-collapse');if(toggle)toggle.before(actions,'\u00a0');else heading.append(actions);}
+        else {const ours=heading.querySelector('.hv-reader-actions'),toggle=heading.querySelector('.hv-collapse');if(ours)ours.before(actions);else if(toggle)toggle.before(actions,'\u00a0');else heading.append(actions);}
       }
       for(const action of data.actions)actions.append(' | ',hnLink(action.label,action.url));
     }
@@ -1691,16 +1700,30 @@
     if(nav.childNodes.length){nav.prepend(' | ');tail.append(nav,' ');}
   }
   function headingTail(heading) { return heading.querySelector(':scope > .hv-comment-tail') || heading; }
+  const replyWord=n=>n+' '+(n===1?'reply':'replies');
+  // Replies under a comment: those loaded and shown, or at least the direct ones HN reports.
+  function repliesBelow(node) {
+    let loaded=0;
+    for(const other of lazyNodes.values())if(other.entry && other.ancestors.has(node.id) && !filteredEffect(other.entry.effect))loaded++;
+    return Math.max(loaded,node.entry?.item?.kids?.length||0);
+  }
+  function branchRail(node) {
+    const rail=document.createElement('button');rail.type='button';rail.className='hv-rail';rail.tabIndex=-1;rail.setAttribute('aria-hidden','true');
+    rail.style.left=(Math.min(node.depth*28,280)+4)+'px';
+    rail.onmouseenter=()=>{rail.title='Collapse '+replyWord(repliesBelow(node));};
+    rail.onclick=()=>node.toggleButton?.click();
+    node.rail=rail;return rail;
+  }
   function collapseToggle(node, onToggle) {
     const toggle=document.createElement('button');toggle.type='button';toggle.className='hv-collapse';
     const update=()=>{
-      const fresh=node.collapsed?newBelow(node):0;
-      toggle.textContent=node.collapsed?'[+]'+(fresh?' '+fresh+' new':''):'[-]';
+      const fresh=node.collapsed?newBelow(node):0, replies=node.collapsed?repliesBelow(node):0;
+      toggle.textContent=node.collapsed?'[+]'+(replies?' '+replyWord(replies):'')+(fresh?' · '+fresh+' new':''):'[-]';
       toggle.setAttribute('aria-expanded',String(!node.collapsed));
-      const label=node.collapsed?'Expand thread'+(fresh?', '+pluralize(fresh,'new comment'):''):'Collapse thread';
+      const label=node.collapsed?'Expand thread'+(replies?', '+replyWord(replies):'')+(fresh?', '+pluralize(fresh,'new comment'):''):'Collapse thread';
       toggle.setAttribute('aria-label',label);toggle.title=label;
     };
-    node.updateToggle=update;node.expand=()=>{if(node.collapsed)toggle.click();};update();
+    node.toggleButton=toggle;node.updateToggle=update;node.expand=()=>{if(node.collapsed)toggle.click();};update();
     toggle.onclick=()=>{
       node.collapsed=!node.collapsed;
       if(node.collapsed)lazyCollapsed.add(node.id);else lazyCollapsed.delete(node.id);
@@ -1774,6 +1797,7 @@
       }
       if(!node.children && item.kids?.length) {
         const host=document.createElement('div');host.className='hv-children';node.host.append(host);
+        if(item.type==='comment' && node.depth*28<280)host.append(branchRail(node));
         node.children=lazyGroup(host,item.kids,item.type==='comment'?node.depth+1:0,new Set([...node.ancestors,node.id]));
       }
       if(node.children)node.children.host.hidden=!!node.collapsed;
@@ -1788,7 +1812,7 @@
     const user=hnLink(item.by || '[deleted]','/user?id='+encodeURIComponent(item.by || ''));
     user.className='hnuser';
     const heading=document.createElement('span');heading.className='comhead'; heading.append(user);
-    if(item.time) { const age=hnLink(relativeTime(item.time),'/item?id='+item.id);age.title=new Date(item.time*1000).toLocaleString();const stamp=document.createElement('span');stamp.className='hv-age';stamp.append(item.type==='comment'?' · ':' ',age);heading.append(stamp); }
+    if(item.time) { const age=hnLink(relativeTime(item.time),'/item?id='+item.id);age.title=new Date(item.time*1000).toLocaleString();const stamp=document.createElement('span');stamp.className='hv-age';stamp.append(' ',age);heading.append(stamp); }
     // A comment posted after the reader's last view of this discussion.
     const fresh=!!(visitBaseline && item.type==='comment' && Number.isFinite(item.time) && item.time>visitBaseline.viewedAt && !filteredEffect(entry.effect) && !item.deleted);
     node.isNew=fresh;
@@ -1806,10 +1830,16 @@
       const head=document.createElement('div');head.append(heading);
       if(fresh){row.classList.add('hv-new');const dot=document.createElement('span');dot.className='hv-new-dot';dot.title='New since your last visit';dot.setAttribute('aria-label','New since your last visit');heading.prepend(dot);}
       lazyNavigation(node,item,heading);
+      // HN's line, one separator: navigation, then HN's own actions when its
+      // HTML arrives, then ours (reply, note), then the toggle.
+      user.dataset.qhnControl='1';
+      const ours=document.createElement('span');ours.className='hv-reader-actions';
+      const reply=hnLink('reply','/reply?id='+item.id+'&goto='+encodeURIComponent('item?id='+document.body.dataset.hvTopic+'#'+item.id));reply.className='hv-reply';
+      ours.append(' | ',reply);if(item.by)ours.append(' | ',recordButton(item.by,row,user,'note'));
+      headingTail(heading).append(ours,' ');
       const body=document.createElement('div');body.className='comment';body.hidden=!!node.collapsed;
       headingTail(heading).append(collapseToggle(node,collapsed=>{body.hidden=collapsed;votes.style.visibility=collapsed?'hidden':'';}));
       const text=document.createElement('span');text.className='commtext';text.append(safeBody(item.deleted?'[deleted]':item.text || ''));body.append(text);
-      const reply=document.createElement('div');reply.className='reply';reply.append(hnLink('reply','/reply?id='+item.id+'&goto='+encodeURIComponent('item?id='+document.body.dataset.hvTopic+'#'+item.id)));body.append(reply);
       cell.append(head,body);innerRow.append(ind,votes,cell);tbody.append(row);
     } else {
       row.className='athing submission';const cell=document.createElement('td');const title=document.createElement('span');title.className='titleline';
@@ -1843,9 +1873,11 @@
     } else if(root) { const reveal=document.createElement('button');reveal.textContent='Reveal this contribution';reveal.onclick=()=>setRootRevealed(true);own.prepend(reveal); }
     if(!node.children && item.kids?.length) {
       const host=document.createElement('div');host.className='hv-children';node.host.append(host);
+      if(item.type==='comment' && node.depth*28<280)host.append(branchRail(node));
       node.children=lazyGroup(host,item.kids,item.type==='comment'?node.depth+1:0,new Set([...node.ancestors,node.id]));
     }
     if(node.children) node.children.host.hidden=!!node.collapsed;
+    if(item.type==='comment')for(const id of node.ancestors){const ancestor=lazyNodes.get(id);if(ancestor?.collapsed)ancestor.updateToggle?.();}
     if(item.type==='comment' && visitBaseline){
       for(const id of node.ancestors)lazyNodes.get(id)?.updateToggle?.();
       renderVisitLine();if(fresh)refreshNewNavigation();

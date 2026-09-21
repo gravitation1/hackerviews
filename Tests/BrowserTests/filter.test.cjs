@@ -513,7 +513,7 @@ test('lazy renderer ignores obsolete results and preserves native reply destinat
   api.lazyResult(request.token-1,[{id:1,effect:'visible',item:{id:1,title:'Stale'}}]);
   assert.equal(p.doc.body.textContent.includes('Stale'),false);
   api.lazyResult(request.token,[{id:1,effect:'visible',item:{id:1,type:'comment',by:'author',parent:99,text:'Target',kids:[]}}]);
-  assert.equal(p.doc.querySelector('.reply a').href,'https://news.ycombinator.com/reply?id=1&goto=item%3Fid%3D1%231');
+  assert.equal(p.doc.querySelector('.comhead a.hv-reply').href,'https://news.ycombinator.com/reply?id=1&goto=item%3Fid%3D1%231');
   assert.equal(p.doc.querySelector('.commtext').textContent,'Target');
   p.dom.window.close();
 });
@@ -859,7 +859,7 @@ test('nested replies and story comments return to their containing topic',async(
   await new Promise(r=>setTimeout(r,5));
   request=p.messages.filter(m=>m.kind==='lazyItems').at(-1);
   api.lazyResult(request.token,[{id:2,effect:'visible',item:{id:2,type:'comment',by:'reader',parent:1,text:'Reply target'}}]);
-  const link=p.doc.getElementById('2').querySelector('.reply a');
+  const link=p.doc.getElementById('2').querySelector('.comhead a.hv-reply');
   const url=new URL(link.href);
   assert.equal(url.searchParams.get('id'),'2');
   assert.equal(url.searchParams.get('goto'),'item?id=1#2');
@@ -1233,7 +1233,7 @@ test('moderated and deleted comments keep their row, indent and a working, persi
   assert.equal(toggle.textContent, '[-]');
   toggle.click();
   assert.equal(children.hidden, true, 'collapsing a tombstone hides its replies');
-  assert.equal(toggle.textContent, '[+]');
+  assert.equal(toggle.textContent, '[+] 1 reply');
   assert.deepEqual([...p.messages.filter(m => m.kind === 'collapsedState').at(-1).ids], [2], 'collapse state is persisted');
   assert.deepEqual([...api.refreshState().collapsed], [2]);
   toggle.click();
@@ -1252,7 +1252,7 @@ test('a tombstone restored as collapsed loads collapsed', async () => {
   await new Promise(r => setTimeout(r, 5));
   const row = p.doc.getElementById('2');
   assert.equal(row.querySelector('.hv-tombstone-label').textContent, '[deleted]');
-  assert.equal(row.querySelector('.hv-collapse').textContent, '[+]');
+  assert.equal(row.querySelector('.hv-collapse').textContent, '[+] 1 reply');
   assert.equal(row.closest('.hv-node').querySelector('.hv-children').hidden, true);
   p.dom.window.close();
 });
@@ -1597,7 +1597,8 @@ test('a revisited discussion counts new comments as they load, marks them, reads
   assert.equal(newLink(3).textContent, 'first new', 'the last one wraps');
   const toggle = row(2).querySelector('.hv-collapse');
   toggle.click();
-  assert.equal(toggle.textContent, '[+] 1 new', 'a collapsed branch says how many new replies it holds');
+  assert.equal(toggle.textContent, '[+] 1 reply · 1 new', 'a collapsed branch says how many replies it holds and how many are new');
+  assert.equal(toggle.getAttribute('aria-label'), 'Expand thread, 1 reply, 1 new comment');
   line().querySelector('.hv-next-new').click();
   assert.equal(scrolled.at(-1), '4', 'next new goes to the first unread comment in thread order, opening its collapsed branch');
   assert.equal(toggle.textContent, '[-]');
@@ -1665,7 +1666,7 @@ test('a discussion opened again restores the threads collapsed on the previous v
   const seeded = p.messages.find(m => m.kind === 'collapsedState');
   assert.deepEqual([...(seeded?.ids || [])], [2], 'the seeded set is posted so the history entry and the next visit carry it');
   story(p); await new Promise(r => setTimeout(r, 5)); replies(p); await new Promise(r => setTimeout(r, 5));
-  assert.equal(p.doc.getElementById('2').querySelector('.hv-collapse').textContent, '[+]', 'the thread collapsed last time is collapsed again');
+  assert.equal(p.doc.getElementById('2').querySelector('.hv-collapse').textContent, '[+] 1 reply', 'the thread collapsed last time is collapsed again');
   assert.equal(p.doc.getElementById('2').querySelector('.comment').hidden, true);
   assert.equal(p.doc.getElementById('3').querySelector('.hv-collapse').textContent, '[-]');
   p.dom.window.close();
@@ -1674,4 +1675,36 @@ test('a discussion opened again restores the threads collapsed on the previous v
   story(q); await new Promise(r => setTimeout(r, 5)); replies(q); await new Promise(r => setTimeout(r, 5));
   assert.equal(q.doc.getElementById('2').querySelector('.hv-collapse').textContent, '[-]');
   q.dom.window.close();
+});
+
+test('a comment is its header and its text: HN’s line with reply and note, no pill, and the branch rail collapses the branch', async () => {
+  const p = await lazyPage(); const api = p.dom.window.HackerViews;
+  let request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  api.lazyResult(request.token, [{id: 1, effect: 'visible', item: {id: 1, type: 'story', by: 'op', title: 'Topic', kids: [2]}}]);
+  await new Promise(r => setTimeout(r, 5));
+  request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  api.lazyResult(request.token, [{id: 2, effect: 'visible', item: {id: 2, type: 'comment', by: 'alice', parent: 1, time: Date.now() / 1000 - 120, text: 'Parent', kids: [3, 4]}}]);
+  await new Promise(r => setTimeout(r, 5));
+  request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  api.lazyResult(request.token, [{id: 3, effect: 'visible', item: {id: 3, type: 'comment', by: 'bob', parent: 2, text: 'Child one'}}, {id: 4, effect: 'visible', item: {id: 4, type: 'comment', by: 'carol', parent: 2, text: 'Child two'}}]);
+  await new Promise(r => setTimeout(r, 5));
+  const row = p.doc.getElementById('2'), head = row.querySelector('.comhead');
+  assert.equal(head.textContent.replace(/\s+/g, ' ').trim(), 'alice 2 minutes ago | parent | reply | note [-]', 'one separator, HN’s words, ours at the end');
+  assert.equal(row.querySelector('.reply'), null, 'no reply pill under the text');
+  assert.equal(row.querySelector('.qhn-record:not(.qhn-record-text)'), null, 'no ellipsis; note is a word');
+  assert.match(head.querySelector('a.hv-reply').href, /\/reply\?id=2&goto=item%3Fid%3D1%232$/);
+  const children = row.closest('.hv-node').querySelector(':scope > .hv-children');
+  const rail = children.querySelector(':scope > .hv-rail');
+  assert.ok(rail, 'a comment with replies owns one rail for its branch');
+  assert.equal(rail.style.left, '4px', 'at depth 0 the rail hangs under the arrows');
+  assert.equal(p.doc.getElementById('3').closest('.hv-node').querySelector(':scope > .hv-children'), null, 'a reply without replies has no rail');
+  rail.dispatchEvent(new p.dom.window.MouseEvent('mouseenter'));
+  assert.equal(rail.title, 'Collapse 2 replies');
+  rail.click();
+  assert.equal(children.hidden, true, 'clicking the rail collapses the branch');
+  assert.equal(row.querySelector('.hv-collapse').textContent, '[+] 2 replies');
+  assert.deepEqual([...p.messages.filter(m => m.kind === 'collapsedState').at(-1).ids], [2], 'through the same toggle, so the state persists');
+  row.querySelector('.hv-collapse').click();
+  assert.equal(children.hidden, false);
+  p.dom.window.close();
 });
