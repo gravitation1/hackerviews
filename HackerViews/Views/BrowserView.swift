@@ -280,8 +280,9 @@ private struct BrowserPage: View {
 
 /// Padding belongs to the button surface so its visual and interactive bounds agree.
 struct ControlSurfaceStyle: ButtonStyle {
-    /// Toolbar metrics: a highlight that hugs the glyph, as the system's own
-    /// toolbar buttons do, instead of the 32-point surface used in content.
+    /// Toolbar metrics: a highlight wider than it is tall with air beside the
+    /// glyph, as the system's own toolbar buttons draw, instead of the
+    /// 32-point square used for controls in content.
     var compact = false
     func makeBody(configuration: Configuration) -> some View {
         Surface(configuration: configuration, compact: compact)
@@ -294,22 +295,22 @@ struct ControlSurfaceStyle: ButtonStyle {
         @Environment(\.isFocused) private var focused
         private var minWidth: CGFloat {
             #if os(macOS)
-            compact ? 26 : 32
+            compact ? 34 : 32
             #else
             44
             #endif
         }
         private var minHeight: CGFloat {
             #if os(macOS)
-            compact ? 22 : 32
+            compact ? 24 : 32
             #else
             44
             #endif
         }
-        private var radius: CGFloat { compact ? 5 : 6 }
+        private var radius: CGFloat { 6 }
         var body: some View {
             configuration.label
-                .padding(.horizontal, compact ? 5 : 8)
+                .padding(.horizontal, compact ? 9 : 8)
                 .frame(minWidth: minWidth, minHeight: minHeight)
                 .contentShape(Rectangle())
                 .background(enabled && (hovering || configuration.isPressed) ? Color.primary.opacity(configuration.isPressed ? 0.18 : 0.08) : Color.clear,
