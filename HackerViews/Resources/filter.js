@@ -324,7 +324,7 @@
        Hiding the body on collapse must not redistribute column widths. */
     .comtr td.ind { width: 0; }
     .comtr td.votelinks { width: 20px; min-width: 20px; }
-    .comtr td.default { width: calc(100% - 8px); }
+    .comtr td.default { width: 100%; }
     /* A comment is its header and its text. Depth is the indent, the branch
        rail belongs to the branch (.hv-rail), and the left edge carries a
        marker only when there is something to mark. */
