@@ -245,7 +245,7 @@
     /* A branch draws one rail, hanging from its parent's arrows to its last
        reply. It is the collapse control for the branch; [-] stays for keys. */
     .hv-children { position: relative; }
-    .hv-rail { position: absolute; top: 0; bottom: 12px; width: 12px; margin: 0; padding: 0; border: 0; min-height: 0; appearance: none; -webkit-appearance: none;
+    .hv-rail { position: absolute; top: 0; bottom: 12px; width: 12px; z-index: 1; margin: 0; padding: 0; border: 0; min-height: 0; appearance: none; -webkit-appearance: none;
       cursor: pointer; background: linear-gradient(to right, transparent 5px, var(--qhn-line) 5px, var(--qhn-line) 6px, transparent 6px); }
     .hv-rail:hover, .hv-rail:focus-visible { outline: 0; background: linear-gradient(to right, transparent 4px, var(--qhn-accent) 4px, var(--qhn-accent) 6px, transparent 6px); }
     .hv-node:has(> .hv-children > .hv-rail:hover) > .hv-own .comhead .hnuser { color: var(--qhn-accent) !important; }
