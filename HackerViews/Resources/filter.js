@@ -256,9 +256,11 @@
     .comtr td.votelinks:has(> .hv-vote:not([hidden]) ~ .hv-vote:not([hidden]))::before, .comtr td.votelinks:has(> .hv-vote:not([hidden]) ~ .hv-vote:not([hidden])) > .hv-rail-head { top: 37px; }
     .comtr.qhn-revealed td.votelinks::before { background: transparent; border-left: 2px dashed var(--qhn-accent); }
     .comtr.hv-tombstone td.votelinks::before { background: transparent; border-left: 2px dashed var(--qhn-line); }
-    /* A leaf whose text ends within a few pixels of its arrows would show a
-       stub, not a line; its coloured name already carries the highlight. */
-    .hv-node:not(:has(> .hv-children)) > .hv-own .comtr[data-hv-short-row] td.votelinks::before { display: none; }
+    /* No line starts within a few pixels of the arrows. A row whose text ends
+       there draws no segment (a coloured name still carries a highlight), and
+       the rail of its replies begins level with the first reply instead. */
+    .comtr[data-hv-short-row] td.votelinks::before, .comtr[data-hv-short-row] .hv-rail-head { display: none; }
+    .hv-node:has(> .hv-own .comtr[data-hv-short-row]) > .hv-children > .hv-rail { top: 0; }
     .hv-rail-head { position: absolute; left: 5px; top: 3px; bottom: 0; width: 12px; z-index: 1; margin: 0; padding: 0; border: 0; min-height: 0; appearance: none; -webkit-appearance: none; background: transparent; cursor: pointer; }
     .hv-children { position: relative; }
     .hv-rail { position: absolute; top: -16px; bottom: 12px; width: 12px; z-index: 1; margin: 0; padding: 0; border: 0; min-height: 0; appearance: none; -webkit-appearance: none;
