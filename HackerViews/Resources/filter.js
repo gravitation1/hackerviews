@@ -1258,7 +1258,7 @@
         node.host.style.contentVisibility='visible';node.host.scrollIntoView({block:'start'});
         link.removeAttribute('aria-busy');link.textContent=lazyJump.label;lazyJump=null;break;
       }
-      if(lazyJump && !candidates.length){link.removeAttribute('aria-busy');link.textContent=lazyJump.label;link.title='No more visible comments';lazyJump=null;}
+      if(lazyJump && !candidates.length){const origin=lazyJump.node;lazyJump=null;refreshNavigation(origin);}
     }
     if(lazyRestoreAnchor) {
       const path=[...lazyRestoreAnchor.ancestors,lazyRestoreAnchor.id];
@@ -1709,7 +1709,7 @@
           if(lazyJump){lazyJump.link.textContent=lazyJump.label;lazyJump.link.removeAttribute('aria-busy');}
           const index=node.group.ids.indexOf(node.id);
           const candidates=label==='next'?node.group.ids.slice(index+1):node.group.ids.slice(0,index).reverse();
-          localPaused=false;lazyJump={group:node.group,candidates,link:a,label};a.textContent='Loading…';a.setAttribute('aria-busy','true');lazyPump();return;
+          localPaused=false;lazyJump={group:node.group,candidates,link:a,label,node};a.textContent='Loading…';a.setAttribute('aria-busy','true');lazyPump();return;
         }
         const target=lazyNodes.get(id)?.host;
         if(target && target.getClientRects().length) {event.preventDefault();target.style.contentVisibility='visible';target.scrollIntoView({block:'start'});}
@@ -1736,6 +1736,21 @@
     if(nav.childNodes.length){nav.prepend(' | ');tail.append(nav,' ');}
   }
   function headingTail(heading) { return heading.querySelector(':scope > .hv-comment-tail') || heading; }
+  function refreshNavigation(node) {
+    const nav=node?.host.querySelector(':scope > .hv-own .hv-comment-nav');
+    if(!nav || !node.entry?.item)return;
+    const holder=document.createElement('span');lazyNavigation(node,node.entry.item,holder);
+    const fresh=holder.querySelector('.hv-comment-nav');
+    if(fresh)nav.replaceWith(fresh);else nav.remove();
+    if(visitBaseline)refreshNewNavigation();
+  }
+  // A sibling's prev/next point at ids that may not be loaded yet. Once one
+  // settles, the nearest visible siblings on either side are re-pointed.
+  function refreshSiblingNavigation(node) {
+    const ids=node.group?.ids||[], index=ids.indexOf(node.id);
+    const visible=id=>{const n=lazyNodes.get(id);return !!n?.entry && !['blocked','hidden-item'].includes(n.entry.effect) && !(n.entry.item?.deleted && !n.entry.item.kids?.length);};
+    for(const id of [ids.slice(0,index).reverse().find(visible),ids.slice(index+1).find(visible)])if(id)refreshNavigation(lazyNodes.get(id));
+  }
   const replyWord=n=>n+' '+(n===1?'reply':'replies');
 
   // Replies under a comment: those loaded and shown, or at least the direct ones HN reports.
@@ -1785,6 +1800,9 @@
   }
   function lazyRenderContent(node, entry) {
     node.entry=entry;
+    // Whatever this sibling turns out to be, its neighbours' prev and next
+    // are re-pointed now, before any branch below decides what to draw.
+    refreshSiblingNavigation(node);
     voteControls.delete(node.id);
     const item=entry.item;
     let own=node.host.querySelector(':scope > .hv-own');

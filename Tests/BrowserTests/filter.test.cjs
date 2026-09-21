@@ -1761,3 +1761,36 @@ test('clicking the other arrow while a vote stands switches the vote, and HN is 
   assert.ok(up2.classList.contains('hv-voted') && !down2.disabled, 'an upvoted comment loaded fresh still offers the downvote to a 973-karma account');
   q.dom.window.close();
 });
+
+test('a next link is withdrawn when the sibling it pointed at loads hidden, before or after it is clicked', async () => {
+  const navOf = (p, id) => [...p.doc.getElementById(String(id)).querySelectorAll('.hv-comment-nav a')].map(a => a.textContent);
+  const load = async (p, ids, entries) => { const request = p.messages.filter(m => m.kind === 'lazyItems').find(m => ids.every(id => m.ids.includes(id))); p.dom.window.HackerViews.lazyResult(request.token, entries); await new Promise(r => setTimeout(r, 5)); };
+  // Not clicked: 2 renders first, pointing at 3; 3 then loads blocked.
+  const p = await lazyPage(); const api = p.dom.window.HackerViews;
+  await load(p, [1], [{id: 1, effect: 'visible', item: {id: 1, type: 'story', by: 'op', title: 'Topic', kids: [2, 3, 4]}}]);
+  await load(p, [2], [{id: 2, effect: 'visible', item: {id: 2, type: 'comment', by: 'a', parent: 1, text: 'First'}}]);
+  assert.deepEqual(navOf(p, 2), ['parent', 'next'], 'while its siblings are unknown the link is offered');
+  await load(p, [3], [{id: 3, effect: 'blocked', label: 'Blocked', item: {id: 3, type: 'comment', by: 'b', parent: 1, text: 'Hidden'}}]);
+  assert.deepEqual(navOf(p, 2), ['parent', 'next'], 'a further unknown sibling keeps it');
+  await load(p, [4], [{id: 4, effect: 'blocked', label: 'Blocked', item: {id: 4, type: 'comment', by: 'c', parent: 1, text: 'Hidden too'}}]);
+  assert.deepEqual(navOf(p, 2), ['parent'], 'once every later sibling is hidden the link is gone');
+  p.dom.window.close();
+  // A deleted leaf and an unresolved sibling withdraw the link too, though neither draws a row.
+  const r = await lazyPage();
+  await load(r, [1], [{id: 1, effect: 'visible', item: {id: 1, type: 'story', by: 'op', title: 'Topic', kids: [2, 3, 4]}}]);
+  await load(r, [2], [{id: 2, effect: 'visible', item: {id: 2, type: 'comment', by: 'a', parent: 1, text: 'First'}}]);
+  await load(r, [3], [{id: 3, effect: 'visible', item: {id: 3, type: 'comment', by: null, parent: 1, deleted: true}}]);
+  await load(r, [4], [{id: 4, effect: 'unresolved', reason: 'Could not check', item: {id: 4, type: 'comment', by: 'd', parent: 1, text: 'Unknown'}}]);
+  assert.deepEqual(navOf(r, 2), ['parent'], 'a deleted leaf and an unresolved sibling are not offered');
+  r.dom.window.close();
+  // Clicked first: the link waits, then is withdrawn when the loaded candidates are all hidden.
+  const q = await lazyPage();
+  await load(q, [1], [{id: 1, effect: 'visible', item: {id: 1, type: 'story', by: 'op', title: 'Topic', kids: [2, 3]}}]);
+  await load(q, [2], [{id: 2, effect: 'visible', item: {id: 2, type: 'comment', by: 'a', parent: 1, text: 'First'}}]);
+  const next = [...q.doc.getElementById('2').querySelectorAll('.hv-comment-nav a')].find(a => a.textContent === 'next');
+  next.click();
+  assert.equal(next.textContent, 'Loading…');
+  await load(q, [3], [{id: 3, effect: 'blocked', label: 'Blocked', item: {id: 3, type: 'comment', by: 'b', parent: 1, text: 'Hidden'}}]);
+  assert.deepEqual(navOf(q, 2), ['parent'], 'no dead link is left behind');
+  q.dom.window.close();
+});
