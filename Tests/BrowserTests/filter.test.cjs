@@ -1065,7 +1065,8 @@ test('upvote state survives a fresh reader document without resurrecting hidden 
   await new Promise(r=>setTimeout(r,10));
   assert.ok(!up.hidden && up.classList.contains('hv-voted') && up.getAttribute('aria-pressed')==='true','the cast arrow stays, marked');
   assert.equal(up.getAttribute('aria-label'),'Upvoted. Click to undo');
-  assert.ok(!down.hidden && down.classList.contains('hv-vacant') && down.disabled && down.getAttribute('aria-hidden')==='true','the other arrow keeps its place, unseen');
+  assert.ok(!down.hidden && !down.disabled && !down.classList.contains('hv-voted'),'the other arrow stays, ready to switch');
+  assert.equal(down.getAttribute('aria-label'),'Switch to downvote');
   assert.equal(first.doc.querySelector('.hv-vote-status'),null,'no text is appended to the row');
   up.click();
   await new Promise(r=>setTimeout(r,10));
@@ -1076,7 +1077,7 @@ test('upvote state survives a fresh reader document without resurrecting hidden 
   const refreshed=await open();
   [up,down]=refreshed.doc.querySelectorAll('.hv-vote');
   assert.ok(!up.hidden && up.classList.contains('hv-voted'),'a fresh document shows the vote HN reports');
-  assert.ok(!down.hidden && down.classList.contains('hv-vacant'));
+  assert.equal(down.hidden,true,'with no karma known, no downvote is offered on a fresh document');
   assert.equal(up.getAttribute('aria-label'),'Upvoted. Click to undo');
   up.click();up.click();
   await new Promise(r=>setTimeout(r,10));
@@ -1110,7 +1111,8 @@ test('failed undo stays retryable and restored controls respect current eligibil
   p.dom.window.HackerViews.lazyResult(request.token,[{id:1,effect:'visible',item:{id:1,type:'comment',by:'author',text:'Comment'}}]);
   await new Promise(r=>setTimeout(r,20));
   const [up,down]=p.doc.querySelectorAll('.hv-vote');
-  assert.ok(!up.hidden && up.classList.contains('hv-vacant'),'the upvote arrow holds its slot above the cast downvote');
+  assert.ok(!up.hidden && !up.classList.contains('hv-voted'),'the upvote arrow stays beside the cast downvote');
+  assert.equal(up.getAttribute('aria-label'),'Switch to upvote');
   assert.ok(!down.hidden && down.classList.contains('hv-voted'));
   assert.equal(down.getAttribute('aria-label'),'Downvoted. Click to undo');
   down.click();
@@ -1121,7 +1123,7 @@ test('failed undo stays retryable and restored controls respect current eligibil
   fail=false;down.click();
   await new Promise(r=>setTimeout(r,10));
   assert.equal(undoRequests,2);
-  assert.equal(up.hidden,false);assert.equal(up.disabled,false);assert.equal(up.classList.contains('hv-vacant'),false);assert.equal(down.hidden,true);
+  assert.equal(up.hidden,false);assert.equal(up.disabled,false);assert.equal(down.hidden,true);
   assert.equal(up.classList.contains('hv-voted'),false);
   p.dom.window.close();
 });
@@ -1702,7 +1704,15 @@ test('a comment is its header and its text: HN’s line with reply and note, no 
   assert.ok(row.querySelector('td.hv-gutter > .hv-rail-head'), 'the segment beside the parent\u2019s own text is part of the control');
   assert.equal(row.querySelector('td.votelinks'), null, 'a comment row has no vote cell');
   assert.deepEqual([...head.querySelectorAll(':scope > .hv-votes > .hv-vote')].map(b => b.title), ['Upvote', 'Downvote'], 'the arrows sit inline at the start of the header');
-  assert.equal(p.doc.getElementById('3').querySelector('.hv-rail-head'), null, 'a leaf has no such segment');
+  const leafHead = p.doc.getElementById('3').querySelector('td.hv-gutter > .hv-rail-head');
+  assert.ok(leafHead, 'a leaf has the line control too');
+  leafHead.dispatchEvent(new p.dom.window.MouseEvent('mouseenter'));
+  assert.equal(leafHead.title, 'Collapse comment');
+  leafHead.click();
+  assert.equal(p.doc.getElementById('3').querySelector('.comment').hidden, true, 'clicking a leaf\u2019s line collapses the comment');
+  assert.equal(p.doc.getElementById('3').querySelector('.hv-collapse').textContent, '[+]');
+  leafHead.click();
+  assert.equal(p.doc.getElementById('3').querySelector('.comment').hidden, false);
   rail.dispatchEvent(new p.dom.window.MouseEvent('mouseenter'));
   assert.equal(rail.title, 'Collapse 2 replies');
   rail.click();
@@ -1715,4 +1725,39 @@ test('a comment is its header and its text: HN’s line with reply and note, no 
   assert.equal(children.hidden, true, 'the segment beside the text collapses the branch too');
   row.querySelector('.hv-collapse').click();
   p.dom.window.close();
+});
+
+test('clicking the other arrow while a vote stands switches the vote, and HN is asked before the new vote is cast', async () => {
+  const requests = []; let voted = null;
+  const p = await lazyPage(); const w = p.dom.window;
+  w.IntersectionObserver = class {constructor(callback) {this.callback = callback;} observe(target) {this.callback([{target, isIntersecting: true}]);} unobserve() {}};
+  w.fetch = async (url, options) => {
+    requests.push(new URL(url).pathname + '?' + (new URL(url).searchParams.get('how') || ''));
+    const u = new URL(url);
+    if (u.pathname === '/vote') { voted = u.searchParams.get('how') === 'un' ? null : u.searchParams.get('how'); return {ok: true}; }
+    return {ok: true, text: async () => `<span class="pagetop"><a id="me" href="user?id=reader">reader</a> (973) | <a id="logout" href="logout">logout</a></span><table><tr class="athing comtr" id="1"><td class="votelinks">
+      <a id="up_1" class="${voted ? 'nosee' : ''}" href="vote?id=1&how=up&auth=fixture">up</a><a id="down_1" class="${voted ? 'nosee' : ''}" href="vote?id=1&how=down&auth=fixture">down</a>
+      </td><td><span class="comhead">author ${voted ? `<a id="un_1" href="vote?id=1&how=un&auth=fixture">${voted === 'up' ? 'unvote' : 'undown'}</a>` : ''}</span></td></tr></table>`};
+  };
+  const request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  w.HackerViews.lazyResult(request.token, [{id: 1, effect: 'visible', item: {id: 1, type: 'comment', by: 'author', text: 'Comment'}}]);
+  await new Promise(r => setTimeout(r, 20));
+  const [up, down] = p.doc.querySelectorAll('.hv-vote');
+  up.click(); await new Promise(r => setTimeout(r, 10));
+  assert.ok(up.classList.contains('hv-voted') && !down.hidden && !down.classList.contains('hv-voted'), 'after an upvote both arrows stay');
+  down.click(); await new Promise(r => setTimeout(r, 20));
+  assert.deepEqual(requests.filter(r => r.startsWith('/vote')), ['/vote?up', '/vote?un', '/vote?down'], 'the switch undoes, checks with HN, then casts the other way');
+  assert.ok(down.classList.contains('hv-voted') && !up.hidden && !up.classList.contains('hv-voted'), 'the downvote now stands and the upvote is offered');
+  assert.equal(up.getAttribute('aria-label'), 'Switch to upvote');
+  p.dom.window.close();
+  // A fresh document of a voted comment offers the other arrow from the undo link when the account has the karma.
+  const q = await lazyPage(); const v = q.dom.window; voted = 'up';
+  v.IntersectionObserver = w.IntersectionObserver;
+  v.fetch = w.fetch;
+  const req2 = q.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  v.HackerViews.lazyResult(req2.token, [{id: 1, effect: 'visible', item: {id: 1, type: 'comment', by: 'author', text: 'Comment'}}]);
+  await new Promise(r => setTimeout(r, 20));
+  const [up2, down2] = q.doc.querySelectorAll('.hv-vote');
+  assert.ok(up2.classList.contains('hv-voted') && !down2.hidden, 'an upvoted comment loaded fresh still offers the downvote to a 973-karma account');
+  q.dom.window.close();
 });

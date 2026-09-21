@@ -205,7 +205,7 @@
     body[data-hv-topic] { overflow-anchor: none; }
     .hv-own > button { cursor: pointer; color: var(--qhn-text); background: var(--qhn-hover); border: 1px solid var(--qhn-line); border-radius: 5px; min-height: 32px; }
     .hv-own .hv-vote.hv-voted { color: var(--qhn-accent); }
-    .hv-own .hv-vote.hv-vacant { visibility: hidden; pointer-events: none; }
+    .hv-votes:has(.hv-voted) .hv-vote:not(.hv-voted):not(:hover):not(:focus-visible) > .votearrow { opacity: .45; }
     .hv-own .hv-vote.hv-voted:hover, .hv-own .hv-vote.hv-voted:focus-visible { color: var(--qhn-text); }
     .hv-own .fatitem td.votelinks { width: 34px; min-width: 34px; text-align: center; padding-top: 8px; }
     .fatitem .hv-vote { margin: 0 auto; }
@@ -1535,21 +1535,17 @@
     // State lives on the arrow: a cast vote keeps its arrow, in accent, and
     // clicking it again undoes. Nothing else in the row changes.
     for(const {button,direction} of voteControls.get(id)||[]) {
-      const cast=actions?.voted===direction;
-      // While a vote stands the other arrow keeps its place, unseen, so the
-      // cast arrow does not slide into its slot.
-      const vacant=!!actions?.voted && !cast;
-      button.hidden=actions?.voted ? false : !actions?.[direction];
+      // Both arrows stay while a vote stands: the cast one in colour, the
+      // other dimmed and ready to switch the vote. Nothing moves.
+      const cast=actions?.voted===direction, eligible=!!actions?.[direction];
+      button.hidden=!cast && !eligible;
       button.classList.toggle('hv-voted',cast);
-      button.classList.toggle('hv-vacant',vacant);
       button.setAttribute('aria-pressed',String(cast));
-      button.setAttribute('aria-hidden',String(vacant));
-      button.tabIndex=vacant?-1:0;
       const verb=direction==='up'?'Upvote':'Downvote', state=direction==='up'?'Upvoted':'Downvoted';
       const label=cast ? (!actions.undo ? state : actions.undoFailed ? 'Undo failed. Click to retry' : state+'. Click to undo')
-        : (button.dataset.hvRetry ? 'Retry vote' : verb);
+        : actions?.voted ? 'Switch to '+verb.toLowerCase() : (button.dataset.hvRetry ? 'Retry vote' : verb);
       button.title=label;button.setAttribute('aria-label',label);
-      button.disabled=pendingVotes.has(id) || vacant || (cast && !actions.undo);
+      button.disabled=pendingVotes.has(id) || (cast && !actions.undo);
     }
   }
   function voteLinkHidden(link) {
@@ -1577,18 +1573,28 @@
         if(actions.voted)actions.undo=url.href;
       }
     }
+    // While a vote stands HN hides both arrows, so the other direction is
+    // taken from the undo link (same token). Downvoting is offered only to
+    // accounts with the karma for it; the switch itself is verified with HN.
+    if(actions.voted) {
+      const other=actions.voted==='up'?'down':'up';
+      if(!actions[other] && (other==='up' || downvotesAllowed())) { const derived=new URL(actions.undo);derived.searchParams.set('how',other);actions[other]=derived.href; }
+    }
     return actions;
   }
-  async function undoVote(id) {
+  function downvotesAllowed() { return parseInt(String(headerModel.identity?.karma||'').replace(/,/g,''),10)>=501; }
+  async function undoVote(id, then) {
     const previous=voteActions.get(id);
     if(!previous?.undo || pendingVotes.has(id))return;
     pendingVotes.add(id);updateVoteControls(id);
+    let cleared=false;
     try {
       const url=new URL(previous.undo);url.searchParams.set('js','t');
       const response=await pooledFetch(url.href,{credentials:'same-origin',cache:'no-store'});
       if(!response.ok)throw new Error();
+      cleared=true;
       voteActions.set(id,{});updateVoteControls(id);
-      // Ask HN which actions are now eligible; never infer downvote eligibility.
+      // Ask HN which actions are now eligible rather than assuming.
       const target=new URL('/item?id='+id,location.origin).href;
       const page=await pooledFetch(target,{credentials:'same-origin',cache:'no-store'});
       if(page.ok) {
@@ -1597,10 +1603,12 @@
         if(row)voteActions.set(id,readVoteActions(doc,row,target));
       }
     } catch (_) {
-      if(voteActions.get(id)===previous)previous.undoFailed=true;
+      if(!cleared && voteActions.get(id)===previous)previous.undoFailed=true;
       // If the undo request failed, retain the voted state and allow retry.
       // If only the subsequent eligibility fetch failed, leave unknown actions hidden.
     } finally {pendingVotes.delete(id);updateVoteControls(id);}
+    // Switching: cast the other way only if HN now offers it.
+    if(cleared && then && voteActions.get(id)?.[then.direction])await castVote(then.item,then.button,then.direction);
   }
   async function loadVoteActions() {
     if(localPaused || voteFetching || !votePage || typeof fetch!=='function')return;
@@ -1662,7 +1670,13 @@
     return button;
   }
   async function lazyVote(item, button, direction) {
-    if(voteActions.get(item.id)?.voted===direction)return undoVote(item.id);
+    const current=voteActions.get(item.id);
+    if(current?.voted===direction)return undoVote(item.id);
+    // The other arrow while a vote stands: undo, then cast the other way.
+    if(current?.voted)return undoVote(item.id,{item,button,direction});
+    return castVote(item,button,direction);
+  }
+  async function castVote(item, button, direction) {
     const action=voteActions.get(item.id)?.[direction];if(!action || pendingVotes.has(item.id))return;
     pendingVotes.add(item.id);updateVoteControls(item.id);
     try {
@@ -1671,7 +1685,8 @@
       if(!voted.ok)throw new Error();
       url.searchParams.set('how','un');
       delete button.dataset.hvRetry;
-      voteActions.set(item.id,{voted:direction,undo:url.href});updateVoteControls(item.id);
+      const other=direction==='up'?'down':'up', kept=voteActions.get(item.id)||{};
+      voteActions.set(item.id,{[other]:kept[other],voted:direction,undo:url.href});updateVoteControls(item.id);
     } catch (_) {button.dataset.hvRetry='1';}
     finally {pendingVotes.delete(item.id);updateVoteControls(item.id);}
   }
@@ -1723,10 +1738,12 @@
     for(const other of lazyNodes.values())if(other.entry && other.ancestors.has(node.id) && !filteredEffect(other.entry.effect))loaded++;
     return Math.max(loaded,node.entry?.item?.kids?.length||0);
   }
-  // The segment of the column beside a comment's own text: the same control as the rail below it.
+  // The line beside a comment's own text collapses that comment, and its
+  // replies with it when it has any: the same control as the rail below.
   function branchHead(node) {
     const head=document.createElement('button');head.type='button';head.className='hv-rail-head';head.tabIndex=-1;head.setAttribute('aria-hidden','true');
-    head.onmouseenter=()=>{head.title='Collapse '+replyWord(repliesBelow(node));};head.onclick=()=>node.toggleButton?.click();
+    head.onmouseenter=()=>{const replies=repliesBelow(node);head.title=node.collapsed?'Expand':replies?'Collapse '+replyWord(replies):'Collapse comment';};
+    head.onclick=()=>node.toggleButton?.click();
     return head;
   }
   function branchRail(node) {
@@ -1808,7 +1825,7 @@
         if(item.time){const age=hnLink(relativeTime(item.time),'/item?id='+item.id);age.title=new Date(item.time*1000).toLocaleString();const stamp=document.createElement('span');stamp.className='hv-age';stamp.append(' · ',age);heading.append(stamp);}
         lazyNavigation(node,item,heading);
         headingTail(heading).append(collapseToggle(node));
-        if(item.kids?.length && node.depth*28<280)votes.append(branchHead(node));
+        votes.append(branchHead(node));
         const head=document.createElement('div');head.append(heading);
         cell.append(head);innerRow.append(ind,votes,cell);tbody.append(row);
         own.append(table);
@@ -1847,7 +1864,7 @@
       const ind=document.createElement('td');ind.className='ind';ind.setAttribute('indent',String(node.depth*40));
       const spacer=document.createElement('span');spacer.style.cssText='display:block;width:'+Math.min(node.depth*28,280)+'px';ind.append(spacer);
       const votes=document.createElement('td'); votes.className='hv-gutter';
-      if(item.kids?.length && node.depth*28<280)votes.append(branchHead(node));
+      votes.append(branchHead(node));
       // The arrows sit inline before the author; the wrapper keeps its width
       // whether or not the account may vote, so the header never shifts.
       const arrows=document.createElement('span');arrows.className='hv-votes';
