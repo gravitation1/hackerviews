@@ -1719,12 +1719,21 @@
   function headingTail(heading) { return heading.querySelector(':scope > .hv-comment-tail') || heading; }
   const replyWord=n=>n+' '+(n===1?'reply':'replies');
   // Marks rows whose vote cell has no room for a marker below the arrows.
-  const shortRowObserver=typeof ResizeObserver==='undefined'?null:new ResizeObserver(entries=>{
-    for(const entry of entries) {
-      const cell=entry.target,row=cell.closest('tr.comtr');if(!row || !cell.isConnected)continue;
-      const top=parseFloat(getComputedStyle(cell,'::before').top)||0;
-      row.toggleAttribute('data-hv-short-row',cell.clientHeight-top<10);
-    }
+  // Re-judged when the row resizes and when an arrow appears or goes, since
+  // eligibility arrives after layout without changing the row's height.
+  function noteRoomBelowArrows(cell) {
+    const row=cell?.closest('tr.comtr');if(!row || !cell.isConnected)return;
+    const top=parseFloat(getComputedStyle(cell,'::before').top)||0;
+    row.toggleAttribute('data-hv-short-row',cell.clientHeight-top<10);
+  }
+  const roomChecks=new Set();let roomCheckPending=false;
+  function scheduleRoomCheck(cell) {
+    if(!cell)return;roomChecks.add(cell);if(roomCheckPending)return;roomCheckPending=true;
+    (typeof requestAnimationFrame==='function'?requestAnimationFrame:setTimeout)(()=>{roomCheckPending=false;for(const c of roomChecks)noteRoomBelowArrows(c);roomChecks.clear();});
+  }
+  const shortRowObserver=typeof ResizeObserver==='undefined'?null:new ResizeObserver(entries=>{for(const entry of entries)noteRoomBelowArrows(entry.target);});
+  const arrowObserver=typeof MutationObserver==='undefined'?null:new MutationObserver(records=>{
+    for(const record of records)if(record.target.classList?.contains('hv-vote'))scheduleRoomCheck(record.target.closest('td.votelinks'));
   });
   // Replies under a comment: those loaded and shown, or at least the direct ones HN reports.
   function repliesBelow(node) {
@@ -2090,6 +2099,7 @@
     },{rootMargin:'500px'});
     window.addEventListener('scroll',lazyPump,{passive:true});
     renderHeader();
+    arrowObserver?.observe(document.getElementById('hv-topic-root'),{attributes:true,attributeFilter:['hidden'],subtree:true});
     lazyGroup(document.getElementById('hv-topic-root'),[Number(document.body.dataset.hvTopic)],0,new Set());
     lazyAnnounce();lazyPump();void loadVoteActions();
   }
