@@ -2003,6 +2003,17 @@
     lazyThread=true;lazyRestoreY=Number(document.body.dataset.hvScroll)||0;
     if(document.body.dataset.hvReveal)revealedID=Number(document.body.dataset.hvTopic);
     try { const visit=JSON.parse(atob(document.body.dataset.hvVisit||'')); if(Number.isFinite(visit?.viewedAt) && visit.viewedAt>0)visitBaseline=visit; } catch(_) {}
+    // A discussion opened again by a new navigation takes the threads the
+    // reader had collapsed last time. History state, when present, wins.
+    let seededCollapse=false;
+    try {
+      const anchor=JSON.parse(atob(document.body.dataset.hvAnchor||''));
+      if(!Array.isArray(anchor?.collapsed) && Array.isArray(visitBaseline?.collapsed)) {
+        for(const id of visitBaseline.collapsed)if(Number.isSafeInteger(id) && id>0)lazyCollapsed.add(id);
+        seededCollapse=lazyCollapsed.size>0;
+      }
+    } catch(_) { if(Array.isArray(visitBaseline?.collapsed)){for(const id of visitBaseline.collapsed)if(Number.isSafeInteger(id) && id>0)lazyCollapsed.add(id);seededCollapse=lazyCollapsed.size>0;} }
+    if(seededCollapse)post({kind:'collapsedState',ids:[...lazyCollapsed]});
     try {
       const anchor=JSON.parse(atob(document.body.dataset.hvAnchor||''));
       for(const id of anchor.collapsed || [])if(Number.isSafeInteger(id) && id>0)lazyCollapsed.add(id);

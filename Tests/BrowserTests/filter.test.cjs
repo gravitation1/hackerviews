@@ -1654,3 +1654,24 @@ test('feed rows the reader has opened before show how many comments arrived sinc
   assert.equal(p.doc.getElementById('103').nextElementSibling.querySelector('.hv-new-count'), null, 'nothing for a story never opened');
   p.dom.window.close();
 });
+
+test('a discussion opened again restores the threads collapsed on the previous visit, unless history says otherwise', async () => {
+  const viewedAt = 1700000000;
+  const story = api => { const request = api.messages.filter(m => m.kind === 'lazyItems').at(-1); api.dom.window.HackerViews.lazyResult(request.token, [{id: 1, effect: 'visible', item: {id: 1, type: 'story', by: 'op', title: 'Topic', descendants: 2, kids: [2, 3]}}]); };
+  const replies = api => { const request = api.messages.filter(m => m.kind === 'lazyItems').at(-1); api.dom.window.HackerViews.lazyResult(request.token, [
+    {id: 2, effect: 'visible', item: {id: 2, type: 'comment', by: 'a', parent: 1, time: viewedAt - 50, text: 'One', kids: [4]}},
+    {id: 3, effect: 'visible', item: {id: 3, type: 'comment', by: 'b', parent: 1, time: viewedAt - 40, text: 'Two'}}]); };
+  const p = await lazyPage(undefined, {visit: {viewedAt, leftAt: viewedAt + 60, descendants: 2, collapsed: [2]}});
+  const seeded = p.messages.find(m => m.kind === 'collapsedState');
+  assert.deepEqual([...(seeded?.ids || [])], [2], 'the seeded set is posted so the history entry and the next visit carry it');
+  story(p); await new Promise(r => setTimeout(r, 5)); replies(p); await new Promise(r => setTimeout(r, 5));
+  assert.equal(p.doc.getElementById('2').querySelector('.hv-collapse').textContent, '[+]', 'the thread collapsed last time is collapsed again');
+  assert.equal(p.doc.getElementById('2').querySelector('.comment').hidden, true);
+  assert.equal(p.doc.getElementById('3').querySelector('.hv-collapse').textContent, '[-]');
+  p.dom.window.close();
+  const q = await lazyPage({id: 3, top: 0, y: 0, ancestors: [1], collapsed: []}, {visit: {viewedAt, leftAt: viewedAt + 60, descendants: 2, collapsed: [2]}});
+  assert.equal(q.messages.find(m => m.kind === 'collapsedState'), undefined, 'history state that says nothing is collapsed is not overridden');
+  story(q); await new Promise(r => setTimeout(r, 5)); replies(q); await new Promise(r => setTimeout(r, 5));
+  assert.equal(q.doc.getElementById('2').querySelector('.hv-collapse').textContent, '[-]');
+  q.dom.window.close();
+});

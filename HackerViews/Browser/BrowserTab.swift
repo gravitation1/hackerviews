@@ -75,8 +75,12 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
     func recordVisit(ending: Bool) {
         if let activePage { activePage.recordVisit(ending: ending); return }
         guard let visit else { return }
-        let anchor = history.indices.contains(historyIndex) && Self.topicID(history[historyIndex].url) == visit.id ? history[historyIndex].anchor : nil
-        store.visits.record(Visit(id: visit.id, viewedAt: visit.viewedAt, leftAt: Date(), descendants: visit.descendants, anchor: anchor))
+        let entry = history.indices.contains(historyIndex) && Self.topicID(history[historyIndex].url) == visit.id ? history[historyIndex] : nil
+        // The page posts its collapse set whenever it changes, and once at load
+        // when seeded from the previous visit; until then the seed still holds.
+        let collapsed = entry?.collapsed ?? visitBaseline?.collapsed
+        store.visits.record(Visit(id: visit.id, viewedAt: visit.viewedAt, leftAt: Date(), descendants: visit.descendants, anchor: entry?.anchor,
+                                  collapsed: collapsed.map { Array($0.prefix(5000)) }))
         if ending { self.visit = nil }
     }
     /// Takes the pending reveal for `id` from this tab and its history owner.
@@ -227,6 +231,7 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
             var object: [String: Any] = ["viewedAt": Int(baseline.viewedAt.timeIntervalSince1970), "leftAt": Int(baseline.leftAt.timeIntervalSince1970), "reload": refreshing]
             if let descendants = baseline.descendants { object["descendants"] = descendants }
             if let anchor = baseline.anchor, let parsed = try? JSONSerialization.jsonObject(with: anchor) { object["anchor"] = parsed }
+            if let collapsed = baseline.collapsed, !collapsed.isEmpty { object["collapsed"] = collapsed }
             return (try? JSONSerialization.data(withJSONObject: object))?.base64EncodedString()
         } ?? ""
         expectingShellLoad = true

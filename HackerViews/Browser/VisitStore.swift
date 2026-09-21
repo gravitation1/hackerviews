@@ -9,6 +9,9 @@ struct Visit: Codable, Equatable {
     var leftAt: Date
     var descendants: Int?
     var anchor: Data?
+    /// Threads the reader had collapsed when they left, restored when the
+    /// discussion is opened again by a new navigation.
+    var collapsed: [Int]?
 }
 
 /// Local-only memory of visited discussions, kept beside the records file.
