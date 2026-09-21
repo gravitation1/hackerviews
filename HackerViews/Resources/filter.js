@@ -205,7 +205,7 @@
     body[data-hv-topic] { overflow-anchor: none; }
     .hv-own > button { cursor: pointer; color: var(--qhn-text); background: var(--qhn-hover); border: 1px solid var(--qhn-line); border-radius: 5px; min-height: 32px; }
     .hv-own .hv-vote.hv-voted { color: var(--qhn-accent); }
-    .hv-own .hv-vote.hv-vacant { visibility: hidden; pointer-events: none; }
+    .hv-own .hv-vote.hv-vacant, .hv-own .hv-vote.hv-vacant:hover { color: transparent; background: var(--qhn-bg); pointer-events: none; }
     .hv-own .hv-vote.hv-voted:hover, .hv-own .hv-vote.hv-voted:focus-visible { color: var(--qhn-text); }
     .hv-own .fatitem td.votelinks { width: 34px; min-width: 34px; text-align: center; padding-top: 8px; }
     .fatitem .hv-vote { margin: 0 auto; }
@@ -230,22 +230,30 @@
     .hv-own .hv-collapse:hover, .hv-own .hv-collapse:focus-visible { color: var(--qhn-text); background: var(--qhn-hover); outline: 1px solid var(--qhn-line); }
     .hv-comment-tail, .hv-age { white-space: nowrap; }
     .hv-comment-nav a { text-decoration: none; }
-    .comtr.hv-tombstone td.default { border-left: 2px dashed var(--qhn-line); padding: 2px 0 2px 6px; }
+    .comtr.hv-tombstone td.default { padding: 2px 0 2px 6px; }
     .hv-tombstone-label { color: var(--qhn-muted); font-size: 12px; font-style: italic; }
     .hv-own .hv-vote { appearance: none; -webkit-appearance: none; display: block; box-sizing: border-box;
       width: 20px; height: 16px; min-height: 0; padding: 0; margin: 0; border: 0; border-radius: 2px;
-      background: transparent; color: var(--qhn-muted); }
+      background: var(--qhn-bg); color: var(--qhn-muted); }
     .hv-vote .votearrow { display: block; width: 0; height: 0; margin: auto; border-left: 4px solid transparent;
       border-right: 4px solid transparent; border-bottom: 8px solid currentColor; }
     .hv-vote .rotate180 { transform: rotate(180deg); }
     .hv-own .hv-vote:hover, .hv-own .hv-vote:focus-visible { color: var(--qhn-text); background: var(--qhn-hover); }
     .hv-own .hv-vote:disabled { opacity: .45; }
     .hv-own td.votelinks { vertical-align: top; padding-top: 1px; width: 20px; min-width: 20px; }
-    .hv-own .hv-vote:has(> .rotate180):not(.hv-voted):not(:hover):not(:focus-visible) { opacity: .45; }
-    /* A branch draws one rail, hanging from its parent's arrows to its last
-       reply. It is the collapse control for the branch; [-] stays for keys. */
+    .hv-own .hv-vote:has(> .rotate180):not(.hv-voted):not(:hover):not(:focus-visible) > .votearrow { opacity: .45; }
+    /* One column per comment: its arrows, then its own marker when it has one
+       (highlighted author, revealed, moderated), then the rail of its replies.
+       The arrows paint the page colour so the marker runs behind them. */
+    .hv-own td.votelinks { position: relative; }
+    .comtr td.votelinks::after { content: ''; position: absolute; left: 10px; top: 0; bottom: 0; width: 2px; box-sizing: border-box; background: transparent; }
+    .comtr.qhn-preferred td.votelinks::after { background: var(--qhn-highlight, #27a99a); }
+    .comtr.qhn-revealed td.votelinks::after { background: transparent; border-left: 2px dashed var(--qhn-accent); }
+    .comtr.hv-tombstone td.votelinks::after { background: transparent; border-left: 2px dashed var(--qhn-line); }
+    /* A branch draws one rail in that same column, from just under its parent's
+       text to its last reply. It is the collapse control for the branch; [-] stays for keys. */
     .hv-children { position: relative; }
-    .hv-rail { position: absolute; top: 0; bottom: 12px; width: 12px; z-index: 1; margin: 0; padding: 0; border: 0; min-height: 0; appearance: none; -webkit-appearance: none;
+    .hv-rail { position: absolute; top: -12px; bottom: 12px; width: 12px; z-index: 1; margin: 0; padding: 0; border: 0; min-height: 0; appearance: none; -webkit-appearance: none;
       cursor: pointer; background: linear-gradient(to right, transparent 5px, var(--qhn-line) 5px, var(--qhn-line) 6px, transparent 6px); }
     .hv-rail:hover, .hv-rail:focus-visible { outline: 0; background: linear-gradient(to right, transparent 4px, var(--qhn-accent) 4px, var(--qhn-accent) 6px, transparent 6px); }
     .hv-node:has(> .hv-children > .hv-rail:hover) > .hv-own .comhead .hnuser { color: var(--qhn-accent) !important; }
@@ -295,7 +303,7 @@
     .hv-chip-alert, .hv-chip[aria-pressed="true"] { color: var(--qhn-accent); border-color: color-mix(in srgb, var(--qhn-accent) 45%, var(--qhn-line)); }
     .hv-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
     .qhn-revealed .commtext, .qhn-revealed .titleline, .qhn-revealed .toptext { opacity: .6; }
-    .comtr.qhn-revealed td.default { border-left-style: dashed; }
+
     .qhn-reveal-label { display: inline-block; margin-left: 6px; padding: 1px 5px; font-size: 10px; line-height: 1.3; font-weight: 600;
       color: var(--qhn-accent); border: 1px solid currentColor; border-radius: 4px; vertical-align: baseline; white-space: nowrap; }
     .hv-skeleton { display: inline-block; width: 92px; height: 12px; border-radius: 6px; background: var(--qhn-line); vertical-align: middle; margin-left: 4px; }
@@ -328,7 +336,7 @@
     /* A comment is its header and its text. Depth is the indent, the branch
        rail belongs to the branch (.hv-rail), and the left edge carries a
        marker only when there is something to mark. */
-    .comtr td.default { border-left: 2px solid transparent; background: transparent; padding: 0 0 0 6px; }
+    .comtr td.default { border-left: 0; background: transparent; padding: 0 0 0 6px; }
     .comtr td.default > div:first-child { margin: 0 0 2px !important; }
     .comtr td.default > br { display: none; }
     .comhead a.hnuser { color: var(--qhn-text); font-size: 12px; font-weight: 600; }
@@ -373,7 +381,7 @@
     /* Story title and metadata form one continuous surface; comment gutters stay unpainted. */
     .qhn-preferred:not(.comtr) { background: color-mix(in srgb, var(--qhn-highlight, #27a99a) 12%, var(--qhn-bg)) !important; }
     .qhn-preferred:not(.comtr) > td { background: transparent !important; }
-    .qhn-preferred td.default { border-left-color: var(--qhn-highlight, #27a99a) !important; }
+
     .qhn-preferred-author { color: var(--qhn-highlight, #27a99a) !important; font-weight: 600; }
     .qhn-faded-author[data-qhn-filter-label]::after { content: ' ◐ ' attr(data-qhn-filter-label); font-size: 10px; font-weight: 600; color: var(--qhn-muted); }
     .qhn-preferred-author::after { content: ' ★'; font-size: 10px; font-weight: 600; }
@@ -1709,7 +1717,7 @@
   }
   function branchRail(node) {
     const rail=document.createElement('button');rail.type='button';rail.className='hv-rail';rail.tabIndex=-1;rail.setAttribute('aria-hidden','true');
-    rail.style.left=(Math.min(node.depth*28,280)+4)+'px';
+    rail.style.left=(Math.min(node.depth*28,280)+13)+'px';
     rail.onmouseenter=()=>{rail.title='Collapse '+replyWord(repliesBelow(node));};
     rail.onclick=()=>node.toggleButton?.click();
     node.rail=rail;return rail;

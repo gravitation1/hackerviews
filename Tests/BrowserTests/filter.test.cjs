@@ -1696,7 +1696,7 @@ test('a comment is its header and its text: HN’s line with reply and note, no 
   const children = row.closest('.hv-node').querySelector(':scope > .hv-children');
   const rail = children.querySelector(':scope > .hv-rail');
   assert.ok(rail, 'a comment with replies owns one rail for its branch');
-  assert.equal(rail.style.left, '4px', 'at depth 0 the rail hangs under the arrows');
+  assert.equal(rail.style.left, '13px', 'at depth 0 the rail line sits under the arrow column, allowing for HN\u2019s table spacing');
   assert.equal(p.doc.getElementById('3').closest('.hv-node').querySelector(':scope > .hv-children'), null, 'a reply without replies has no rail');
   rail.dispatchEvent(new p.dom.window.MouseEvent('mouseenter'));
   assert.equal(rail.title, 'Collapse 2 replies');
