@@ -248,7 +248,7 @@
        when there are replies, the author's colour when highlighted, dashed when
        revealed or moderated. Every comment has one, so no gutter is empty; a parent's collapses the
        branch; [-] stays for keys. */
-    .hv-votes { display: inline-flex; align-items: center; gap: 3px; width: 33px; height: 14px; margin-right: 2px; vertical-align: -2px; }
+    .hv-votes { display: inline-flex; align-items: center; gap: 3px; width: 33px; height: 14px; margin-right: 2px; vertical-align: 1px; }
     .hv-votes .hv-vote { display: inline-block; width: 15px; height: 14px; border-radius: 3px; }
     .hv-votes .votearrow { border-left-width: 4px; border-right-width: 4px; border-bottom-width: 7px; }
     .hv-own { --hv-column: var(--qhn-line); }
