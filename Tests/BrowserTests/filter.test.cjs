@@ -597,9 +597,9 @@ test('vote controls only expose authenticated HN actions for the exact item',asy
   const request=p.messages.filter(m=>m.kind==='lazyItems').at(-1);
   api.lazyResult(request.token,[{id:1,effect:'visible',item:{id:1,type:'comment',by:'reader',text:'Comment'}}]);
   const [up,down]=p.doc.querySelectorAll('.hv-vote');
-  assert.equal(up.hidden,true);assert.equal(down.hidden,true);
+  assert.ok([up,down].every(b => b.disabled && b.classList.contains('hv-ineligible')),'both arrows dead until HN offers them');
   await new Promise(r=>setTimeout(r,20));
-  assert.equal(up.hidden,false);assert.equal(down.hidden,true);
+  assert.ok(!up.disabled && !up.classList.contains('hv-ineligible'));assert.ok(down.disabled && down.classList.contains('hv-ineligible'));
   assert.equal(p.doc.querySelector('.qhn-op-badge').textContent,'You');
   p.dom.window.close();
 });
@@ -611,7 +611,7 @@ test('signed-out voting links leave both controls hidden',async()=>{
   const request=p.messages.filter(m=>m.kind==='lazyItems').at(-1);
   api.lazyResult(request.token,[{id:1,effect:'visible',item:{id:1,type:'comment',by:'reader',text:'Comment'}}]);
   await new Promise(r=>setTimeout(r,20));
-  assert.ok([...p.doc.querySelectorAll('.hv-vote')].every(button=>button.hidden));
+  assert.ok([...p.doc.querySelectorAll('.hv-vote')].every(b => b.disabled && b.classList.contains('hv-ineligible')));
   p.dom.window.close();
 });
 
@@ -683,7 +683,7 @@ test('deleted comments show a tombstone directly and preserve surviving replies 
   api.lazyResult(request.token,[{id:1,effect:'visible',item:{id:1,type:'comment',deleted:true,parent:99,kids:[2]}}]);
   assert.match(p.doc.body.textContent,/\[deleted\]/);
   assert.equal(p.doc.querySelector('.qhn-record'),null);
-  assert.equal(p.doc.querySelector('.hv-vote'),null);
+  assert.ok(p.doc.querySelectorAll('.hv-vote').length>0 && [...p.doc.querySelectorAll('.hv-vote')].every(b=>b.disabled&&b.classList.contains('hv-ineligible')),'a tombstone keeps the arrow slot with dead arrows');
   assert.equal(p.doc.body.textContent.includes('Retry'),false);
   await new Promise(r=>setTimeout(r,5));
   request=p.messages.filter(m=>m.kind==='lazyItems').at(-1);
@@ -1077,7 +1077,7 @@ test('upvote state survives a fresh reader document without resurrecting hidden 
   const refreshed=await open();
   [up,down]=refreshed.doc.querySelectorAll('.hv-vote');
   assert.ok(!up.hidden && up.classList.contains('hv-voted'),'a fresh document shows the vote HN reports');
-  assert.equal(down.hidden,true,'with no karma known, no downvote is offered on a fresh document');
+  assert.ok(down.disabled && down.classList.contains('hv-ineligible'),'with no karma known, the downvote is dead on a fresh document');
   assert.equal(up.getAttribute('aria-label'),'Upvoted. Click to undo');
   up.click();up.click();
   await new Promise(r=>setTimeout(r,10));
@@ -1095,7 +1095,7 @@ test('hidden authenticated vote links are unavailable even without an undo link'
   const request=p.messages.filter(m=>m.kind==='lazyItems').at(-1);
   p.dom.window.HackerViews.lazyResult(request.token,[{id:1,effect:'visible',item:{id:1,type:'comment',by:'author',text:'Comment'}}]);
   await new Promise(r=>setTimeout(r,20));
-  assert.ok([...p.doc.querySelectorAll('.hv-vote')].every(button=>button.hidden));
+  assert.ok([...p.doc.querySelectorAll('.hv-vote')].every(b => b.disabled && b.classList.contains('hv-ineligible')));
   assert.equal(p.doc.querySelector('.hv-vote-status'),null);
   p.dom.window.close();
 });
@@ -1123,7 +1123,7 @@ test('failed undo stays retryable and restored controls respect current eligibil
   fail=false;down.click();
   await new Promise(r=>setTimeout(r,10));
   assert.equal(undoRequests,2);
-  assert.equal(up.hidden,false);assert.equal(up.disabled,false);assert.equal(down.hidden,true);
+  assert.equal(up.hidden,false);assert.equal(up.disabled,false);assert.ok(down.disabled && down.classList.contains('hv-ineligible'));
   assert.equal(up.classList.contains('hv-voted'),false);
   p.dom.window.close();
 });
@@ -1758,6 +1758,6 @@ test('clicking the other arrow while a vote stands switches the vote, and HN is 
   v.HackerViews.lazyResult(req2.token, [{id: 1, effect: 'visible', item: {id: 1, type: 'comment', by: 'author', text: 'Comment'}}]);
   await new Promise(r => setTimeout(r, 20));
   const [up2, down2] = q.doc.querySelectorAll('.hv-vote');
-  assert.ok(up2.classList.contains('hv-voted') && !down2.hidden, 'an upvoted comment loaded fresh still offers the downvote to a 973-karma account');
+  assert.ok(up2.classList.contains('hv-voted') && !down2.disabled, 'an upvoted comment loaded fresh still offers the downvote to a 973-karma account');
   q.dom.window.close();
 });

@@ -206,6 +206,10 @@
     .hv-own > button { cursor: pointer; color: var(--qhn-text); background: var(--qhn-hover); border: 1px solid var(--qhn-line); border-radius: 5px; min-height: 32px; }
     .hv-own .hv-vote.hv-voted { color: var(--qhn-accent); }
     .hv-votes:has(.hv-voted) .hv-vote:not(.hv-voted):not(:hover):not(:focus-visible) > .votearrow { opacity: .45; }
+    /* An arrow the account cannot use stays in place, dead: the row keeps its
+       shape and the state is visible instead of implied by a gap. */
+    .hv-own .hv-vote.hv-ineligible, .hv-own .hv-vote.hv-ineligible:hover, .hv-own .hv-vote.hv-ineligible:disabled { opacity: 1; background: transparent; color: var(--qhn-muted); cursor: default; }
+    .hv-votes .hv-vote.hv-ineligible > .votearrow { opacity: .22 !important; }
     .hv-own .hv-vote.hv-voted:hover, .hv-own .hv-vote.hv-voted:focus-visible { color: var(--qhn-text); }
     .hv-own .fatitem td.votelinks { width: 34px; min-width: 34px; text-align: center; padding-top: 8px; }
     .fatitem .hv-vote { margin: 0 auto; }
@@ -1537,15 +1541,17 @@
     for(const {button,direction} of voteControls.get(id)||[]) {
       // Both arrows stay while a vote stands: the cast one in colour, the
       // other dimmed and ready to switch the vote. Nothing moves.
-      const cast=actions?.voted===direction, eligible=!!actions?.[direction];
-      button.hidden=!cast && !eligible;
+      const cast=actions?.voted===direction, eligible=!!actions?.[direction], dead=!cast && !eligible;
+      button.hidden=false;
       button.classList.toggle('hv-voted',cast);
+      button.classList.toggle('hv-ineligible',dead);
       button.setAttribute('aria-pressed',String(cast));
       const verb=direction==='up'?'Upvote':'Downvote', state=direction==='up'?'Upvoted':'Downvoted';
       const label=cast ? (!actions.undo ? state : actions.undoFailed ? 'Undo failed. Click to retry' : state+'. Click to undo')
+        : dead ? (actions ? 'Can’t '+verb.toLowerCase()+' this' : verb)
         : actions?.voted ? 'Switch to '+verb.toLowerCase() : (button.dataset.hvRetry ? 'Retry vote' : verb);
       button.title=label;button.setAttribute('aria-label',label);
-      button.disabled=pendingVotes.has(id) || (cast && !actions.undo);
+      button.disabled=pendingVotes.has(id) || dead || (cast && !actions.undo);
     }
   }
   function voteLinkHidden(link) {
@@ -1648,7 +1654,7 @@
     void loadVoteActions();
   }
   function lazyVoteControl(item, direction) {
-    const button=document.createElement('button');button.type='button';button.className='hv-vote';button.hidden=true;
+    const button=document.createElement('button');button.type='button';button.className='hv-vote hv-ineligible';button.disabled=true;
     button.title=direction==='up'?'Upvote':'Downvote';button.setAttribute('aria-label',button.title);
     const arrow=document.createElement('span');arrow.className='votearrow'+(direction==='down'?' rotate180':'');arrow.setAttribute('aria-hidden','true');button.append(arrow);
     const control={button,direction,visible:false};
@@ -1821,7 +1827,8 @@
         const votes=document.createElement('td');votes.className='hv-gutter';
         const cell=document.createElement('td');cell.className='default';
         const heading=document.createElement('span');heading.className='comhead';
-        const label=hnLink(marker,'/item?id='+item.id);label.className='hv-tombstone-label';heading.append(label);
+        const label=hnLink(marker,'/item?id='+item.id);label.className='hv-tombstone-label';
+        const arrows=document.createElement('span');arrows.className='hv-votes';arrows.append(lazyVoteControl(item,'up'),lazyVoteControl(item,'down'));heading.append(arrows,label);
         if(item.time){const age=hnLink(relativeTime(item.time),'/item?id='+item.id);age.title=new Date(item.time*1000).toLocaleString();const stamp=document.createElement('span');stamp.className='hv-age';stamp.append(' · ',age);heading.append(stamp);}
         lazyNavigation(node,item,heading);
         headingTail(heading).append(collapseToggle(node));
