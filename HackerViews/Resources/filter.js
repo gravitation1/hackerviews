@@ -210,7 +210,9 @@
        shape and the state is visible instead of implied by a gap. */
     .hv-own .hv-vote.hv-ineligible, .hv-own .hv-vote.hv-ineligible:hover, .hv-own .hv-vote.hv-ineligible:disabled { opacity: 1; background: transparent; color: var(--qhn-muted); cursor: default; }
     .hv-votes .hv-vote.hv-ineligible > .votearrow { opacity: .22 !important; }
-    .hv-own .hv-vote.hv-voted:hover, .hv-own .hv-vote.hv-voted:focus-visible { color: var(--qhn-text); }
+    /* A cast arrow keeps its colour under the pointer, so the click shows at
+       once; the hover background alone marks the pointer. */
+    .hv-own .hv-vote.hv-voted:hover, .hv-own .hv-vote.hv-voted:focus-visible { color: var(--qhn-accent); background: var(--qhn-hover); }
     .hv-own .fatitem td.votelinks { width: 34px; min-width: 34px; text-align: center; padding-top: 8px; }
     .fatitem .hv-vote { margin: 0 auto; }
     .hv-score { display: block; font-size: 12px; font-weight: 600; color: var(--qhn-muted); margin-top: 2px; }
