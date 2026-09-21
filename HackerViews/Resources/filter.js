@@ -246,13 +246,12 @@
        job: one continuous 2px line from the top of the comment, beside its own
        text, continuing as the rail of its replies. Beside the text it is grey
        when there are replies, the author's colour when highlighted, dashed when
-       revealed or moderated, absent otherwise. Every part of it collapses the
+       revealed or moderated. Every comment has one, so no gutter is empty; a parent's collapses the
        branch; [-] stays for keys. */
     .hv-votes { display: inline-flex; align-items: center; gap: 3px; width: 33px; height: 14px; margin-right: 2px; vertical-align: -2px; }
     .hv-votes .hv-vote { display: inline-block; width: 15px; height: 14px; border-radius: 3px; }
     .hv-votes .votearrow { border-left-width: 4px; border-right-width: 4px; border-bottom-width: 7px; }
-    .hv-own { --hv-column: transparent; }
-    .hv-node:has(> .hv-children) > .hv-own { --hv-column: var(--qhn-line); }
+    .hv-own { --hv-column: var(--qhn-line); }
     .comtr.qhn-preferred { --hv-column: var(--qhn-highlight, #27a99a); }
     .comtr td.hv-gutter { position: relative; width: 12px; min-width: 12px; padding: 0; }
     .comtr td.hv-gutter::before { content: ''; position: absolute; left: 5px; top: 0; bottom: 0; width: 2px; box-sizing: border-box; background: var(--hv-column); }
