@@ -280,30 +280,42 @@ private struct BrowserPage: View {
 
 /// Padding belongs to the button surface so its visual and interactive bounds agree.
 struct ControlSurfaceStyle: ButtonStyle {
+    /// Toolbar metrics: a highlight that hugs the glyph, as the system's own
+    /// toolbar buttons do, instead of the 32-point surface used in content.
+    var compact = false
     func makeBody(configuration: Configuration) -> some View {
-        Surface(configuration: configuration)
+        Surface(configuration: configuration, compact: compact)
     }
     private struct Surface: View {
         let configuration: ButtonStyle.Configuration
+        let compact: Bool
         @State private var hovering = false
         @Environment(\.isEnabled) private var enabled
         @Environment(\.isFocused) private var focused
-        private var targetSize: CGFloat {
+        private var minWidth: CGFloat {
             #if os(macOS)
-            32
+            compact ? 26 : 32
             #else
             44
             #endif
         }
+        private var minHeight: CGFloat {
+            #if os(macOS)
+            compact ? 22 : 32
+            #else
+            44
+            #endif
+        }
+        private var radius: CGFloat { compact ? 5 : 6 }
         var body: some View {
             configuration.label
-                .padding(.horizontal, 8)
-                .frame(minWidth: targetSize, minHeight: targetSize)
+                .padding(.horizontal, compact ? 5 : 8)
+                .frame(minWidth: minWidth, minHeight: minHeight)
                 .contentShape(Rectangle())
                 .background(enabled && (hovering || configuration.isPressed) ? Color.primary.opacity(configuration.isPressed ? 0.18 : 0.08) : Color.clear,
-                            in: RoundedRectangle(cornerRadius: 6))
+                            in: RoundedRectangle(cornerRadius: radius))
                 .overlay {
-                    RoundedRectangle(cornerRadius: 6)
+                    RoundedRectangle(cornerRadius: radius)
                         .strokeBorder(focused ? Color.accentColor : Color.clear, lineWidth: 2)
                 }
                 .opacity(enabled ? 1 : 0.45)
@@ -405,6 +417,7 @@ private struct ReaderToolbarActions: View {
         }
         .labelStyle(.iconOnly)
         .symbolRenderingMode(.monochrome)
+        .buttonStyle(ControlSurfaceStyle(compact: true))
     }
 
     private var separator: some View {
