@@ -205,7 +205,7 @@
     body[data-hv-topic] { overflow-anchor: none; }
     .hv-own > button { cursor: pointer; color: var(--qhn-text); background: var(--qhn-hover); border: 1px solid var(--qhn-line); border-radius: 5px; min-height: 32px; }
     .hv-own .hv-vote.hv-voted { color: var(--qhn-accent); }
-    .hv-own .hv-vote.hv-vacant, .hv-own .hv-vote.hv-vacant:hover { color: transparent; background: var(--qhn-bg); pointer-events: none; }
+    .hv-own .hv-vote.hv-vacant { visibility: hidden; pointer-events: none; }
     .hv-own .hv-vote.hv-voted:hover, .hv-own .hv-vote.hv-voted:focus-visible { color: var(--qhn-text); }
     .hv-own .fatitem td.votelinks { width: 34px; min-width: 34px; text-align: center; padding-top: 8px; }
     .fatitem .hv-vote { margin: 0 auto; }
@@ -234,7 +234,7 @@
     .hv-tombstone-label { color: var(--qhn-muted); font-size: 12px; font-style: italic; }
     .hv-own .hv-vote { appearance: none; -webkit-appearance: none; display: block; box-sizing: border-box;
       width: 20px; height: 16px; min-height: 0; padding: 0; margin: 0; border: 0; border-radius: 2px;
-      background: var(--qhn-bg); color: var(--qhn-muted); }
+      background: transparent; color: var(--qhn-muted); }
     .hv-vote .votearrow { display: block; width: 0; height: 0; margin: auto; border-left: 4px solid transparent;
       border-right: 4px solid transparent; border-bottom: 8px solid currentColor; }
     .hv-vote .rotate180 { transform: rotate(180deg); }
@@ -242,14 +242,16 @@
     .hv-own .hv-vote:disabled { opacity: .45; }
     .hv-own td.votelinks { vertical-align: top; padding-top: 1px; width: 20px; min-width: 20px; }
     .hv-own .hv-vote:has(> .rotate180):not(.hv-voted):not(:hover):not(:focus-visible) > .votearrow { opacity: .45; }
-    /* One column per comment: its arrows, then its own marker when it has one
-       (highlighted author, revealed, moderated), then the rail of its replies.
-       The arrows paint the page colour so the marker runs behind them. */
+    /* One column per comment: its arrows cap the column, its own marker when
+       it has one (highlighted author, revealed, moderated) hangs from them to
+       the end of its text, and the rail of its replies continues below. */
     .hv-own td.votelinks { position: relative; }
-    .comtr td.votelinks::after { content: ''; position: absolute; left: 10px; top: 0; bottom: 0; width: 2px; box-sizing: border-box; background: transparent; }
-    .comtr.qhn-preferred td.votelinks::after { background: var(--qhn-highlight, #27a99a); }
-    .comtr.qhn-revealed td.votelinks::after { background: transparent; border-left: 2px dashed var(--qhn-accent); }
-    .comtr.hv-tombstone td.votelinks::after { background: transparent; border-left: 2px dashed var(--qhn-line); }
+    .comtr td.votelinks::before { content: ''; position: absolute; left: 10px; top: 3px; bottom: 0; width: 2px; box-sizing: border-box; background: transparent; }
+    .comtr td.votelinks:has(> .hv-vote:not([hidden]))::before { top: 21px; }
+    .comtr td.votelinks:has(> .hv-vote:not([hidden]) ~ .hv-vote:not([hidden]))::before { top: 37px; }
+    .comtr.qhn-preferred td.votelinks::before { background: var(--qhn-highlight, #27a99a); }
+    .comtr.qhn-revealed td.votelinks::before { background: transparent; border-left: 2px dashed var(--qhn-accent); }
+    .comtr.hv-tombstone td.votelinks::before { background: transparent; border-left: 2px dashed var(--qhn-line); }
     /* A branch draws one rail in that same column, from just under its parent's
        text to its last reply. It is the collapse control for the branch; [-] stays for keys. */
     .hv-children { position: relative; }
