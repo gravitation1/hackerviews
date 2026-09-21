@@ -242,31 +242,28 @@
     .hv-own .hv-vote:disabled { opacity: .45; }
     .hv-own td.votelinks { vertical-align: top; padding-top: 1px; width: 20px; min-width: 20px; }
     .hv-own .hv-vote:has(> .rotate180):not(.hv-voted):not(:hover):not(:focus-visible) > .votearrow { opacity: .45; }
-    /* One column per comment, one continuous 2px line: the arrows cap it, it
-       runs beside the comment's own text, and it continues as the rail of the
-       replies. The line beside the text is grey when there are replies, the
-       author's colour when highlighted, dashed when revealed or moderated, and
-       absent otherwise. Every part of it collapses the branch; [-] stays for keys. */
+    /* A comment's arrows sit inline before its author, so the gutter has one
+       job: one continuous 2px line from the top of the comment, beside its own
+       text, continuing as the rail of its replies. Beside the text it is grey
+       when there are replies, the author's colour when highlighted, dashed when
+       revealed or moderated, absent otherwise. Every part of it collapses the
+       branch; [-] stays for keys. */
+    .hv-votes { display: inline-flex; align-items: center; gap: 3px; width: 33px; height: 14px; margin-right: 2px; vertical-align: -2px; }
+    .hv-votes .hv-vote { display: inline-block; width: 15px; height: 14px; border-radius: 3px; }
+    .hv-votes .votearrow { border-left-width: 4px; border-right-width: 4px; border-bottom-width: 7px; }
     .hv-own { --hv-column: transparent; }
     .hv-node:has(> .hv-children) > .hv-own { --hv-column: var(--qhn-line); }
     .comtr.qhn-preferred { --hv-column: var(--qhn-highlight, #27a99a); }
-    .hv-own td.votelinks { position: relative; }
-    .comtr td.votelinks::before { content: ''; position: absolute; left: 10px; top: 3px; bottom: 0; width: 2px; box-sizing: border-box; background: var(--hv-column); }
-    .comtr td.votelinks:has(> .hv-vote:not([hidden]))::before, .comtr td.votelinks:has(> .hv-vote:not([hidden])) > .hv-rail-head { top: 21px; }
-    .comtr td.votelinks:has(> .hv-vote:not([hidden]) ~ .hv-vote:not([hidden]))::before, .comtr td.votelinks:has(> .hv-vote:not([hidden]) ~ .hv-vote:not([hidden])) > .hv-rail-head { top: 37px; }
-    .comtr.qhn-revealed td.votelinks::before { background: transparent; border-left: 2px dashed var(--qhn-accent); }
-    .comtr.hv-tombstone td.votelinks::before { background: transparent; border-left: 2px dashed var(--qhn-line); }
-    /* No line starts within a few pixels of the arrows. A row whose text ends
-       there draws no segment (a coloured name still carries a highlight), and
-       the rail of its replies begins level with the first reply instead. */
-    .comtr[data-hv-short-row] td.votelinks::before, .comtr[data-hv-short-row] .hv-rail-head { display: none; }
-    .hv-node:has(> .hv-own .comtr[data-hv-short-row]) > .hv-children > .hv-rail { top: 0; }
-    .hv-rail-head { position: absolute; left: 5px; top: 3px; bottom: 0; width: 12px; z-index: 1; margin: 0; padding: 0; border: 0; min-height: 0; appearance: none; -webkit-appearance: none; background: transparent; cursor: pointer; }
+    .comtr td.hv-gutter { position: relative; width: 12px; min-width: 12px; padding: 0; }
+    .comtr td.hv-gutter::before { content: ''; position: absolute; left: 5px; top: 0; bottom: 0; width: 2px; box-sizing: border-box; background: var(--hv-column); }
+    .comtr.qhn-revealed td.hv-gutter::before { background: transparent; border-left: 2px dashed var(--qhn-accent); }
+    .comtr.hv-tombstone td.hv-gutter::before { background: transparent; border-left: 2px dashed var(--qhn-line); }
+    .hv-rail-head { position: absolute; left: 0; top: 0; bottom: 0; width: 12px; z-index: 1; margin: 0; padding: 0; border: 0; min-height: 0; appearance: none; -webkit-appearance: none; background: transparent; cursor: pointer; }
     .hv-children { position: relative; }
     .hv-rail { position: absolute; top: -16px; bottom: 12px; width: 12px; z-index: 1; margin: 0; padding: 0; border: 0; min-height: 0; appearance: none; -webkit-appearance: none;
       cursor: pointer; background: linear-gradient(to right, transparent 5px, var(--qhn-line) 5px, var(--qhn-line) 7px, transparent 7px); }
     .hv-rail:hover, .hv-rail:focus-visible, .hv-node:has(> .hv-own .hv-rail-head:hover) > .hv-children > .hv-rail { outline: 0; background: linear-gradient(to right, transparent 5px, var(--qhn-accent) 5px, var(--qhn-accent) 7px, transparent 7px); }
-    .hv-node:has(> .hv-children > .hv-rail:hover) > .hv-own td.votelinks::before, .hv-own td.votelinks:has(> .hv-rail-head:hover)::before { background: var(--qhn-accent); border: 0; }
+    .hv-node:has(> .hv-children > .hv-rail:hover) > .hv-own td.hv-gutter::before, .hv-own td.hv-gutter:has(> .hv-rail-head:hover)::before { background: var(--qhn-accent); border: 0; }
     .hv-node:has(> .hv-children > .hv-rail:hover) > .hv-own .comhead .hnuser, .hv-node:has(> .hv-own .hv-rail-head:hover) > .hv-own .comhead .hnuser { color: var(--qhn-accent) !important; }
     .hv-reader-actions a, .hv-reader-actions .qhn-record-text { color: var(--qhn-muted); text-decoration: none; }
     .hv-reader-actions a:hover, .hv-reader-actions .qhn-record-text:hover { color: var(--qhn-accent); text-decoration: underline; }
@@ -1720,32 +1717,22 @@
   }
   function headingTail(heading) { return heading.querySelector(':scope > .hv-comment-tail') || heading; }
   const replyWord=n=>n+' '+(n===1?'reply':'replies');
-  // Marks rows whose vote cell has no room for a marker below the arrows.
-  // Re-judged when the row resizes and when an arrow appears or goes, since
-  // eligibility arrives after layout without changing the row's height.
-  function noteRoomBelowArrows(cell) {
-    const row=cell?.closest('tr.comtr');if(!row || !cell.isConnected)return;
-    const top=parseFloat(getComputedStyle(cell,'::before').top)||0;
-    row.toggleAttribute('data-hv-short-row',cell.clientHeight-top<10);
-  }
-  const roomChecks=new Set();let roomCheckPending=false;
-  function scheduleRoomCheck(cell) {
-    if(!cell)return;roomChecks.add(cell);if(roomCheckPending)return;roomCheckPending=true;
-    (typeof requestAnimationFrame==='function'?requestAnimationFrame:setTimeout)(()=>{roomCheckPending=false;for(const c of roomChecks)noteRoomBelowArrows(c);roomChecks.clear();});
-  }
-  const shortRowObserver=typeof ResizeObserver==='undefined'?null:new ResizeObserver(entries=>{for(const entry of entries)noteRoomBelowArrows(entry.target);});
-  const arrowObserver=typeof MutationObserver==='undefined'?null:new MutationObserver(records=>{
-    for(const record of records)if(record.target.classList?.contains('hv-vote'))scheduleRoomCheck(record.target.closest('td.votelinks'));
-  });
+
   // Replies under a comment: those loaded and shown, or at least the direct ones HN reports.
   function repliesBelow(node) {
     let loaded=0;
     for(const other of lazyNodes.values())if(other.entry && other.ancestors.has(node.id) && !filteredEffect(other.entry.effect))loaded++;
     return Math.max(loaded,node.entry?.item?.kids?.length||0);
   }
+  // The segment of the column beside a comment's own text: the same control as the rail below it.
+  function branchHead(node) {
+    const head=document.createElement('button');head.type='button';head.className='hv-rail-head';head.tabIndex=-1;head.setAttribute('aria-hidden','true');
+    head.onmouseenter=()=>{head.title='Collapse '+replyWord(repliesBelow(node));};head.onclick=()=>node.toggleButton?.click();
+    return head;
+  }
   function branchRail(node) {
     const rail=document.createElement('button');rail.type='button';rail.className='hv-rail';rail.tabIndex=-1;rail.setAttribute('aria-hidden','true');
-    rail.style.left=(Math.min(node.depth*28,280)+13)+'px';
+    rail.style.left=(Math.min(node.depth*28,280)+8)+'px';
     rail.onmouseenter=()=>{rail.title='Collapse '+replyWord(repliesBelow(node));};
     rail.onclick=()=>node.toggleButton?.click();
     node.rail=rail;return rail;
@@ -1815,13 +1802,14 @@
         inner.innerHTML='<tbody></tbody>';inner.firstChild.append(innerRow);outer.append(inner);row.append(outer);
         const ind=document.createElement('td');ind.className='ind';ind.setAttribute('indent',String(node.depth*40));
         const spacer=document.createElement('span');spacer.style.cssText='display:block;width:'+Math.min(node.depth*28,280)+'px';ind.append(spacer);
-        const votes=document.createElement('td');votes.className='votelinks';shortRowObserver?.observe(votes);
+        const votes=document.createElement('td');votes.className='hv-gutter';
         const cell=document.createElement('td');cell.className='default';
         const heading=document.createElement('span');heading.className='comhead';
         const label=hnLink(marker,'/item?id='+item.id);label.className='hv-tombstone-label';heading.append(label);
         if(item.time){const age=hnLink(relativeTime(item.time),'/item?id='+item.id);age.title=new Date(item.time*1000).toLocaleString();const stamp=document.createElement('span');stamp.className='hv-age';stamp.append(' · ',age);heading.append(stamp);}
         lazyNavigation(node,item,heading);
         headingTail(heading).append(collapseToggle(node));
+        if(item.kids?.length && node.depth*28<280)votes.append(branchHead(node));
         const head=document.createElement('div');head.append(heading);
         cell.append(head);innerRow.append(ind,votes,cell);tbody.append(row);
         own.append(table);
@@ -1859,14 +1847,12 @@
       inner.innerHTML='<tbody></tbody>';inner.firstChild.append(innerRow);outer.append(inner);row.append(outer);
       const ind=document.createElement('td');ind.className='ind';ind.setAttribute('indent',String(node.depth*40));
       const spacer=document.createElement('span');spacer.style.cssText='display:block;width:'+Math.min(node.depth*28,280)+'px';ind.append(spacer);
-      const votes=document.createElement('td'); votes.className='votelinks';
-      votes.append(lazyVoteControl(item,'up'),lazyVoteControl(item,'down'));
-      if(item.kids?.length && node.depth*28<280) {
-        // The segment of the column beside this comment's own text: part of the same control as the rail below.
-        const head=document.createElement('button');head.type='button';head.className='hv-rail-head';head.tabIndex=-1;head.setAttribute('aria-hidden','true');
-        head.onmouseenter=()=>{head.title='Collapse '+replyWord(repliesBelow(node));};head.onclick=()=>node.toggleButton?.click();votes.append(head);
-      }
-      votes.style.visibility=node.collapsed?'hidden':'';shortRowObserver?.observe(votes);
+      const votes=document.createElement('td'); votes.className='hv-gutter';
+      if(item.kids?.length && node.depth*28<280)votes.append(branchHead(node));
+      // The arrows sit inline before the author; the wrapper keeps its width
+      // whether or not the account may vote, so the header never shifts.
+      const arrows=document.createElement('span');arrows.className='hv-votes';
+      arrows.append(lazyVoteControl(item,'up'),lazyVoteControl(item,'down'));heading.prepend(arrows);
       const cell=document.createElement('td');cell.className='default';
       const head=document.createElement('div');head.append(heading);
       if(fresh){row.classList.add('hv-new');const dot=document.createElement('span');dot.className='hv-new-dot';dot.title='New since your last visit';dot.setAttribute('aria-label','New since your last visit');heading.prepend(dot);}
@@ -1879,7 +1865,7 @@
       ours.append(' | ',reply);if(item.by)ours.append(' | ',recordButton(item.by,row,user,'note'));
       headingTail(heading).append(ours,' ');
       const body=document.createElement('div');body.className='comment';body.hidden=!!node.collapsed;
-      headingTail(heading).append(collapseToggle(node,collapsed=>{body.hidden=collapsed;votes.style.visibility=collapsed?'hidden':'';}));
+      headingTail(heading).append(collapseToggle(node,collapsed=>{body.hidden=collapsed;}));
       const text=document.createElement('span');text.className='commtext';text.append(safeBody(item.deleted?'[deleted]':item.text || ''));body.append(text);
       cell.append(head,body);innerRow.append(ind,votes,cell);tbody.append(row);
     } else {
@@ -2101,7 +2087,6 @@
     },{rootMargin:'500px'});
     window.addEventListener('scroll',lazyPump,{passive:true});
     renderHeader();
-    arrowObserver?.observe(document.getElementById('hv-topic-root'),{attributes:true,attributeFilter:['hidden'],subtree:true});
     lazyGroup(document.getElementById('hv-topic-root'),[Number(document.body.dataset.hvTopic)],0,new Set());
     lazyAnnounce();lazyPump();void loadVoteActions();
   }

@@ -85,10 +85,10 @@ import WebKit
               const row=document.getElementById('1'),cell=row.querySelector('.default'),before=cell.getBoundingClientRect().x;
               row.querySelector('.hv-collapse').click();
               const collapsed=cell.getBoundingClientRect().x;
-              if(getComputedStyle(buttons[0].parentElement).visibility!=='hidden')return 'votes visible after collapse';
+              if(!buttons[0].closest('.comhead'))return 'arrows not inline in the header';
               row.querySelector('.hv-collapse').click();
               if(Math.abs(before-collapsed)>.5)return 'collapse shifted gutter';
-              if(Math.abs(up.x-down.x)>.5 || down.y<up.bottom || up.width!==20 || up.height!==16)return JSON.stringify({up,down});
+              if(Math.abs(up.y-down.y)>.5 || down.x<up.right || up.width!==15 || up.height!==14)return JSON.stringify({up,down});
               if(buttons.some(b=>b.textContent || getComputedStyle(b).appearance!=='none'))return 'native button styling or text glyph';
               const record=row.querySelector('.qhn-record');
               const reference=record.cloneNode(true);document.body.append(reference);
@@ -115,7 +115,7 @@ import WebKit
             """, arguments: [:], in: nil, contentWorld: .page) as! String
             precondition(nextNavigation == "ok", "Next navigation: \(nextNavigation)")
             print("PASS WebKit next scrolls to offscreen sibling inside current discussion")
-            print("PASS WebKit lazy vote controls: stacked arrows, compact dimensions, stable collapse gutter")
+            print("PASS WebKit lazy vote controls: inline side-by-side arrows, compact dimensions, stable collapse gutter")
             print("PASS WebKit dark link contrast overrides HN score colors")
             print("PASS WebKit comment geometry: collapse/reopen at three depths and two widths")
             exit(0)
