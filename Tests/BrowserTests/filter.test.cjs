@@ -1698,6 +1698,8 @@ test('a comment is its header and its text: HN’s line with reply and note, no 
   assert.ok(rail, 'a comment with replies owns one rail for its branch');
   assert.equal(rail.style.left, '13px', 'at depth 0 the rail line sits under the arrow column, allowing for HN\u2019s table spacing');
   assert.equal(p.doc.getElementById('3').closest('.hv-node').querySelector(':scope > .hv-children'), null, 'a reply without replies has no rail');
+  assert.ok(row.querySelector('td.votelinks > .hv-rail-head'), 'the segment beside the parent\u2019s own text is part of the control');
+  assert.equal(p.doc.getElementById('3').querySelector('.hv-rail-head'), null, 'a leaf has no such segment');
   rail.dispatchEvent(new p.dom.window.MouseEvent('mouseenter'));
   assert.equal(rail.title, 'Collapse 2 replies');
   rail.click();
@@ -1706,5 +1708,8 @@ test('a comment is its header and its text: HN’s line with reply and note, no 
   assert.deepEqual([...p.messages.filter(m => m.kind === 'collapsedState').at(-1).ids], [2], 'through the same toggle, so the state persists');
   row.querySelector('.hv-collapse').click();
   assert.equal(children.hidden, false);
+  row.querySelector('.hv-rail-head').click();
+  assert.equal(children.hidden, true, 'the segment beside the text collapses the branch too');
+  row.querySelector('.hv-collapse').click();
   p.dom.window.close();
 });

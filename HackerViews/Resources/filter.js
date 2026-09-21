@@ -242,23 +242,27 @@
     .hv-own .hv-vote:disabled { opacity: .45; }
     .hv-own td.votelinks { vertical-align: top; padding-top: 1px; width: 20px; min-width: 20px; }
     .hv-own .hv-vote:has(> .rotate180):not(.hv-voted):not(:hover):not(:focus-visible) > .votearrow { opacity: .45; }
-    /* One column per comment: its arrows cap the column, its own marker when
-       it has one (highlighted author, revealed, moderated) hangs from them to
-       the end of its text, and the rail of its replies continues below. */
+    /* One column per comment, one continuous 2px line: the arrows cap it, it
+       runs beside the comment's own text, and it continues as the rail of the
+       replies. The line beside the text is grey when there are replies, the
+       author's colour when highlighted, dashed when revealed or moderated, and
+       absent otherwise. Every part of it collapses the branch; [-] stays for keys. */
+    .hv-own { --hv-column: transparent; }
+    .hv-node:has(> .hv-children) > .hv-own { --hv-column: var(--qhn-line); }
+    .comtr.qhn-preferred { --hv-column: var(--qhn-highlight, #27a99a); }
     .hv-own td.votelinks { position: relative; }
-    .comtr td.votelinks::before { content: ''; position: absolute; left: 10px; top: 3px; bottom: 0; width: 2px; box-sizing: border-box; background: transparent; }
-    .comtr td.votelinks:has(> .hv-vote:not([hidden]))::before { top: 21px; }
-    .comtr td.votelinks:has(> .hv-vote:not([hidden]) ~ .hv-vote:not([hidden]))::before { top: 37px; }
-    .comtr.qhn-preferred td.votelinks::before { background: var(--qhn-highlight, #27a99a); }
+    .comtr td.votelinks::before { content: ''; position: absolute; left: 10px; top: 3px; bottom: 0; width: 2px; box-sizing: border-box; background: var(--hv-column); }
+    .comtr td.votelinks:has(> .hv-vote:not([hidden]))::before, .comtr td.votelinks:has(> .hv-vote:not([hidden])) > .hv-rail-head { top: 21px; }
+    .comtr td.votelinks:has(> .hv-vote:not([hidden]) ~ .hv-vote:not([hidden]))::before, .comtr td.votelinks:has(> .hv-vote:not([hidden]) ~ .hv-vote:not([hidden])) > .hv-rail-head { top: 37px; }
     .comtr.qhn-revealed td.votelinks::before { background: transparent; border-left: 2px dashed var(--qhn-accent); }
     .comtr.hv-tombstone td.votelinks::before { background: transparent; border-left: 2px dashed var(--qhn-line); }
-    /* A branch draws one rail in that same column, from just under its parent's
-       text to its last reply. It is the collapse control for the branch; [-] stays for keys. */
+    .hv-rail-head { position: absolute; left: 5px; top: 3px; bottom: 0; width: 12px; z-index: 1; margin: 0; padding: 0; border: 0; min-height: 0; appearance: none; -webkit-appearance: none; background: transparent; cursor: pointer; }
     .hv-children { position: relative; }
-    .hv-rail { position: absolute; top: -12px; bottom: 12px; width: 12px; z-index: 1; margin: 0; padding: 0; border: 0; min-height: 0; appearance: none; -webkit-appearance: none;
-      cursor: pointer; background: linear-gradient(to right, transparent 5px, var(--qhn-line) 5px, var(--qhn-line) 6px, transparent 6px); }
-    .hv-rail:hover, .hv-rail:focus-visible { outline: 0; background: linear-gradient(to right, transparent 4px, var(--qhn-accent) 4px, var(--qhn-accent) 6px, transparent 6px); }
-    .hv-node:has(> .hv-children > .hv-rail:hover) > .hv-own .comhead .hnuser { color: var(--qhn-accent) !important; }
+    .hv-rail { position: absolute; top: -16px; bottom: 12px; width: 12px; z-index: 1; margin: 0; padding: 0; border: 0; min-height: 0; appearance: none; -webkit-appearance: none;
+      cursor: pointer; background: linear-gradient(to right, transparent 5px, var(--qhn-line) 5px, var(--qhn-line) 7px, transparent 7px); }
+    .hv-rail:hover, .hv-rail:focus-visible, .hv-node:has(> .hv-own .hv-rail-head:hover) > .hv-children > .hv-rail { outline: 0; background: linear-gradient(to right, transparent 5px, var(--qhn-accent) 5px, var(--qhn-accent) 7px, transparent 7px); }
+    .hv-node:has(> .hv-children > .hv-rail:hover) > .hv-own td.votelinks::before, .hv-own td.votelinks:has(> .hv-rail-head:hover)::before { background: var(--qhn-accent); border: 0; }
+    .hv-node:has(> .hv-children > .hv-rail:hover) > .hv-own .comhead .hnuser, .hv-node:has(> .hv-own .hv-rail-head:hover) > .hv-own .comhead .hnuser { color: var(--qhn-accent) !important; }
     .hv-reader-actions a, .hv-reader-actions .qhn-record-text { color: var(--qhn-muted); text-decoration: none; }
     .hv-reader-actions a:hover, .hv-reader-actions .qhn-record-text:hover { color: var(--qhn-accent); text-decoration: underline; }
     [hidden] { display: none !important; }
@@ -1835,6 +1839,11 @@
       const spacer=document.createElement('span');spacer.style.cssText='display:block;width:'+Math.min(node.depth*28,280)+'px';ind.append(spacer);
       const votes=document.createElement('td'); votes.className='votelinks';
       votes.append(lazyVoteControl(item,'up'),lazyVoteControl(item,'down'));
+      if(item.kids?.length && node.depth*28<280) {
+        // The segment of the column beside this comment's own text: part of the same control as the rail below.
+        const head=document.createElement('button');head.type='button';head.className='hv-rail-head';head.tabIndex=-1;head.setAttribute('aria-hidden','true');
+        head.onmouseenter=()=>{head.title='Collapse '+replyWord(repliesBelow(node));};head.onclick=()=>node.toggleButton?.click();votes.append(head);
+      }
       votes.style.visibility=node.collapsed?'hidden':'';
       const cell=document.createElement('td');cell.className='default';
       const head=document.createElement('div');head.append(heading);
