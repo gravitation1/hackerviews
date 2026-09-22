@@ -1828,3 +1828,27 @@ test('a dead or deleted leaf that a filter also matched is not counted as hidden
   assert.equal(q.doc.querySelector('#hv-header .hv-chip[aria-pressed]')?.textContent, '1 hidden', 'a blocked dead comment with replies is counted, since revealing it shows its tombstone and branch');
   p.dom.window.close(); q.dom.window.close();
 });
+
+test('when HN serves something other than the discussion, the header says so and retry recovers the vote links', async () => {
+  let serve = 'limited';
+  const p = await lazyPage(); const w = p.dom.window;
+  w.IntersectionObserver = class {constructor(callback) {this.callback = callback;} observe(target) {this.callback([{target, isIntersecting: true}]);} unobserve() {}};
+  w.fetch = async url => {
+    if (serve === 'limited') return {ok: true, text: async () => `<html><body>Sorry, we're not able to serve your requests this quickly.</body></html>`};
+    return {ok: true, text: async () => `<span class="pagetop"><a id="me" href="user?id=reader">reader</a> (973) | <a id="logout" href="logout">logout</a></span><table><tr class="athing comtr" id="1"><td class="votelinks"><a id="up_1" href="vote?id=1&how=up&auth=fixture">up</a></td><td><span class="comhead">author</span></td></tr></table>`};
+  };
+  const request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  w.HackerViews.lazyResult(request.token, [{id: 1, effect: 'visible', item: {id: 1, type: 'comment', by: 'author', text: 'Comment'}}]);
+  await new Promise(r => setTimeout(r, 20));
+  const chip = () => [...p.doc.querySelectorAll('#hv-header .hv-chip')].find(c => /HN page/.test(c.textContent));
+  assert.ok(chip(), 'the header reports the failed page');
+  const [up] = p.doc.querySelectorAll('.hv-vote');
+  assert.ok(up.disabled && up.classList.contains('hv-ineligible'), 'arrows stay dead meanwhile');
+  serve = 'ok';
+  chip().click();
+  await new Promise(r => setTimeout(r, 20));
+  assert.equal(chip(), undefined, 'the notice goes once the page loads');
+  assert.equal(p.doc.querySelector('#hv-header .hv-me')?.textContent, 'reader', 'sign-in state arrives');
+  assert.ok(!up.disabled && !up.classList.contains('hv-ineligible'), 'and the vote links with it');
+  p.dom.window.close();
+});

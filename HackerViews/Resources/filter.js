@@ -694,6 +694,13 @@
       side.append(item('logout', identity.logoutURL, {id: 'logout'}));
     } else if (identity.state === 'out') {
       side.append(item('login', identity.loginURL || 'https://news.ycombinator.com/login?goto=news'));
+    } else if (identity.state === 'unknown') {
+      // HN's page for this discussion did not load, so sign-in state, vote
+      // links and HN's own actions are all missing. Say so, and offer a retry.
+      const li = document.createElement('li'); const chip = document.createElement('button'); chip.type = 'button'; chip.className = 'hv-chip hv-chip-alert';
+      chip.append(chipIcon('retry'), document.createTextNode('HN page didn’t load · retry'));
+      chip.title = 'Hacker News’s page for this discussion could not be loaded, so votes and your sign-in state are unavailable. Retry.';
+      chip.onclick = retryVoteActions; li.append(chip); side.append(li);
     }
     host.replaceChildren(nav, side);
   }
@@ -1546,6 +1553,10 @@
   const voteControls = new Map();
   const votePages = new Set();
   let votePage = location.href, voteFetching = false;
+  function retryVoteActions() {
+    headerModel.identity={state:'pending'};renderHeader();
+    void loadVoteActions();
+  }
   let voteObserver;
   function updateVoteControls(id) {
     const actions=voteActions.get(id);
@@ -1643,6 +1654,10 @@
       if(!response.ok)throw new Error();
       const html=await response.text();trace('votes.response',{ms:performance.now()-voteStarted,bytes:new TextEncoder().encode(html).length});
       const doc=new DOMParser().parseFromString(html,'text/html');
+      // A page with neither HN's header nor a single contribution is not the
+      // discussion (a rate-limit or error page served with 200): a failed
+      // fetch, not a final answer.
+      if(!doc.querySelector('.pagetop, tr.athing'))throw new Error('not an HN page');
       readSignedInUser(doc);paintOP();
       if(document.getElementById('hv-header')) {
         const parsed=readHeader(doc,target);
@@ -1659,8 +1674,9 @@
       const next=more?new URL(more.getAttribute('href'),target):null;
       votePage=next && next.origin===location.origin && next.pathname==='/item' && next.searchParams.get('id')===new URL(location.href).searchParams.get('id')?next.href:null;
     } catch (_) {
-      // Unknown eligibility stays hidden. A later viewport entry can retry.
-      if(headerModel.identity.state==='pending'){headerModel.identity={state:'unknown'};renderHeader();}
+      // The header says so and offers a retry; the next viewport entry
+      // retries on its own, since the page is not recorded as loaded.
+      if(['pending','unknown'].includes(headerModel.identity.state)){headerModel.identity={state:'unknown'};renderHeader();}
       if(canonicalCommentState==='pending'){canonicalCommentState='failed';renderCommentBox();}
       return;
     } finally {voteFetching=false;trace('votes.end',{ms:performance.now()-voteStarted});}
