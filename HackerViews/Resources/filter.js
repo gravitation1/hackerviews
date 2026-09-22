@@ -1158,10 +1158,17 @@
     }
     return null;
   }
+  // A dead or deleted comment with no replies draws nothing whether or not a
+  // filter matched it, exactly as HN shows nothing for it without showdead;
+  // counting it as hidden would promise a reveal that has nothing to show.
+  function silentLeaf(entry) {
+    const item = entry?.item;
+    return !!item && item.type === 'comment' && !(item.kids?.length) && (item.deleted === true || (item.dead === true && !canonicalItems.get(item.id)?.showDead));
+  }
   // Hidden on its own account. Replies hidden only because of a loaded
   // ancestor are neither counted nor labelled: revealing that ancestor lifts them.
   function lazyFiltered(node, entry = node.entry) {
-    return filteredEffect(entry?.effect) && node.id !== revealedID && !inheritanceAnchor(node, entry);
+    return filteredEffect(entry?.effect) && node.id !== revealedID && !inheritanceAnchor(node, entry) && !silentLeaf(entry);
   }
   function lazyShown(node, entry = node.entry) {
     if (!filteredEffect(entry?.effect)) return true;
@@ -1529,6 +1536,7 @@
       if(node?.entry?.item?.dead)lazyRender(node,node.entry);
       else if(node)applyCanonicalMetadata(node);
     }
+    if(lazyThread)lazyHeaderStatus();
   }
   const voteActions = new Map();
   const pendingVotes = new Set();

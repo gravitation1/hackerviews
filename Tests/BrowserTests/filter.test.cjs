@@ -1794,3 +1794,28 @@ test('a next link is withdrawn when the sibling it pointed at loads hidden, befo
   assert.deepEqual(navOf(q, 2), ['parent'], 'no dead link is left behind');
   q.dom.window.close();
 });
+
+test('a dead or deleted leaf that a filter also matched is not counted as hidden, since revealing it would show nothing', async () => {
+  const p = await lazyPage(); const api = p.dom.window.HackerViews;
+  const chip = () => p.doc.querySelector('#hv-header .hv-chip[aria-pressed]');
+  let request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  api.lazyResult(request.token, [{id: 1, effect: 'visible', item: {id: 1, type: 'story', by: 'op', title: 'Topic', kids: [2, 3, 4]}}]);
+  await new Promise(r => setTimeout(r, 5));
+  request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  api.lazyResult(request.token, [
+    {id: 2, effect: 'visible', item: {id: 2, type: 'comment', by: 'alice', parent: 1, text: 'Alive'}},
+    {id: 3, effect: 'blocked', label: 'Newbies', item: {id: 3, type: 'comment', by: 'newbie', parent: 1, dead: true, text: '[dead]'}},
+    {id: 4, effect: 'blocked', label: 'Newbies', item: {id: 4, type: 'comment', by: 'newbie2', parent: 1, deleted: true}}]);
+  await new Promise(r => setTimeout(r, 5));
+  assert.equal(chip(), null, 'nothing is offered as hidden when the only matches are a dead leaf and a deleted leaf');
+  // A blocked dead comment that has replies keeps its place as a tombstone, so it does count.
+  const q = await lazyPage(); const api2 = q.dom.window.HackerViews;
+  request = q.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  api2.lazyResult(request.token, [{id: 1, effect: 'visible', item: {id: 1, type: 'story', by: 'op', title: 'Topic', kids: [2]}}]);
+  await new Promise(r => setTimeout(r, 5));
+  request = q.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  api2.lazyResult(request.token, [{id: 2, effect: 'blocked', label: 'Newbies', item: {id: 2, type: 'comment', by: 'newbie', parent: 1, dead: true, text: '[dead]', kids: [3]}}]);
+  await new Promise(r => setTimeout(r, 5));
+  assert.equal(q.doc.querySelector('#hv-header .hv-chip[aria-pressed]')?.textContent, '1 hidden', 'a blocked dead comment with replies is counted, since revealing it shows its tombstone and branch');
+  p.dom.window.close(); q.dom.window.close();
+});
