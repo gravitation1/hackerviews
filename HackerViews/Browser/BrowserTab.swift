@@ -412,6 +412,11 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
     func restoreRetainedViewport() {
         guard let (y, anchor) = reactivationPosition else { return }
         reactivationPosition = nil
+        // A feed page coming back on screen re-checks which of its stories
+        // have been opened, so the one just read is marked at once.
+        if lazyURL == nil, state == .ready {
+            webView.callAsyncJavaScript("window.HackerViews?.refreshVisits()", arguments: [:], in: nil, in: Self.world, completionHandler: nil)
+        }
         restoringRetainedViewport = true
         webView.callAsyncJavaScript("await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))); if (window.HackerViews) window.HackerViews.restoreReadingPosition(anchor, y); else window.scrollTo(0, y)",
             arguments: ["anchor": anchor ?? [:], "y": y], in: nil, in: Self.world) { [weak self] _ in

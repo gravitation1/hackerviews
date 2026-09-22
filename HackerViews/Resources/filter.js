@@ -324,6 +324,9 @@
     a:visited { color: var(--qhn-muted); }
     .title { font-size: 14px; line-height: 1.5; }
     .titleline > a { font-weight: 500; }
+    /* A discussion the reader has opened before: the title takes the visited
+       colour, as HN and browsers do, and says when it was last viewed. */
+    tr.athing[data-hv-visited] .titleline > a:any-link { color: var(--qhn-muted); }
     .rank { font-size: 11px; color: var(--qhn-muted); padding-right: 4px; }
     .subtext, .comhead, .sitestr, .sitebit { font-size: 11px; color: var(--qhn-muted); }
     .subtext a, .comhead a, .title .sitebit a { color: var(--qhn-muted); }
@@ -2181,23 +2184,33 @@
 
   // Feed rows the reader has opened before get a count of comments added since.
   let visitsRequested = false;
-  function requestVisits(stories) {
-    if (visitsRequested) return;
+  function requestVisits(stories, again = false) {
+    if (visitsRequested && !again) return;
     const ids = [...new Set(stories.map(idOf).filter(id => Number.isSafeInteger(id) && id > 0))];
     if (!ids.length) return;
     visitsRequested = true; post({kind: 'visits', ids: ids.slice(0, 500)});
   }
+  // Called when a retained feed page comes back on screen, so a discussion
+  // just opened from it is marked without a reload.
+  function refreshVisits() {
+    if (lazyThread) return;
+    requestVisits([...document.querySelectorAll('tr.athing:not(.comtr)')].filter(row => row.querySelector('.titleline')), true);
+  }
   function paintVisits(results) {
     for (const [key, record] of Object.entries(results || {})) {
       const row = document.getElementById(String(key));
-      if (!row || !Number.isFinite(record?.descendants)) continue;
+      if (!row || !Number.isFinite(record?.viewedAt)) continue;
+      row.setAttribute('data-hv-visited', '');
+      const title = row.querySelector('.titleline > a');
+      if (title) title.title = 'Viewed ' + relativeTime(record.viewedAt);
       const subtext = row.nextElementSibling?.querySelector('.subtext') || row.nextElementSibling;
       const link = [...(subtext?.querySelectorAll('a[href]') || [])].find(a => /^\s*\d+\s*comments?\s*$/.test(a.textContent));
-      if (!link || subtext.querySelector('.hv-new-count')) continue;
+      if (!link || !Number.isFinite(record.descendants)) continue;
       const fresh = Number(/\d+/.exec(link.textContent)[0]) - record.descendants;
-      if (fresh <= 0) continue;
-      const badge = document.createElement('span'); badge.className = 'hv-new-count'; badge.textContent = ' · +' + fresh + ' new';
-      badge.title = pluralize(fresh, 'comment') + ' since your last visit'; link.after(badge);
+      let badge = subtext.querySelector('.hv-new-count');
+      if (fresh <= 0) { badge?.remove(); continue; }
+      if (!badge) { badge = document.createElement('span'); badge.className = 'hv-new-count'; link.after(badge); }
+      badge.textContent = ' · +' + fresh + ' new'; badge.title = pluralize(fresh, 'comment') + ' since your last visit';
     }
   }
   function finish(token, decisions, blockPage = false, labels = {}, partial = false, inherited = {}) {
@@ -2325,6 +2338,7 @@
     resolvePartial(token, decisions, labels = {}, inherited = {}) { finish(token, decisions, false, labels, true, inherited); },
     resolve(token, decisions, labels = {}, inherited = {}) { finish(token, decisions, false, labels, false, inherited); },
     visitResults(results) { paintVisits(results); },
+    refreshVisits,
     retry() { process(); }
   };
   const observer = new MutationObserver(mutations => {

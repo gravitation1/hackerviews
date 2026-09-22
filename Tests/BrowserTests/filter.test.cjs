@@ -1655,6 +1655,15 @@ test('feed rows the reader has opened before show how many comments arrived sinc
   assert.equal(p.doc.getElementById('101').nextElementSibling.querySelector('.hv-new-count').textContent, ' · +12 new');
   assert.equal(p.doc.getElementById('102').nextElementSibling.querySelector('.hv-new-count'), null, 'nothing when the count has not grown');
   assert.equal(p.doc.getElementById('103').nextElementSibling.querySelector('.hv-new-count'), null, 'nothing for a story never opened');
+  assert.ok(p.doc.getElementById('101').hasAttribute('data-hv-visited') && p.doc.getElementById('102').hasAttribute('data-hv-visited'), 'opened stories are marked as viewed, with or without new comments');
+  assert.equal(p.doc.getElementById('103').hasAttribute('data-hv-visited'), false, 'a story never opened is not');
+  assert.match(p.doc.getElementById('102').querySelector('.titleline > a').title, /^Viewed .* ago$/, 'the title says when it was viewed');
+  const before = p.messages.filter(m => m.kind === 'visits').length;
+  p.dom.window.HackerViews.refreshVisits();
+  assert.equal(p.messages.filter(m => m.kind === 'visits').length, before + 1, 'coming back to the feed asks again');
+  p.dom.window.HackerViews.visitResults({'101': {descendants: 143, viewedAt: 1700000600}, '102': {descendants: 40, viewedAt: 1700000000}, '103': {descendants: 9, viewedAt: 1700000900}});
+  assert.equal(p.doc.getElementById('101').nextElementSibling.querySelector('.hv-new-count'), null, 'a story read since drops its new count');
+  assert.ok(p.doc.getElementById('103').hasAttribute('data-hv-visited'), 'a story opened from this page is marked when the page comes back');
   p.dom.window.close();
 });
 
