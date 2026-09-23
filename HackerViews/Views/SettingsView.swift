@@ -20,6 +20,12 @@ struct SettingsView: View {
         "Rewrites: links to the first site open on the second, keeping the path; subdomains count. A template with {url}, {host} or {path} opens the link through another site."
         #endif
     }
+    /// A binding to the row with this id that reads a blank rule, and writes
+    /// nothing, once the row is gone.
+    private func rewriteBinding(for id: UUID) -> Binding<LinkRewrite> {
+        Binding(get: { rewrites.first { $0.id == id } ?? LinkRewrite() },
+                set: { value in if let index = rewrites.firstIndex(where: { $0.id == id }) { rewrites[index] = value } })
+    }
     private func scheduleRewriteSave() {
         rewriteSave?.cancel()
         rewriteSave = Task { @MainActor in
@@ -56,25 +62,28 @@ struct SettingsView: View {
                 Text("Uses your default browser. Opens normally when private opening isn’t supported or the attempt fails.")
                     .font(.caption).foregroundStyle(.secondary)
                 #endif
-                ForEach($rewrites) { $rule in
+                ForEach(rewrites) { current in
+                    // Bound by id, not by index: a field's value action can fire after
+                    // its row is removed, and an index binding then trapped.
+                    let rule = rewriteBinding(for: current.id)
                     VStack(alignment: .leading, spacing: 6) {
                         HStack(spacing: 8) {
-                            TextField("Site", text: $rule.from, prompt: Text("x.com"))
+                            TextField("Site", text: rule.from, prompt: Text("x.com"))
                                 .labelsHidden().textFieldStyle(.roundedBorder).autocorrectionDisabled()
                                 #if os(iOS)
                                 .textInputAutocapitalization(.never).keyboardType(.URL)
                                 #endif
                             Image(systemName: "arrow.right").foregroundStyle(.secondary).accessibilityLabel("opens as")
-                            TextField("Opens as", text: $rule.to, prompt: Text("xcancel.com, or https://archive.ph/newest/{url}"))
+                            TextField("Opens as", text: rule.to, prompt: Text("xcancel.com, or https://archive.ph/newest/{url}"))
                                 .labelsHidden().textFieldStyle(.roundedBorder).autocorrectionDisabled()
                                 #if os(iOS)
                                 .textInputAutocapitalization(.never).keyboardType(.URL)
                                 #endif
-                            Toggle("Enabled", isOn: $rule.enabled).labelsHidden().toggleStyle(.switch)
-                            Button { rewrites.removeAll { $0.id == rule.id } } label: { Image(systemName: "minus.circle") }
+                            Toggle("Enabled", isOn: rule.enabled).labelsHidden().toggleStyle(.switch)
+                            Button { rewrites.removeAll { $0.id == current.id } } label: { Image(systemName: "minus.circle") }
                                 .buttonStyle(ControlSurfaceStyle()).accessibilityLabel("Remove rewrite")
                         }
-                        if let error = rule.error, !(rule.from.isEmpty && rule.to.isEmpty) {
+                        if let error = current.error, !(current.from.isEmpty && current.to.isEmpty) {
                             Text(error).font(.caption).foregroundStyle(.red)
                         }
                     }
