@@ -57,9 +57,16 @@ public struct RecordArchive: Codable, Sendable {
         }
     }
     public var rules: [FilterRule] { effectiveFilterRevision?.orderedRules ?? [.blockedDefault] }
+    /// The latest revision that carries link rewrites. A revision written by
+    /// an app that knew nothing of them leaves the previous set in force.
+    public var linkRewrites: [LinkRewrite] {
+        filterRevisions?.filter { $0.linkRewrites != nil }.max {
+            $0.modifiedAt == $1.modifiedAt ? $0.id.uuidString < $1.id.uuidString : $0.modifiedAt < $1.modifiedAt
+        }?.linkRewrites ?? []
+    }
 
     public var preferredUsers: Set<String> { Set(current.filter { $0.isPreferred == true }.map(\.username)) }
-    public var policy: FilterPolicy { FilterPolicy(blocked: blockedUsers, accounts: accountFilters, preferred: preferredUsers, highlights: highlightFilters, rules: rules) }
+    public var policy: FilterPolicy { FilterPolicy(blocked: blockedUsers, accounts: accountFilters, preferred: preferredUsers, highlights: highlightFilters, rules: rules, linkRewrites: linkRewrites) }
     public var revisionCount: Int { revisions.count + (filterRevisions?.count ?? 0) }
 
     public init(revisions: [PersonRevision] = []) { self.revisions = revisions }
@@ -112,7 +119,10 @@ public struct RecordArchive: Codable, Sendable {
                   r.filters.isValid, r.highlights?.isValid != false,
                   (r.orderedRules?.count ?? 0) <= 10_000,
                   r.orderedRules?.allSatisfy(\.isValid) != false,
-                  Set((r.orderedRules ?? []).map(\.id)).count == (r.orderedRules?.count ?? 0) else { throw ArchiveError.invalidRecord }
+                  Set((r.orderedRules ?? []).map(\.id)).count == (r.orderedRules?.count ?? 0),
+                  (r.linkRewrites?.count ?? 0) <= 1_000,
+                  r.linkRewrites?.allSatisfy({ $0.from.utf8.count <= 2_000 && $0.to.utf8.count <= 2_000 }) != false,
+                  Set((r.linkRewrites ?? []).map(\.id)).count == (r.linkRewrites?.count ?? 0) else { throw ArchiveError.invalidRecord }
         }
         for r in revisions {
             guard Self.validUsername(r.username), r.note.utf8.count <= 100_000,

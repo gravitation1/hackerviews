@@ -13,6 +13,26 @@ struct BackupDocument: FileDocument {
 }
 
 struct SettingsView: View {
+    private var rewriteHelp: String {
+        #if os(macOS)
+        "Links to the first site open on the second, keeping the path; subdomains count. A template with {url}, {host} or {path} opens the link through another site. Hold Option when clicking to open the original."
+        #else
+        "Links to the first site open on the second, keeping the path; subdomains count. A template with {url}, {host} or {path} opens the link through another site."
+        #endif
+    }
+    private func scheduleRewriteSave() {
+        rewriteSave?.cancel()
+        rewriteSave = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(800))
+            guard !Task.isCancelled else { return }
+            saveRewrites()
+        }
+    }
+    /// Empty rows are drafts and are not stored; incomplete ones are, so a
+    /// half-written template survives leaving Settings, and simply does nothing.
+    private func saveRewrites() {
+        store.saveLinkRewrites(rewrites.filter { !($0.from.isEmpty && $0.to.isEmpty) })
+    }
     @ObservedObject var store: RecordStore
     @AppStorage("HackerViews.preferPrivateExternalLinks") private var preferPrivateExternalLinks = false
     @State private var exporting = false
@@ -20,6 +40,8 @@ struct SettingsView: View {
     @State private var importData: Data?
     @State private var confirmImport = false
     @State private var importSummary = ""
+    @State private var rewrites: [LinkRewrite] = []
+    @State private var rewriteSave: Task<Void, Never>?
     var body: some View {
         Form {
             if let notice = store.recoveryNotice {
@@ -35,6 +57,33 @@ struct SettingsView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             #endif
+            Section {
+                ForEach($rewrites) { $rule in
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 8) {
+                            TextField("Site", text: $rule.from, prompt: Text("x.com"))
+                                .labelsHidden().textFieldStyle(.roundedBorder).autocorrectionDisabled()
+                                #if os(iOS)
+                                .textInputAutocapitalization(.never).keyboardType(.URL)
+                                #endif
+                            Image(systemName: "arrow.right").foregroundStyle(.secondary).accessibilityLabel("opens as")
+                            TextField("Opens as", text: $rule.to, prompt: Text("xcancel.com, or https://archive.ph/newest/{url}"))
+                                .labelsHidden().textFieldStyle(.roundedBorder).autocorrectionDisabled()
+                                #if os(iOS)
+                                .textInputAutocapitalization(.never).keyboardType(.URL)
+                                #endif
+                            Toggle("Enabled", isOn: $rule.enabled).labelsHidden().toggleStyle(.switch)
+                            Button { rewrites.removeAll { $0.id == rule.id } } label: { Image(systemName: "minus.circle") }
+                                .buttonStyle(ControlSurfaceStyle()).accessibilityLabel("Remove rewrite")
+                        }
+                        if let error = rule.error, !(rule.from.isEmpty && rule.to.isEmpty) {
+                            Text(error).font(.caption).foregroundStyle(.red)
+                        }
+                    }
+                }
+                Button { rewrites.append(LinkRewrite()) } label: { Label("Add a rewrite", systemImage: "plus") }
+                Text(rewriteHelp).font(.caption).foregroundStyle(.secondary)
+            } header: { Text("Link rewrites") }
             Section("Private records") {
                 LabeledContent("People", value: String(store.people.count))
                 LabeledContent("Active filters", value: String(store.archive.rules.filter(\.isActive).count))
@@ -72,6 +121,9 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .onAppear { rewrites = store.archive.linkRewrites }
+        .onChange(of: rewrites) { _, _ in scheduleRewriteSave() }
+        .onDisappear { rewriteSave?.cancel(); saveRewrites() }
         #if os(iOS)
         .navigationTitle("Settings & backups")
         #endif

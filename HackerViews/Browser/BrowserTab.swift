@@ -167,9 +167,18 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
         self.retainsPages = retainsPages
         super.init()
         guard !retainsPages else { return }
+        var previous = store.archive.policy
         subscription = store.$archive.map(\.policy).removeDuplicates().dropFirst().sink { [weak self] policy in
             guard let self, self.pendingRestoredURL == nil else { return }
+            defer { previous = policy }
             self.installScripts(in: self.webView, policy: policy)
+            self.webView.callAsyncJavaScript("window.HackerViews?.setLinkRewrites(rules)",
+                arguments: ["rules": Self.rewriteRules(policy)], in: nil, in: Self.world, completionHandler: nil)
+            // A change to link rewrites alone changes no filter decision, so it
+            // must not start the recheck, which cancels loading in flight and
+            // pauses it until the reader scrolls.
+            var filtersOnly = policy; filtersOnly.linkRewrites = previous.linkRewrites
+            guard filtersOnly != previous else { return }
             self.webView.callAsyncJavaScript("window.HackerViews?.setOrdered(active, true)",
                 arguments: ["active": policy.rules.contains { $0.isActive }],
                 in: nil, in: Self.world, completionHandler: nil)
@@ -472,8 +481,20 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
         }
     }
 
+    /// The enabled, valid rewrites, in the shape the page script annotates links with.
+    static func rewriteRules(_ policy: FilterPolicy) -> [[String: String]] {
+        policy.linkRewrites.filter { $0.enabled && $0.isValid }.map { ["from": $0.from, "to": $0.to] }
+    }
+    private static func wantsOriginal(_ action: WKNavigationAction) -> Bool {
+        #if os(macOS)
+        action.modifierFlags.contains(.option)
+        #else
+        if #available(iOS 18.4, *) { action.modifierFlags.contains(.alternate) } else { false }
+        #endif
+    }
     private func installScripts(in view: WKWebView, policy: FilterPolicy? = nil) {
         let policy = policy ?? store.archive.policy
+        let rewrites = String(decoding: (try? JSONEncoder().encode(Self.rewriteRules(policy))) ?? Data("[]".utf8), as: UTF8.self)
         let data = (try? JSONEncoder().encode(Array(policy.blocked))) ?? Data("[]".utf8)
         let names = String(decoding: data, as: UTF8.self)
         let preferred = String(decoding: (try? JSONEncoder().encode(Array(policy.preferred))) ?? Data("[]".utf8), as: UTF8.self)
@@ -486,7 +507,7 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
         #else
         let diagnostics = ""
         #endif
-        controller.addUserScript(WKUserScript(source: diagnostics + "window.__hackerViewsNetworkPool = true; window.__hackerViewsOrdered = true; window.__hackerViewsOrderedActive = \(policy.rules.contains { $0.isActive }); window.__hackerViewsBlocked = \(names); window.__hackerViewsAccountFiltersActive = \(policy.accounts.isActive); window.__hackerViewsPreferred = \(preferred); window.__hackerViewsHighlightActive = \(policy.highlights.isActive);\n" + script,
+        controller.addUserScript(WKUserScript(source: diagnostics + "window.__hackerViewsNetworkPool = true; window.__hackerViewsOrdered = true; window.__hackerViewsOrderedActive = \(policy.rules.contains { $0.isActive }); window.__hackerViewsBlocked = \(names); window.__hackerViewsAccountFiltersActive = \(policy.accounts.isActive); window.__hackerViewsPreferred = \(preferred); window.__hackerViewsHighlightActive = \(policy.highlights.isActive); window.__hackerViewsLinkRewrites = \(rewrites);\n" + script,
                                               injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Self.world))
     }
 
@@ -944,11 +965,14 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
             } else { lazyURL = nil; decisionHandler(.allow) }
         } else {
             // External articles go to the user's browser. No app bridge is exposed there.
+            // A link rewrite applies here, the one place every external link
+            // leaves the app; Option (or the alternate key) opens the original.
             if navigationAction.navigationType == .linkActivated && ["https", "http", "mailto"].contains(target.scheme ?? "") {
+                let destination = Self.wantsOriginal(navigationAction) ? target : (LinkRewriter.rewrite(target, rules: store.archive.linkRewrites) ?? target)
                 #if os(macOS)
-                ExternalBrowser.open(target)
+                ExternalBrowser.open(destination)
                 #else
-                UIApplication.shared.open(target)
+                UIApplication.shared.open(destination)
                 #endif
             }
             decisionHandler(.cancel)
@@ -980,6 +1004,8 @@ struct WebSurface: UIViewRepresentable {
 #if os(macOS)
 @MainActor
 enum ExternalBrowser {
+    /// Test seam: when set, receives the URL instead of the system opening it.
+    @MainActor static var handler: ((URL) -> Void)?
     static func privateArguments(bundleID: String, url: URL) -> [String]? {
         guard ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return nil }
         switch bundleID {
@@ -993,7 +1019,8 @@ enum ExternalBrowser {
         default: return nil
         }
     }
-    static func open(_ url: URL) {
+    @MainActor static func open(_ url: URL) {
+        if let handler { handler(url); return }
         guard UserDefaults.standard.bool(forKey: "HackerViews.preferPrivateExternalLinks"),
               let appURL = NSWorkspace.shared.urlForApplication(toOpen: url),
               let bundle = Bundle(url: appURL), let id = bundle.bundleIdentifier,

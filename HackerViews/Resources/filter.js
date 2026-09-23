@@ -744,8 +744,51 @@
     headerModel.hidden = hidden; headerModel.unresolved = unresolved; headerModel.retry = retry;
     renderHeader();
   }
+  // Link rewrites. The page keeps HN's links as they are; the app rewrites
+  // the destination when a link is followed. The page says so beforehand: a
+  // rewritten link's tooltip names the site it opens on, and a story's domain
+  // label shows that site with the original in its own tooltip.
+  let linkRewrites = (window.__hackerViewsLinkRewrites || []).filter(rule => rule && rule.from && rule.to);
+  const rewriteHost = text => { let host = String(text || '').trim().toLowerCase(); if (host.startsWith('www.')) host = host.slice(4); return host; };
+  function rewriteLink(href) {
+    let url; try { url = new URL(href, location.href); } catch (_) { return null; }
+    if (!['http:', 'https:'].includes(url.protocol)) return null;
+    const host = url.hostname.toLowerCase();
+    for (const rule of linkRewrites) {
+      const from = rewriteHost(rule.from); if (!from) continue;
+      if (host !== from && host !== 'www.' + from && !host.endsWith('.' + from)) continue;
+      const to = String(rule.to).trim();
+      if (to.includes('{')) {
+        const path = (url.pathname || '/').replace(/^\//, '') + url.search;
+        let out; try { out = new URL(to.replaceAll('{url}', url.href).replaceAll('{host}', url.hostname).replaceAll('{path}', path)); } catch (_) { return null; }
+        return ['http:', 'https:'].includes(out.protocol) ? out : null;
+      }
+      const out = new URL(url.href); out.hostname = rewriteHost(to); return out;
+    }
+    return null;
+  }
+  function annotateLinks(root) {
+    if (!root) return;
+    if (!linkRewrites.length && !root.querySelector('.hv-rewritten, [data-hv-original]')) return;
+    for (const a of root.querySelectorAll('.titleline a[href], .commtext a[href], .toptext a[href]')) {
+      if (a.closest('.sitebit')) continue;
+      const target = rewriteLink(a.getAttribute('href'));
+      if (target) { a.classList.add('hv-rewritten'); a.title = 'Opens as ' + target.hostname; }
+      else if (a.classList.contains('hv-rewritten')) { a.classList.remove('hv-rewritten'); a.removeAttribute('title'); }
+    }
+    for (const title of root.querySelectorAll('.titleline')) {
+      const link = title.querySelector(':scope > a[href]'), site = title.querySelector('.sitebit .sitestr'), bit = title.querySelector('.sitebit');
+      if (!link || !site) continue;
+      const target = rewriteLink(link.getAttribute('href'));
+      if (target) {
+        if (!site.dataset.hvOriginal) site.dataset.hvOriginal = site.textContent;
+        site.textContent = target.hostname.replace(/^www\./, ''); bit.title = 'Originally ' + site.dataset.hvOriginal;
+      } else if (site.dataset.hvOriginal) { site.textContent = site.dataset.hvOriginal; delete site.dataset.hvOriginal; bit.removeAttribute('title'); }
+    }
+  }
   function addControls() {
     renderHeader();
+    if (!lazyThread) annotateLinks(document);
     if (!requestedOP && location.pathname === '/item') {
       const id = Number(new URL(location.href).searchParams.get('id'));
       if (id > 0) { requestedOP = true; post({kind: 'originalPoster', id}); }
@@ -1942,7 +1985,7 @@
       row.className='athing submission';const cell=document.createElement('td');const title=document.createElement('span');title.className='titleline';
       let target;try{target=new URL(item.url || '/item?id='+item.id,'https://news.ycombinator.com/');}catch(_){target=new URL('/item?id='+item.id,'https://news.ycombinator.com/');}
       if(!['https:','http:'].includes(target.protocol))target=new URL('/item?id='+item.id,'https://news.ycombinator.com/');
-      const link=hnLink('',target.href);link.append(safeBody(item.title || 'Discussion'));title.append(link);if(target.hostname!=='news.ycombinator.com'){const domain=document.createElement('span');domain.className='sitebit comhead';domain.append(' (',hnLink(target.hostname.replace(/^www\./,''),'/from?site='+encodeURIComponent(target.hostname)),')');title.append(domain);}cell.append(title);row.append(cell);tbody.append(row);
+      const link=hnLink('',target.href);link.append(safeBody(item.title || 'Discussion'));title.append(link);if(target.hostname!=='news.ycombinator.com'){const domain=document.createElement('span');domain.className='sitebit comhead';const site=hnLink(target.hostname.replace(/^www\./,''),'/from?site='+encodeURIComponent(target.hostname));site.className='sitestr';domain.append(' (',site,')');title.append(domain);}cell.append(title);row.append(cell);tbody.append(row);
       const meta=document.createElement('tr');const md=document.createElement('td');md.className='subtext';
       const canComment=item.type!=='job' && root && effect!=='hidden-item';
       if(item.by) {
@@ -1986,7 +2029,7 @@
     }
     if(root && revealedID===node.id && filteredEffect(entry.effect)) { const notice=document.createElement('div');notice.className='qhn-loading';
       notice.append('Temporarily revealed · Hidden by '+(entry.label || 'your filters')+' · '); const hide=document.createElement('button');hide.textContent='Hide again';hide.onclick=()=>setRootRevealed(false);notice.append(hide);own.prepend(notice); }
-    addControls();paintOP();applyCanonicalMetadata(node);
+    addControls();paintOP();applyCanonicalMetadata(node);annotateLinks(own);
   }
   const queuedResults = new Map();
   let resultFramePending = false;
@@ -2354,6 +2397,7 @@
     resolvePartial(token, decisions, labels = {}, inherited = {}) { finish(token, decisions, false, labels, true, inherited); },
     resolve(token, decisions, labels = {}, inherited = {}) { finish(token, decisions, false, labels, false, inherited); },
     visitResults(results) { paintVisits(results); },
+    setLinkRewrites(rules) { linkRewrites = (rules || []).filter(rule => rule && rule.from && rule.to); annotateLinks(document); },
     refreshVisits,
     retry() { process(); }
   };

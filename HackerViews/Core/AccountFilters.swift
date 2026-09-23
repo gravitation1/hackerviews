@@ -39,6 +39,7 @@ public struct AccountFilterRevision: Codable, Equatable, Sendable, Identifiable 
     public var orderedRules: [FilterRule]?
     public var membershipVersion: Int?
     public var highlights: AccountFilters?
+    public var linkRewrites: [LinkRewrite]?
     public var filters: AccountFilters
     public init(filters: AccountFilters) { self.filters = filters }
 }
@@ -49,4 +50,5 @@ public struct FilterPolicy: Equatable, Sendable {
     public var preferred: Set<String>
     public var highlights: AccountFilters
     public var rules: [FilterRule]
+    public var linkRewrites: [LinkRewrite] = []
 }

@@ -1852,3 +1852,46 @@ test('when HN serves something other than the discussion, the header says so and
   assert.ok(!up.disabled && !up.classList.contains('hv-ineligible'), 'and the vote links with it');
   p.dom.window.close();
 });
+
+test('link rewrites are announced on the page: the story domain shows the site it opens on, links say so, HN links are untouched', async () => {
+  const p = await page('', {blocked: [], url: 'https://news.ycombinator.com/item?id=1'});
+  p.dom.window.close();
+  const q = await lazyPage(); const w = q.dom.window;
+  w.HackerViews.setLinkRewrites([{from: 'x.com', to: 'xcancel.com'}, {from: 'medium.com', to: 'https://scribe.rip/{path}'}]);
+  let request = q.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  w.HackerViews.lazyResult(request.token, [{id: 1, effect: 'visible', item: {id: 1, type: 'story', by: 'op', title: 'Topic', url: 'https://www.x.com/someone/status/1', kids: [2]}}]);
+  await new Promise(r => setTimeout(r, 5));
+  const title = q.doc.querySelector('.fatitem .titleline');
+  assert.equal(title.querySelector('.sitestr').textContent, 'xcancel.com', 'the domain label shows the site that will open');
+  assert.equal(title.querySelector('.sitebit').title, 'Originally x.com');
+  assert.match(title.querySelector('.sitestr').getAttribute('href'), /from\?site=www\.x\.com$/, 'HN’s search-by-site link keeps the original');
+  assert.equal(title.querySelector(':scope > a').title, 'Opens as xcancel.com');
+  assert.equal(title.querySelector(':scope > a').getAttribute('href'), 'https://www.x.com/someone/status/1', 'the link itself is not changed; the app rewrites it when followed');
+  request = q.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  w.HackerViews.lazyResult(request.token, [{id: 2, effect: 'visible', item: {id: 2, type: 'comment', by: 'a', parent: 1, text: 'See <a href="https://mobile.x.com/p/2">this</a>, <a href="https://medium.com/@me/post">that</a> and <a href="https://news.ycombinator.com/item?id=3">this thread</a> and <a href="https://example.org/">nothing</a>'}}]);
+  await new Promise(r => setTimeout(r, 5));
+  const links = [...q.doc.getElementById('2').querySelectorAll('.commtext a')];
+  assert.deepEqual(links.map(a => a.title || ''), ['Opens as xcancel.com', 'Opens as scribe.rip', '', ''], 'subdomains match, templates resolve, HN and unrelated links say nothing');
+  const rewritten = (href) => { const [a] = [...q.doc.querySelectorAll('.commtext a')].filter(x => x.getAttribute('href') === href); return a; };
+  assert.ok(rewritten('https://medium.com/@me/post'), 'the medium link is present for the template check');
+  assert.deepEqual(links.map(a => a.classList.contains('hv-rewritten')), [true, true, false, false]);
+  w.HackerViews.setLinkRewrites([]);
+  assert.equal(title.querySelector('.sitestr').textContent, 'x.com', 'removing the rules restores the label');
+  assert.equal(title.querySelector('.sitebit').hasAttribute('title'), false);
+  assert.deepEqual([...q.doc.getElementById('2').querySelectorAll('.commtext a')].map(a => a.title || ''), ['', '', '', ''], 'and the tooltips');
+  q.dom.window.close();
+});
+
+test('on HN’s own feed pages the same annotation applies to titles and domains', async () => {
+  const feedRow = (id, url, host) => `<tr class="athing submission" id="${id}"><td><span class="titleline"><a href="${url}">Story ${id}</a><span class="sitebit comhead"> (<a href="from?site=${host}"><span class="sitestr">${host}</span></a>)</span></span></td></tr><tr><td class="subtext"><a class="hnuser" href="user?id=op">op</a> | <a href="item?id=${id}">3 comments</a></td></tr><tr class="spacer"><td></td></tr>`;
+  const p = await page(hnHeader(signedIn) + `<table>${feedRow(101, 'https://x.com/a/status/9', 'x.com')}${feedRow(102, 'https://example.org/b', 'example.org')}</table>`, {blocked: []});
+  p.dom.window.__hackerViewsLinkRewrites = [{from: 'x.com', to: 'xcancel.com'}];
+  p.dom.window.HackerViews.setLinkRewrites([{from: 'x.com', to: 'xcancel.com'}]);
+  const row = id => p.doc.getElementById(String(id)).querySelector('.titleline');
+  assert.equal(row(101).querySelector('.sitestr').textContent, 'xcancel.com');
+  assert.equal(row(101).querySelector('.sitebit').title, 'Originally x.com');
+  assert.equal(row(101).querySelector(':scope > a').title, 'Opens as xcancel.com');
+  assert.equal(row(102).querySelector('.sitestr').textContent, 'example.org');
+  assert.equal(row(102).querySelector(':scope > a').title, '');
+  p.dom.window.close();
+});

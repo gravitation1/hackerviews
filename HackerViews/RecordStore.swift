@@ -88,6 +88,7 @@ final class RecordStore: ObservableObject {
         revision.highlights = archive.highlightFilters
         revision.orderedRules = rules
         revision.membershipVersion = 1
+        revision.linkRewrites = archive.linkRewrites
         let latest = candidate.filterRevisions?.map(\.modifiedAt).max() ?? .distantPast
         revision.modifiedAt = max(Date(), latest.addingTimeInterval(0.001))
         candidate.filterRevisions = (candidate.filterRevisions ?? []) + [revision]
@@ -101,6 +102,7 @@ final class RecordStore: ObservableObject {
         var revision = AccountFilterRevision(filters: highlighting ? archive.accountFilters : filters)
         revision.highlights = highlighting ? filters : archive.highlightFilters
         revision.orderedRules = archive.effectiveFilterRevision?.orderedRules
+        revision.linkRewrites = archive.linkRewrites
         let latest = candidate.filterRevisions?.map(\.modifiedAt).max() ?? .distantPast
         revision.modifiedAt = max(Date(), latest.addingTimeInterval(0.001))
         candidate.filterRevisions = (candidate.filterRevisions ?? []) + [revision]
@@ -109,6 +111,23 @@ final class RecordStore: ObservableObject {
             Task { await synchronize() }
             return true
         } catch { self.error = error.localizedDescription; return false }
+    }
+    /// Saves the link rewrites as a filter revision carrying everything else
+    /// forward, so the set syncs and survives like the rules do.
+    @discardableResult
+    func saveLinkRewrites(_ rewrites: [LinkRewrite]) -> Bool {
+        guard rewrites != archive.linkRewrites else { return true }
+        var candidate = archive
+        var revision = AccountFilterRevision(filters: archive.accountFilters)
+        revision.highlights = archive.highlightFilters
+        revision.orderedRules = archive.effectiveFilterRevision?.orderedRules
+        revision.membershipVersion = archive.effectiveFilterRevision?.membershipVersion
+        revision.linkRewrites = rewrites
+        let latest = candidate.filterRevisions?.map(\.modifiedAt).max() ?? .distantPast
+        revision.modifiedAt = max(Date(), latest.addingTimeInterval(0.001))
+        candidate.filterRevisions = (candidate.filterRevisions ?? []) + [revision]
+        do { try persist(candidate); Task { await synchronize() }; return true }
+        catch { self.error = error.localizedDescription; return false }
     }
 
     func toggle(_ person: PersonRevision) {
