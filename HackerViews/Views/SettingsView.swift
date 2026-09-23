@@ -15,9 +15,9 @@ struct BackupDocument: FileDocument {
 struct SettingsView: View {
     private var rewriteHelp: String {
         #if os(macOS)
-        "Links to the first site open on the second, keeping the path; subdomains count. A template with {url}, {host} or {path} opens the link through another site. Hold Option when clicking to open the original."
+        "Rewrites: links to the first site open on the second, keeping the path; subdomains count. A template with {url}, {host} or {path} opens the link through another site. Hold Option when clicking to open the original."
         #else
-        "Links to the first site open on the second, keeping the path; subdomains count. A template with {url}, {host} or {path} opens the link through another site."
+        "Rewrites: links to the first site open on the second, keeping the path; subdomains count. A template with {url}, {host} or {path} opens the link through another site."
         #endif
     }
     private func scheduleRewriteSave() {
@@ -50,14 +50,12 @@ struct SettingsView: View {
                     Button("I’ve reviewed this") { store.acknowledgeRecoveryNotice() }
                 }
             }
-            #if os(macOS)
             Section("External links") {
+                #if os(macOS)
                 Toggle("Prefer opening external links in a private browser window", isOn: $preferPrivateExternalLinks)
                 Text("Uses your default browser. Opens normally when private opening isn’t supported or the attempt fails.")
                     .font(.caption).foregroundStyle(.secondary)
-            }
-            #endif
-            Section {
+                #endif
                 ForEach($rewrites) { $rule in
                     VStack(alignment: .leading, spacing: 6) {
                         HStack(spacing: 8) {
@@ -83,7 +81,7 @@ struct SettingsView: View {
                 }
                 Button { rewrites.append(LinkRewrite()) } label: { Label("Add a rewrite", systemImage: "plus") }
                 Text(rewriteHelp).font(.caption).foregroundStyle(.secondary)
-            } header: { Text("Link rewrites") }
+            }
             Section("Private records") {
                 LabeledContent("People", value: String(store.people.count))
                 LabeledContent("Active filters", value: String(store.archive.rules.filter(\.isActive).count))
