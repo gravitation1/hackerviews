@@ -1,6 +1,6 @@
 # HackerViews
 
-A native **Mac and iPhone** companion for Hacker News. Read and participate on the actual HN website, while privately blocking users and their discussion branches and preserving the reasons with citations.
+A native **Mac and iPhone** app for reading Hacker News on the real site, with private filters that block, fade, or highlight people and topics, cited notes on users, and a memory of what you have already read.
 
 ## Open and run
 
