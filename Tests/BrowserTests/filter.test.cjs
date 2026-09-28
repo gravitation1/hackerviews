@@ -1657,7 +1657,7 @@ test('feed rows the reader has opened before show how many comments arrived sinc
   assert.equal(p.doc.getElementById('103').nextElementSibling.querySelector('.hv-new-count'), null, 'nothing for a story never opened');
   assert.ok(p.doc.getElementById('101').hasAttribute('data-hv-visited') && p.doc.getElementById('102').hasAttribute('data-hv-visited'), 'opened stories are marked as viewed, with or without new comments');
   assert.equal(p.doc.getElementById('103').hasAttribute('data-hv-visited'), false, 'a story never opened is not');
-  assert.match(p.doc.getElementById('102').querySelector('.titleline > a').title, /^Viewed .* ago$/, 'the title says when it was viewed');
+  assert.match(p.doc.getElementById('102').querySelector('.titleline > a').title, /^https:\/\/\S+\nViewed .* ago$/, 'the title shows its address and when it was viewed');
   const before = p.messages.filter(m => m.kind === 'visits').length;
   p.dom.window.HackerViews.refreshVisits();
   assert.equal(p.messages.filter(m => m.kind === 'visits').length, before + 1, 'coming back to the feed asks again');
@@ -1865,21 +1865,42 @@ test('link rewrites are announced on the page: the story domain shows the site i
   assert.equal(title.querySelector('.sitestr').textContent, 'xcancel.com', 'the domain label shows the site that will open');
   assert.equal(title.querySelector('.sitebit').title, 'Originally x.com');
   assert.match(title.querySelector('.sitestr').getAttribute('href'), /from\?site=www\.x\.com$/, 'HN’s search-by-site link keeps the original');
-  assert.equal(title.querySelector(':scope > a').title, 'Opens as xcancel.com');
+  assert.equal(title.querySelector(':scope > a').title, 'Opens as https://xcancel.com/someone/status/1\nOriginally https://www.x.com/someone/status/1');
   assert.equal(title.querySelector(':scope > a').getAttribute('href'), 'https://www.x.com/someone/status/1', 'the link itself is not changed; the app rewrites it when followed');
   request = q.messages.filter(m => m.kind === 'lazyItems').at(-1);
   w.HackerViews.lazyResult(request.token, [{id: 2, effect: 'visible', item: {id: 2, type: 'comment', by: 'a', parent: 1, text: 'See <a href="https://mobile.x.com/p/2">this</a>, <a href="https://medium.com/@me/post">that</a> and <a href="https://news.ycombinator.com/item?id=3">this thread</a> and <a href="https://example.org/">nothing</a>'}}]);
   await new Promise(r => setTimeout(r, 5));
   const links = [...q.doc.getElementById('2').querySelectorAll('.commtext a')];
-  assert.deepEqual(links.map(a => a.title || ''), ['Opens as xcancel.com', 'Opens as scribe.rip', '', ''], 'subdomains match, templates resolve, HN and unrelated links say nothing');
+  assert.deepEqual(links.map(a => a.title || ''), ['Opens as https://xcancel.com/p/2\nOriginally https://mobile.x.com/p/2', 'Opens as https://scribe.rip/@me/post\nOriginally https://medium.com/@me/post', 'https://news.ycombinator.com/item?id=3', 'https://example.org/'], 'subdomains match, templates resolve, HN and unrelated links show their address');
   const rewritten = (href) => { const [a] = [...q.doc.querySelectorAll('.commtext a')].filter(x => x.getAttribute('href') === href); return a; };
   assert.ok(rewritten('https://medium.com/@me/post'), 'the medium link is present for the template check');
   assert.deepEqual(links.map(a => a.classList.contains('hv-rewritten')), [true, true, false, false]);
   w.HackerViews.setLinkRewrites([]);
   assert.equal(title.querySelector('.sitestr').textContent, 'x.com', 'removing the rules restores the label');
   assert.equal(title.querySelector('.sitebit').hasAttribute('title'), false);
-  assert.deepEqual([...q.doc.getElementById('2').querySelectorAll('.commtext a')].map(a => a.title || ''), ['', '', '', ''], 'and the tooltips');
+  assert.deepEqual([...q.doc.getElementById('2').querySelectorAll('.commtext a')].map(a => a.title || ''), ['https://mobile.x.com/p/2', 'https://medium.com/@me/post', 'https://news.ycombinator.com/item?id=3', 'https://example.org/'], 'and the tooltips go back to the addresses');
   q.dom.window.close();
+});
+
+test('every link in a comment, and the story’s own link, shows its full address on hover, since HN shortens link text', async () => {
+  const q = await lazyPage(); const w = q.dom.window;
+  let request = q.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  w.HackerViews.lazyResult(request.token, [{id: 1, effect: 'visible', item: {id: 1, type: 'story', by: 'op', title: 'Pirating the Pirates', url: 'https://mubi.com/en/notebook/posts/pirating-the-pirates', kids: [2]}}]);
+  await new Promise(r => setTimeout(r, 5));
+  assert.equal(q.doc.querySelector('.fatitem .titleline > a').title, 'https://mubi.com/en/notebook/posts/pirating-the-pirates');
+  assert.equal(q.doc.querySelector('.fatitem .sitebit').hasAttribute('title'), false, 'the domain label has no tooltip unless rewritten');
+  request = q.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  const long = 'https://forums.digitalspy.com/discussion/2181751/dvds-with-the-wrong-film-on-them-what-happened';
+  w.HackerViews.lazyResult(request.token, [{id: 2, effect: 'visible', item: {id: 2, type: 'comment', by: 'a', parent: 1, text: `It gets worse: <a href="${long}" rel="nofollow">https://forums.digitalspy.com/discussion/2181751/dvds-with-t...</a> and <a href="mailto:someone@example.org">mail</a>`}}]);
+  await new Promise(r => setTimeout(r, 5));
+  const links = [...q.doc.getElementById('2').querySelectorAll('.commtext a')];
+  assert.deepEqual(links.map(a => a.title), [long, 'mailto:someone@example.org'], 'the shortened text keeps its full address in the tooltip');
+  assert.deepEqual(links.map(a => a.textContent), ['https://forums.digitalspy.com/discussion/2181751/dvds-with-t...', 'mail'], 'the text is left as HN wrote it');
+  q.dom.window.close();
+  const p = await page(hnHeader(signedIn) + `<table><tr class="athing" id="10"><td><span class="titleline"><a href="item?id=10">Ask HN: Why?</a></span></td></tr><tr><td class="subtext"><a class="hnuser" href="user?id=op">op</a></td></tr></table><table class="comment-tree"><tr class="athing comtr" id="11"><td><div class="comment"><span class="commtext"><a href="https://example.org/a/very/long/path" rel="nofollow">https://example.org/a/very/lo...</a></span></div></td></tr></table>`, {blocked: []});
+  assert.equal(p.doc.getElementById('10').querySelector('.titleline > a').title, 'https://news.ycombinator.com/item?id=10', 'a text post’s title resolves to its full address');
+  assert.equal(p.doc.getElementById('11').querySelector('.commtext a').title, 'https://example.org/a/very/long/path', 'and HN’s own comment pages get the same');
+  p.dom.window.close();
 });
 
 test('on HN’s own feed pages the same annotation applies to titles and domains', async () => {
@@ -1890,8 +1911,8 @@ test('on HN’s own feed pages the same annotation applies to titles and domains
   const row = id => p.doc.getElementById(String(id)).querySelector('.titleline');
   assert.equal(row(101).querySelector('.sitestr').textContent, 'xcancel.com');
   assert.equal(row(101).querySelector('.sitebit').title, 'Originally x.com');
-  assert.equal(row(101).querySelector(':scope > a').title, 'Opens as xcancel.com');
+  assert.equal(row(101).querySelector(':scope > a').title, 'Opens as https://xcancel.com/a/status/9\nOriginally https://x.com/a/status/9');
   assert.equal(row(102).querySelector('.sitestr').textContent, 'example.org');
-  assert.equal(row(102).querySelector(':scope > a').title, '');
+  assert.equal(row(102).querySelector(':scope > a').title, 'https://example.org/b', 'an ordinary title shows its address');
   p.dom.window.close();
 });

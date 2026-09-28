@@ -767,14 +767,22 @@
     }
     return null;
   }
+  // Every link in a comment, and the story's own link, carries its full
+  // address as a tooltip, since HN shortens long link text. A rewritten link
+  // says where it opens and what it was; a visited story adds when.
+  function linkTip(a, target) {
+    let href; try { href = new URL(a.getAttribute('href'), location.href).href; } catch (_) { href = a.getAttribute('href') || ''; }
+    const lines = target ? ['Opens as ' + target.href, 'Originally ' + href] : [href];
+    if (a.dataset.hvViewed) lines.push(a.dataset.hvViewed);
+    a.title = lines.join('\n');
+  }
   function annotateLinks(root) {
     if (!root) return;
-    if (!linkRewrites.length && !root.querySelector('.hv-rewritten, [data-hv-original]')) return;
     for (const a of root.querySelectorAll('.titleline a[href], .commtext a[href], .toptext a[href]')) {
       if (a.closest('.sitebit')) continue;
       const target = rewriteLink(a.getAttribute('href'));
-      if (target) { a.classList.add('hv-rewritten'); a.title = 'Opens as ' + target.hostname; }
-      else if (a.classList.contains('hv-rewritten')) { a.classList.remove('hv-rewritten'); a.removeAttribute('title'); }
+      a.classList.toggle('hv-rewritten', !!target);
+      linkTip(a, target);
     }
     for (const title of root.querySelectorAll('.titleline')) {
       const link = title.querySelector(':scope > a[href]'), site = title.querySelector('.sitebit .sitestr'), bit = title.querySelector('.sitebit');
@@ -2261,7 +2269,7 @@
       if (!row || !Number.isFinite(record?.viewedAt)) continue;
       row.setAttribute('data-hv-visited', '');
       const title = row.querySelector('.titleline > a');
-      if (title) title.title = 'Viewed ' + relativeTime(record.viewedAt);
+      if (title) { title.dataset.hvViewed = 'Viewed ' + relativeTime(record.viewedAt); linkTip(title, rewriteLink(title.getAttribute('href'))); }
       const subtext = row.nextElementSibling?.querySelector('.subtext') || row.nextElementSibling;
       const link = [...(subtext?.querySelectorAll('a[href]') || [])].find(a => /^\s*\d+\s*comments?\s*$/.test(a.textContent));
       if (!link || !Number.isFinite(record.descendants)) continue;
