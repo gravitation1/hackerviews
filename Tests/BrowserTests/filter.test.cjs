@@ -948,17 +948,42 @@ test('lazy metadata restores authenticated actions, relative age, domain and com
   p.dom.window.close();
 });
 
-test('dead content stays hidden unless authenticated HN HTML includes its text',async()=>{
+test('dead content stays hidden unless authenticated HN HTML includes its text, and then HN’s text and mark are shown',async()=>{
   for(const showDead of [false,true]) {
     const p=await lazyPage();const api=p.dom.window.HackerViews;
-    p.dom.window.fetch=async()=>({ok:true,text:async()=>showDead?`<table><tr class="athing comtr" id="1"><td><span class="commtext">Moderated text</span></td></tr></table>`:'<table></table>'});
+    p.dom.window.fetch=async()=>({ok:true,text:async()=>showDead?`<table><tr class="athing comtr" id="1"><td><span class="comhead"><a class="hnuser" href="user?id=reader">reader</a> <span class="age">1 hour ago</span> [dead] | parent</span><div class="comment"><div class="commtext c5a">Moderated <i>text</i><p>Second paragraph</div><div class="reply"></div></div></td></tr></table>`:'<table></table>'});
     const request=p.messages.filter(m=>m.kind==='lazyItems').at(-1);
-    api.lazyResult(request.token,[{id:1,effect:'visible',item:{id:1,type:'comment',by:'reader',dead:true,text:'Moderated text'}}]);
+    // The API never carries the text of a dead comment, only this placeholder.
+    api.lazyResult(request.token,[{id:1,effect:'visible',item:{id:1,type:'comment',by:'reader',dead:true,text:'[dead]'}}]);
     assert.equal(p.doc.querySelector('.commtext'),null,'No initial flash of moderated content');
     await new Promise(r=>setTimeout(r,20));
     assert.equal(!!p.doc.querySelector('.commtext'),showDead);
+    if(showDead) {
+      assert.equal(p.doc.querySelector('.commtext').textContent,'Moderated textSecond paragraph','the text comes from HN’s page, not the API placeholder');
+      assert.equal(p.doc.querySelector('.commtext i')?.textContent,'text','with HN’s markup');
+      assert.equal(p.doc.querySelector('.hv-dead-mark')?.textContent,' [dead]','and HN’s mark follows the age');
+      assert.ok(Number(p.doc.querySelector('.commtext').style.opacity)<1,'faded as HN fades it');
+    } else assert.equal(p.doc.querySelector('.hv-tombstone-label')?.textContent,'[moderated]');
     p.dom.window.close();
   }
+});
+
+test('a flagged comment shows its placeholder until HN’s page carries its text, then HN’s text and mark',async()=>{
+  const p=await lazyPage();const api=p.dom.window.HackerViews;const w=p.dom.window;
+  // The arrows coming into view are what fetch HN's page for a live comment.
+  w.IntersectionObserver=class {constructor(callback){this.callback=callback;} observe(target){this.callback([{target,isIntersecting:true}]);} unobserve(){}};
+  let release;const gate=new Promise(r=>release=r);
+  w.fetch=async()=>{await gate;return {ok:true,text:async()=>`<table><tr class="athing comtr" id="1"><td><span class="comhead"><a class="hnuser" href="user?id=reader">reader</a> <span class="age">1 hour ago</span> [flagged] | parent</span><div class="comment"><div class="commtext c5a">Flagged text</div><div class="reply"></div></div></td></tr></table>`};};
+  const request=p.messages.filter(m=>m.kind==='lazyItems').at(-1);
+  api.lazyResult(request.token,[{id:1,effect:'visible',item:{id:1,type:'comment',by:'reader',text:'[flagged]'}}]);
+  await new Promise(r=>setTimeout(r,10));
+  assert.equal(p.doc.querySelector('.commtext')?.textContent,'[flagged]','the placeholder shows first, as HN shows it without showdead');
+  assert.equal(p.doc.querySelector('.hv-dead-mark'),null,'and no mark doubles it');
+  release();
+  await new Promise(r=>setTimeout(r,20));
+  assert.equal(p.doc.querySelector('.commtext')?.textContent,'Flagged text');
+  assert.equal(p.doc.querySelector('.hv-dead-mark')?.textContent,' [flagged]');
+  p.dom.window.close();
 });
 
 

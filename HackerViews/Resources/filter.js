@@ -210,6 +210,7 @@
        shape and the state is visible instead of implied by a gap. */
     .hv-own .hv-vote.hv-ineligible, .hv-own .hv-vote.hv-ineligible:hover, .hv-own .hv-vote.hv-ineligible:disabled { opacity: 1; background: transparent; color: var(--qhn-muted); cursor: default; }
     .hv-votes .hv-vote.hv-ineligible > .votearrow { opacity: .22 !important; }
+    .hv-dead-mark { color: var(--qhn-muted); }
     /* A cast arrow keeps its colour under the pointer, so the click shows at
        once; the hover background alone marks the pointer. */
     .hv-own .hv-vote.hv-voted:hover, .hv-own .hv-vote.hv-voted:focus-visible { color: var(--qhn-accent); background: var(--qhn-hover); }
@@ -1164,6 +1165,8 @@
   const lazyCollapsed = new Set();
   const lazyGroups = new Map();
   let lazyObserver;
+  // What the API gives in place of text the account may not see.
+  const placeholderText=text=>/^\s*\[(dead|flagged|deleted)\]\s*$/.test(text||'');
   function safeBody(html) {
     const parsed = new DOMParser().parseFromString(html || '', 'text/html');
     const output = document.createDocumentFragment();
@@ -1596,14 +1599,19 @@
         if(!actions.some(action=>action.label===label))actions.push({label,url:url.href});
       }
       const text=row.querySelector('.commtext,.titleline');
+      // The API carries only "[dead]" or "[flagged]" for such a comment; HN's
+      // page, for an account with showdead, carries the text and marks the
+      // row after its age. Keep both so the reader can show what HN shows.
+      const placeholder=!!text && placeholderText(text.textContent);
+      const marker=(/\[(dead|flagged)\]/.exec(row.querySelector('.comhead')?.textContent||'')||[])[0]||null;
       const shade=[...(text?.classList||[])].find(name=>/^c[0-9a-f]{2}$/.test(name));
       const countText=row.matches('.comtr')?null:[...(row.nextElementSibling?.querySelectorAll('a[href]')||[])].map(a=>a.textContent).find(t=>/^\s*\d+\s*comments?\s*$/.test(t));
       // HN's live count is what the visit record should remember, not the API's cached total.
       if(countText && id===Number(document.body.dataset.hvTopic))post({kind:'visitCount',id,count:Number(/\d+/.exec(countText)[0])});
-      canonicalItems.set(id,{actions,showDead:!!text && !/^\s*\[(dead|deleted)\]\s*$/.test(text.textContent),
+      canonicalItems.set(id,{actions,showDead:!!text && !placeholder,text:row.matches('.comtr') && text && !placeholder ? text.innerHTML : null,marker,
         fade:shade?Math.max(.35,1-parseInt(shade.slice(1),16)/255):null,comments:countText?Number(/\d+/.exec(countText)[0]):null});
       const node=lazyNodes.get(id);
-      if(node?.entry?.item?.dead)lazyRender(node,node.entry);
+      if(node?.entry?.item && (node.entry.item.dead || placeholderText(node.entry.item.text)))lazyRender(node,node.entry);
       else if(node)applyCanonicalMetadata(node);
     }
     if(lazyThread)lazyHeaderStatus();
@@ -1974,6 +1982,11 @@
     user.className='hnuser';
     const heading=document.createElement('span');heading.className='comhead'; heading.append(user);
     if(item.time) { const age=hnLink(relativeTime(item.time),'/item?id='+item.id);age.title=new Date(item.time*1000).toLocaleString();const stamp=document.createElement('span');stamp.className='hv-age';stamp.append(' ',age);heading.append(stamp); }
+    // A dead or flagged comment shown with its text, as HN shows it to an
+    // account with showdead, carries HN's mark after its age.
+    const canonical=canonicalItems.get(item.id);
+    const shownFromHN=!!canonical?.text && (item.dead===true || placeholderText(item.text));
+    if(shownFromHN) { const mark=document.createElement('span');mark.className='hv-dead-mark';mark.append(' ',canonical.marker || (item.dead?'[dead]':'[flagged]'));heading.append(mark); }
     // A comment posted after the reader's last view of this discussion.
     const fresh=!!(visitBaseline && item.type==='comment' && Number.isFinite(item.time) && item.time>visitBaseline.viewedAt && !filteredEffect(entry.effect) && !item.deleted);
     node.isNew=fresh;
@@ -2003,7 +2016,7 @@
       headingTail(heading).append(ours,' ');
       const body=document.createElement('div');body.className='comment';body.hidden=!!node.collapsed;
       headingTail(heading).append(collapseToggle(node,collapsed=>{body.hidden=collapsed;}));
-      const text=document.createElement('span');text.className='commtext';text.append(safeBody(item.deleted?'[deleted]':item.text || ''));body.append(text);
+      const text=document.createElement('span');text.className='commtext';text.append(safeBody(item.deleted?'[deleted]':shownFromHN?canonical.text:item.text || ''));body.append(text);
       cell.append(head,body);innerRow.append(ind,votes,cell);tbody.append(row);
     } else {
       row.className='athing submission';const cell=document.createElement('td');const title=document.createElement('span');title.className='titleline';
