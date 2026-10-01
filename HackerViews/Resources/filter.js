@@ -1366,16 +1366,25 @@
   }
   let networkToken=0;
   const networkWaiters=new Map();
+  // A page request waits for one of the app's network leases, so it shares
+  // the reader's budget. A lease the app never answers must not hang the
+  // request: after a moment it goes ahead without one, and a grant that
+  // arrives too late is handed straight back.
+  const leaseTimeout=()=>Number(window.__hackerViewsLeaseTimeout)||5000;
   async function pooledFetch(url,options) {
     if(!window.__hackerViewsNetworkPool)return fetch(url,options);
     const token=++networkToken;
-    await new Promise(resolve=>{networkWaiters.set(token,resolve);post({kind:'networkAcquire',token});});
+    const leased=await new Promise(resolve=>{
+      networkWaiters.set(token,()=>resolve(true));
+      post({kind:'networkAcquire',token});
+      setTimeout(()=>{if(networkWaiters.delete(token)){trace('lease.timeout',{token});resolve(false);}},leaseTimeout());
+    });
     try {
       const response=await fetch(url,options);
       // Keep the lease until the response body has finished downloading.
       const body=await response.arrayBuffer();
       return new Response(body,{status:response.status,statusText:response.statusText,headers:response.headers});
-    } finally {post({kind:'networkRelease',token});}
+    } finally {if(leased)post({kind:'networkRelease',token});}
   }
   const canonicalItems = new Map();
   // HN's own comment form for this discussion, taken from its authenticated
@@ -1702,29 +1711,36 @@
       // HN's read-only item API has no per-account voting permissions. Inspect
       // authenticated action links in the background; never gate comment loading.
       const response=await pooledFetch(target,{credentials:'same-origin',cache:'no-store',signal:AbortSignal.timeout(10000)});
-      if(!response.ok)throw new Error();
+      if(!response.ok)throw new Error('status');
       const html=await response.text();trace('votes.response',{ms:performance.now()-voteStarted,bytes:new TextEncoder().encode(html).length});
       const doc=new DOMParser().parseFromString(html,'text/html');
       // A page with neither HN's header nor a single contribution is not the
       // discussion (a rate-limit or error page served with 200): a failed
       // fetch, not a final answer.
-      if(!doc.querySelector('.pagetop, tr.athing'))throw new Error('not an HN page');
+      if(!doc.querySelector('.pagetop, tr.athing'))throw new Error('page');
       readSignedInUser(doc);paintOP();
       if(document.getElementById('hv-header')) {
         const parsed=readHeader(doc,target);
         if(parsed){if(parsed.links.length)headerModel.links=parsed.links;headerModel.identity=parsed.identity;renderHeader();}
       }
       rememberCanonicalItems(doc,target);rememberCommentForm(doc,target);
+      let rows=0,withActions=0;
       for(const row of doc.querySelectorAll('tr.athing[id]')) {
         const id=Number(row.id);if(!Number.isSafeInteger(id))continue;
         const actions=readVoteActions(doc,row,target);
+        rows++;if(actions.up || actions.down || actions.voted)withActions++;
         voteActions.set(id,actions);updateVoteControls(id);
       }
+      // What HN's page gave the arrows, for the trace: how many rows, how
+      // many of them with a vote the account can cast or undo, and whether
+      // the page came back signed in.
+      trace('votes.result',{rows,actions:withActions,signedIn:!!signedInUser});
       votePages.add(target);
       const more=doc.querySelector('a.morelink[href]');
       const next=more?new URL(more.getAttribute('href'),target):null;
       votePage=next && next.origin===location.origin && next.pathname==='/item' && next.searchParams.get('id')===new URL(location.href).searchParams.get('id')?next.href:null;
-    } catch (_) {
+    } catch (error) {
+      trace('votes.fail',{reason:['status','page'].includes(error?.message)?error.message:['AbortError','TimeoutError'].includes(error?.name)?'timeout':'network'});
       // The header says so and offers a retry; the next viewport entry
       // retries on its own, since the page is not recorded as loaded.
       if(['pending','unknown'].includes(headerModel.identity.state)){headerModel.identity={state:'unknown'};renderHeader();}
@@ -2364,7 +2380,7 @@
 
   window.HackerViews = {
     lazyResult, localResult, readingPosition, refreshState, restoreReadingPosition,
-    networkGranted(token) { const resolve=networkWaiters.get(token);networkWaiters.delete(token);resolve?.(); },
+    networkGranted(token) { const resolve=networkWaiters.get(token);networkWaiters.delete(token);if(resolve)resolve();else post({kind:'networkRelease',token}); },
     originalPoster(name, threadRootID) {
       originalPoster = name; paintOP();
       if(Number.isSafeInteger(threadRootID) && threadRootID>0) {

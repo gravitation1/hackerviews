@@ -527,7 +527,13 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
               let body = message.body as? [String: Any], let kind = body["kind"] as? String else { return }
         switch kind {
         case "networkAcquire":
-            guard let token = body["token"] as? Int, networkWaiters[token] == nil, !networkLeases.contains(token), networkWaiters.count + networkLeases.count < 4 else { return }
+            guard let token = body["token"] as? Int else { return }
+            guard networkWaiters[token] == nil, !networkLeases.contains(token), networkWaiters.count + networkLeases.count < 4 else {
+                // Over the page's share, or a token already in flight: let the
+                // request go ahead without a lease rather than leave it waiting.
+                webView.callAsyncJavaScript("window.HackerViews?.networkGranted(token)", arguments: ["token": token], in: nil, in: Self.world, completionHandler: nil)
+                return
+            }
             let epoch = navigationID
             networkWaiters[token] = Task { [weak self] in
                 await ReaderRequestPool.shared.acquire()
@@ -548,9 +554,10 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
                         "skipped", "unskipped", "heightChanges", "heightDelta", "heightMax", "longTasks", "longTaskMax",
                         "layoutShifts", "layoutShiftScore", "pumpCalls", "pumpTotal", "pumpMax", "renderCalls", "renderTotal",
                         "renderMax", "delta", "wheelAge", "scrolling", "anchorCalls", "anchorTotal", "anchorMax",
-                        "anchorSelectTotal", "anchorRowsMax", "anchorChecked", "anchorCheckedMax", "anchorScrollCalls", "anchorWaitMax"] {
+                        "anchorSelectTotal", "anchorRowsMax", "anchorChecked", "anchorCheckedMax", "anchorScrollCalls", "anchorWaitMax",
+                        "rows", "actions", "signedIn"] {
                 if let value = body[key] as? NSNumber { fields[key] = value }
-                else if key == "reason", let value = body[key] as? String, ["viewport", "navigation", "restore", "refresh"].contains(value) { fields[key] = value }
+                else if key == "reason", let value = body[key] as? String, ["viewport", "navigation", "restore", "refresh", "status", "page", "timeout", "network"].contains(value) { fields[key] = value }
             }
             ReaderTrace.event("web." + event, fields)
         case "localRecheck":

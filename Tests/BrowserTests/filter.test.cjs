@@ -1853,6 +1853,33 @@ test('when HN serves something other than the discussion, the header says so and
   p.dom.window.close();
 });
 
+test('a network lease the app never answers does not hang the vote fetch, and a late grant is handed back', async () => {
+  const p = await lazyPage(); const w = p.dom.window;
+  w.__hackerViewsNetworkPool = true; w.__hackerViewsLeaseTimeout = 30; w.Response = Response;
+  w.IntersectionObserver = class {constructor(callback) {this.callback = callback;} observe(target) {this.callback([{target, isIntersecting: true}]);} unobserve() {}};
+  let fetched = 0;
+  const html = `<span class="pagetop"><a id="me" href="user?id=reader">reader</a> (973) | <a id="logout" href="logout">logout</a></span><table><tr class="athing comtr" id="1"><td class="votelinks"><a id="up_1" href="vote?id=1&amp;how=up&amp;auth=abc&amp;goto=item%3Fid%3D1"><div class="votearrow"></div></a></td></tr></table>`;
+  w.fetch = async () => { fetched++; return {ok: true, status: 200, statusText: 'OK', headers: {}, arrayBuffer: async () => new TextEncoder().encode(html).buffer}; };
+  const request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  w.HackerViews.lazyResult(request.token, [{id: 1, effect: 'visible', item: {id: 1, type: 'comment', by: 'author', text: 'Comment'}}]);
+  await new Promise(r => setTimeout(r, 10));
+  const acquire = p.messages.find(m => m.kind === 'networkAcquire');
+  assert.ok(acquire, 'the page asks the app for a lease');
+  assert.equal(fetched, 0, 'and waits for it');
+  await new Promise(r => setTimeout(r, 80));
+  assert.equal(fetched, 1, 'after the wait it fetches without one');
+  assert.ok(p.messages.some(m => m.kind === 'performance' && m.event === 'lease.timeout'), 'and says so in the trace');
+  assert.equal(p.doc.querySelector('#hv-header .hv-me')?.textContent, 'reader', 'sign-in state arrives');
+  const [up] = p.doc.querySelectorAll('.hv-vote');
+  assert.ok(!up.disabled && !up.classList.contains('hv-ineligible'), 'and the arrow is live');
+  const result = p.messages.find(m => m.kind === 'performance' && m.event === 'votes.result');
+  assert.deepEqual([result.rows, result.actions, result.signedIn], [1, 1, true], 'the trace records what the page gave the arrows');
+  assert.equal(p.messages.filter(m => m.kind === 'networkRelease').length, 0, 'nothing is released that was never held');
+  w.HackerViews.networkGranted(acquire.token);
+  assert.deepEqual(p.messages.filter(m => m.kind === 'networkRelease').map(m => m.token), [acquire.token], 'a grant that comes too late is handed straight back');
+  p.dom.window.close();
+});
+
 test('link rewrites are announced on the page: the story domain shows the site it opens on, links say so, HN links are untouched', async () => {
   const p = await page('', {blocked: [], url: 'https://news.ycombinator.com/item?id=1'});
   p.dom.window.close();
