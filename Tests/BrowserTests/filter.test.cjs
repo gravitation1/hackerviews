@@ -968,6 +968,37 @@ test('dead content stays hidden unless authenticated HN HTML includes its text, 
   }
 });
 
+test('a comment still inside its author’s delay is withheld, as HN withholds it, and asked for again once it may have appeared', async () => {
+  const viewedAt = 1700000000;
+  const p = await lazyPage(undefined, {visit: {viewedAt, leftAt: viewedAt + 600, descendants: 1}});
+  const w = p.dom.window; const api = w.HackerViews; w.__hackerViewsDelayedRecheck = 40;
+  let request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  api.lazyResult(request.token, [{id: 1, effect: 'visible', item: {id: 1, type: 'story', by: 'op', title: 'Topic', descendants: 2, kids: [2, 3]}}]);
+  await new Promise(r => setTimeout(r, 5));
+  request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  const now = Math.floor(Date.now() / 1000);
+  api.lazyResult(request.token, [
+    {id: 2, effect: 'visible', item: {id: 2, type: 'comment', by: 'a', parent: 1, time: now - 30, text: 'Visible'}},
+    {id: 3, effect: 'visible', item: {id: 3, type: 'comment', by: 'b', parent: 1, time: now - 20, text: '[delayed]'}}]);
+  await new Promise(r => setTimeout(r, 5));
+  assert.ok(p.doc.getElementById('2'), 'the visible comment renders');
+  assert.equal(p.doc.getElementById('3'), null, 'the delayed one draws nothing');
+  assert.equal(p.doc.body.textContent.includes('[delayed]'), false, 'and no placeholder');
+  assert.match(p.doc.querySelector('.hv-visit-text').textContent, /^1 new comment/, 'it is not counted as new yet');
+  assert.ok(![...p.doc.getElementById('2').querySelectorAll('.hv-comment-nav a')].some(a => a.textContent === 'next'), 'its sibling has no next link to it');
+  const before = p.messages.filter(m => m.kind === 'lazyItems').length;
+  await new Promise(r => setTimeout(r, 80));
+  const again = p.messages.filter(m => m.kind === 'lazyItems').slice(before);
+  assert.ok(again.some(m => m.ids.includes(3)), 'after the interval the page asks for it again');
+  api.lazyResult(again.at(-1).token, [{id: 3, effect: 'visible', item: {id: 3, type: 'comment', by: 'b', parent: 1, time: now - 20, text: 'Now visible'}}]);
+  await new Promise(r => setTimeout(r, 5));
+  assert.equal(p.doc.getElementById('3')?.querySelector('.commtext')?.textContent, 'Now visible', 'and shows it once HN releases it');
+  assert.match(p.doc.querySelector('.hv-visit-text').textContent, /^2 new comments/, 'counted as new when it appears');
+  assert.ok(p.doc.getElementById('3').querySelector('.hv-new-dot'), 'with the new mark');
+  assert.ok([...p.doc.getElementById('2').querySelectorAll('.hv-comment-nav a')].some(a => a.textContent === 'next'), 'and its sibling now has a next link');
+  p.dom.window.close();
+});
+
 test('a flagged comment shows its placeholder until HN’s page carries its text, then HN’s text and mark',async()=>{
   const p=await lazyPage();const api=p.dom.window.HackerViews;const w=p.dom.window;
   // The arrows coming into view are what fetch HN's page for a live comment.

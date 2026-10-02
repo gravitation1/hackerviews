@@ -211,6 +211,7 @@
     .hv-own .hv-vote.hv-ineligible, .hv-own .hv-vote.hv-ineligible:hover, .hv-own .hv-vote.hv-ineligible:disabled { opacity: 1; background: transparent; color: var(--qhn-muted); cursor: default; }
     .hv-votes .hv-vote.hv-ineligible > .votearrow { opacity: .22 !important; }
     .hv-dead-mark { color: var(--qhn-muted); }
+    .hv-delayed { color: var(--qhn-muted); margin: 4px 0; }
     /* A cast arrow keeps its colour under the pointer, so the click shows at
        once; the hover background alone marks the pointer. */
     .hv-own .hv-vote.hv-voted:hover, .hv-own .hv-vote.hv-voted:focus-visible { color: var(--qhn-accent); background: var(--qhn-hover); }
@@ -1167,6 +1168,24 @@
   let lazyObserver;
   // What the API gives in place of text the account may not see.
   const placeholderText=text=>/^\s*\[(dead|flagged|deleted)\]\s*$/.test(text||'');
+  // A comment still inside its author's delay (HN's profile setting, up to
+  // ten minutes): HN shows it to nobody else until the delay passes, and the
+  // API carries only "[delayed]" meanwhile.
+  function isDelayed(item) { return !!item && item.type==='comment' && item.deleted!==true && item.dead!==true && /^\s*\[delayed\]\s*$/.test(item.text||''); }
+  const delayedTimers=new Map();
+  const delayedRecheck=()=>Number(window.__hackerViewsDelayedRecheck)||75000;
+  // Ask for a delayed comment again once the app's item cache has turned
+  // over, until it appears or is old enough that no delay can still hold it.
+  function scheduleDelayedRecheck(node) {
+    if(delayedTimers.has(node.id))return;
+    if(Date.now()/1000-(node.entry?.item?.time||0)>15*60)return;
+    delayedTimers.set(node.id,setTimeout(()=>{
+      delayedTimers.delete(node.id);
+      if(!node.host.isConnected || !isDelayed(node.entry?.item))return;
+      if(localPaused){scheduleDelayedRecheck(node);return;}
+      lazyRefreshQueue=[...(lazyRefreshQueue||[]),node];lazyPump();
+    },delayedRecheck()));
+  }
   function safeBody(html) {
     const parsed = new DOMParser().parseFromString(html || '', 'text/html');
     const output = document.createDocumentFragment();
@@ -1227,7 +1246,7 @@
   // counting it as hidden would promise a reveal that has nothing to show.
   function silentLeaf(entry) {
     const item = entry?.item;
-    return !!item && item.type === 'comment' && !(item.kids?.length) && (item.deleted === true || (item.dead === true && !canonicalItems.get(item.id)?.showDead));
+    return !!item && item.type === 'comment' && !(item.kids?.length) && (item.deleted === true || (item.dead === true && !canonicalItems.get(item.id)?.showDead) || isDelayed(item));
   }
   // Hidden on its own account. Replies hidden only because of a loaded
   // ancestor are neither counted nor labelled: revealing that ancestor lifts them.
@@ -1824,7 +1843,7 @@
     if(threadRoot!==node.id)link('root',threadRoot);
     link('parent',item.parent);
     const siblings=node.group?.ids || [], index=siblings.indexOf(node.id);
-    const available=id=>{const entry=lazyNodes.get(id)?.entry;return !['blocked','hidden-item','unresolved'].includes(entry?.effect) && !(entry?.item?.deleted && !entry.item.kids?.length);};
+    const available=id=>{const entry=lazyNodes.get(id)?.entry;return !['blocked','hidden-item','unresolved'].includes(entry?.effect) && !(entry?.item?.deleted && !entry.item.kids?.length) && !isDelayed(entry?.item);};
     link('prev',siblings.slice(0,index).reverse().find(available));
     link('next',siblings.slice(index+1).find(available));
     if(node.isNew) {
@@ -1852,7 +1871,7 @@
   // settles, the nearest visible siblings on either side are re-pointed.
   function refreshSiblingNavigation(node) {
     const ids=node.group?.ids||[], index=ids.indexOf(node.id);
-    const visible=id=>{const n=lazyNodes.get(id);return !!n?.entry && !['blocked','hidden-item'].includes(n.entry.effect) && !(n.entry.item?.deleted && !n.entry.item.kids?.length);};
+    const visible=id=>{const n=lazyNodes.get(id);return !!n?.entry && !['blocked','hidden-item'].includes(n.entry.effect) && !(n.entry.item?.deleted && !n.entry.item.kids?.length) && !isDelayed(n.entry.item);};
     for(const id of [ids.slice(0,index).reverse().find(visible),ids.slice(index+1).find(visible)])if(id)refreshNavigation(lazyNodes.get(id));
   }
   const replyWord=n=>n+' '+(n===1?'reply':'replies');
@@ -1860,7 +1879,7 @@
   // Replies under a comment: those loaded and shown, or at least the direct ones HN reports.
   function repliesBelow(node) {
     let loaded=0;
-    for(const other of lazyNodes.values())if(other.entry && other.ancestors.has(node.id) && !filteredEffect(other.entry.effect))loaded++;
+    for(const other of lazyNodes.values())if(other.entry && other.ancestors.has(node.id) && !filteredEffect(other.entry.effect) && !isDelayed(other.entry.item))loaded++;
     return Math.max(loaded,node.entry?.item?.kids?.length||0);
   }
   // The line beside a comment's own text collapses that comment, and its
@@ -1931,6 +1950,19 @@
         reveal.onclick=()=>setRootRevealed(true); own.append(text,reveal);
       }
       if (node.children) node.children.host.hidden=true;
+      return;
+    }
+    if(isDelayed(item)) {
+      // Nothing to draw, as on HN; a branch or the page's own comment keeps a
+      // marker so its place in the tree is not a mystery.
+      if(root || item.kids?.length) { const placeholder=document.createElement('p');placeholder.className='hv-delayed';placeholder.append(hnLink('[delayed]','/item?id='+item.id));own.append(placeholder); }
+      if(!node.children && item.kids?.length) {
+        const host=document.createElement('div');host.className='hv-children';node.host.append(host);
+        if(node.depth*28<280)host.append(branchRail(node));
+        node.children=lazyGroup(host,item.kids,node.depth+1,new Set([...node.ancestors,node.id]));
+      }
+      if(node.children)node.children.host.hidden=!!node.collapsed;
+      scheduleDelayedRecheck(node);
       return;
     }
     if(item.deleted===true || (item.dead===true && !canonicalItems.get(item.id)?.showDead)) {
