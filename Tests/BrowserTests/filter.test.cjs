@@ -1184,7 +1184,8 @@ test('failed undo stays retryable and restored controls respect current eligibil
   p.dom.window.close();
 });
 
-const hnHeader = (right, current = '') => `<table id="hnmain" border="0" cellpadding="0" cellspacing="0" width="85%"><tbody><tr><td bgcolor="#ff6600"><table border="0" cellpadding="0" cellspacing="0" width="100%" style="padding:2px"><tbody><tr>
+const blackBar = '<tr><td bgcolor="#000000"><img src="s.gif" height="5" width="0"></td></tr>';
+const hnHeader = (right, current = '', mourning = false) => `<table id="hnmain" border="0" cellpadding="0" cellspacing="0" width="85%"><tbody>${mourning ? blackBar : ''}<tr><td bgcolor="#ff6600"><table border="0" cellpadding="0" cellspacing="0" width="100%" style="padding:2px"><tbody><tr>
   <td style="width:18px;padding-right:4px"><a href="https://news.ycombinator.com"><img src="y18.svg" width="18" height="18"></a></td>
   <td style="line-height:12pt; height:10px;"><span class="pagetop"><b class="hnname"><a href="news">Hacker News</a></b>
     <a href="newest">new</a> | ${current === 'threads' ? '<span class="topsel">' : '<span>'}<a href="threads?id=alice">threads</a></span> | <a href="front">past</a> | <a href="newcomments">comments</a> | <a href="ask">ask</a> | <a href="show">show</a> | <a href="jobs">jobs</a> | <a href="submit">submit</a> | <a href="https://evil.test/newest">offsite</a></span></td>
@@ -1243,6 +1244,35 @@ test('the header shows hidden and unchecked counts and retry re-runs the page ch
   assert.equal(header.querySelector('.hv-chip'), null, 'chips disappear when nothing is hidden or unchecked');
   assert.equal(p.messages.filter(m => m.kind === 'ready').at(-1).hidden, 0);
   p.dom.window.close();
+});
+
+test('HN\'s black bar, a row above its header while HN mourns, becomes a black edge on the shared header', async () => {
+  const p = await page(hnHeader(signedIn, '', true), {blocked: []});
+  const header = p.doc.querySelector('#hnmain > tbody > tr > td.hv-header-cell > header.hv-header');
+  assert.ok(header, 'header mounted inside HN\'s header cell, below the bar\'s row');
+  assert.equal(p.doc.querySelector('.pagetop'), null);
+  assert.equal(p.doc.querySelector('img[src="y18.svg"]'), null);
+  assert.equal(p.doc.querySelector('td[bgcolor="#000000"]'), null, 'HN\'s own bar row is gone');
+  assert.ok(header.classList.contains('hv-black-bar'), 'the header carries the bar');
+  assert.deepEqual([...header.querySelectorAll('.hv-nav a')].map(a => a.textContent), ['home','new','threads','past','comments','ask','show','jobs','submit']);
+  assert.equal(header.querySelector('.hv-side a#me').textContent, 'alice');
+  assert.equal(header.querySelector('.hv-karma').textContent, '973');
+  p.dom.window.close();
+  const plain = await page(hnHeader(signedIn), {blocked: []});
+  assert.equal(plain.doc.querySelector('header.hv-header').classList.contains('hv-black-bar'), false, 'no bar, no edge');
+  plain.dom.window.close();
+  // The discussion shell learns of the bar from HN's page for the discussion.
+  const shell = await lazyPage();
+  const shellHeader = shell.doc.getElementById('hv-header');
+  assert.equal(shellHeader.classList.contains('hv-black-bar'), false);
+  shell.dom.window.IntersectionObserver = class {constructor(callback){this.callback=callback;}observe(target){this.callback([{target,isIntersecting:true}]);}unobserve(){}};
+  shell.dom.window.fetch = async () => ({ok: true, text: async () => hnHeader(signedIn, '', true)});
+  const request = shell.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  shell.dom.window.HackerViews.lazyResult(request.token, [{id: 1, effect: 'visible', item: {id: 1, type: 'comment', by: 'reader', text: 'Comment'}}]);
+  await new Promise(r => setTimeout(r, 20));
+  assert.ok(shellHeader.classList.contains('hv-black-bar'), 'the shell\'s header carries the bar once HN\'s page arrives');
+  assert.equal(shellHeader.querySelector('.hv-side a#me').textContent, 'alice');
+  shell.dom.window.close();
 });
 
 test('the topic shell renders the same header with a pending identity until HN\'s HTML arrives', async () => {

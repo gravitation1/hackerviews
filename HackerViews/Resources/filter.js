@@ -284,9 +284,8 @@
     html { overscroll-behavior-x: none; }
     body { font-size: 14px; }
     #hnmain { width: 100% !important; min-width: 0 !important; background: var(--qhn-bg); padding: 0 16px 16px; }
-    #hnmain > tbody > tr:first-child > td { background: var(--qhn-bg) !important; padding: 0; }
-    #hnmain > tbody > tr:first-child table { padding: 0 !important; }
-    #hnmain > tbody > tr:first-child > td > table > tbody > tr > td:first-child:has(> a > img[src="y18.svg"]), .hnname { display: none; }
+    /* HN's header cell, wherever it sits: a black bar's row stands above it while HN mourns. */
+    #hnmain > tbody > tr > td.hv-header-cell { background: var(--qhn-bg) !important; padding: 0; }
     /* One header for feed pages and the topic shell. Every item carries a leading
        tick and a trailing gap; the negative item margin puts the tick inside the
        previous gap and the list's overflow clips the first tick of every line. */
@@ -294,6 +293,9 @@
       gap: 6px 16px; padding: 6px 0; margin: 0 0 10px; border-bottom: 1px solid var(--qhn-line);
       font-family: -apple-system, BlinkMacSystemFont, sans-serif; font-size: 12px; line-height: 24px; color: var(--qhn-muted); }
     #hnmain .hv-header { margin-bottom: 0; }
+    /* HN's black bar, carried as a black edge along the top of the header, with a
+       hairline under it so the band still reads on the dark theme. */
+    .hv-header.hv-black-bar { border-top: 5px solid #000; box-shadow: inset 0 1px 0 var(--qhn-line); }
     body.hv-plain { padding: 0 16px 16px; }
     .hv-header ul { display: flex; align-items: center; flex-wrap: wrap; list-style: none; overflow: hidden; margin: 0; padding: 0; }
     .hv-header .hv-nav { margin-left: -7px; }
@@ -584,7 +586,7 @@
     '/threads', '/best', '/active', '/lists', '/login', '/logout', '/user']);
   const defaultSections = [['new', '/newest'], ['threads', '/threads'], ['past', '/front'], ['comments', '/newcomments'],
     ['ask', '/ask'], ['show', '/show'], ['jobs', '/jobs'], ['submit', '/submit']];
-  const headerModel = {links: null, identity: {state: 'pending'}, hidden: 0, unresolved: 0, retry: null};
+  const headerModel = {links: null, identity: {state: 'pending'}, hidden: 0, unresolved: 0, retry: null, blackBar: false};
   let headerSignature = '';
   function readHeader(root, base) {
     const spans = [...root.querySelectorAll('.pagetop')];
@@ -607,7 +609,18 @@
       links.push({label, url: url.href, current: !!a.closest('.topsel')});
     }
     if (identity.state === 'in' && !identity.logoutURL) identity.logoutURL = new URL('/logout?goto=news', base).href;
-    return {links, identity};
+    return {links, identity, blackBar: !!blackBarRow(root)};
+  }
+  // While HN mourns someone, a black bar stands above its header: a row of its
+  // main table, before the header's, whose one cell is black. Found from the
+  // header's cell, the page, or a fetched document.
+  function blackBarRow(root) {
+    const main = root.closest?.('#hnmain') || root.querySelector('#hnmain');
+    const header = main?.querySelector('.pagetop')?.closest('#hnmain > tbody > tr');
+    for (let row = header?.previousElementSibling; row; row = row.previousElementSibling) {
+      if (row.cells.length === 1 && /^(#000000|black)$/i.test(row.cells[0].getAttribute('bgcolor') || '')) return row;
+    }
+    return null;
   }
   function headerElement() {
     const shell = document.getElementById('hv-header');
@@ -617,7 +630,10 @@
       (document.getElementById('hv-topic') || document.body).prepend(header);
       return header;
     }
-    const cell = document.querySelector('#hnmain > tbody > tr:first-child > td');
+    // HN's header cell is the one holding its links, not the table's first row:
+    // a black bar's row stands above it while HN mourns.
+    const cell = document.querySelector('#hnmain > tbody > tr > td.hv-header-cell')
+      || document.querySelector('#hnmain .pagetop')?.closest('#hnmain > tbody > tr > td');
     if (!cell) {
       if (!document.body || document.getElementById('hnmain')) return null;
       const header = document.createElement('header'); header.id = 'hv-header'; header.className = 'hv-header';
@@ -630,9 +646,10 @@
     if (!header) {
       const parsed = readHeader(cell, location.href);
       if (!parsed) return null;
-      headerModel.links = parsed.links; headerModel.identity = parsed.identity;
+      headerModel.links = parsed.links; headerModel.identity = parsed.identity; headerModel.blackBar = parsed.blackBar;
+      blackBarRow(cell)?.remove();
       header = document.createElement('header'); header.className = 'hv-header';
-      cell.replaceChildren(header);
+      cell.classList.add('hv-header-cell'); cell.replaceChildren(header);
     }
     return header;
   }
@@ -649,9 +666,10 @@
     const host = headerElement();
     if (!host) return;
     const model = headerModel;
-    const signature = JSON.stringify([location.pathname, model.links, model.identity, model.hidden, model.unresolved, revealAll]);
+    const signature = JSON.stringify([location.pathname, model.links, model.identity, model.hidden, model.unresolved, revealAll, model.blackBar]);
     if (signature === headerSignature && host.childElementCount) return;
     headerSignature = signature;
+    host.classList.toggle('hv-black-bar', !!model.blackBar);
     const item = (label, url, options = {}) => {
       const li = document.createElement('li'); const a = hnLink(label, url);
       if (options.current) a.setAttribute('aria-current', 'page');
@@ -1748,7 +1766,7 @@
       readSignedInUser(doc);paintOP();
       if(document.getElementById('hv-header')) {
         const parsed=readHeader(doc,target);
-        if(parsed){if(parsed.links.length)headerModel.links=parsed.links;headerModel.identity=parsed.identity;renderHeader();}
+        if(parsed){if(parsed.links.length)headerModel.links=parsed.links;headerModel.identity=parsed.identity;headerModel.blackBar=parsed.blackBar;renderHeader();}
       }
       rememberCanonicalItems(doc,target);rememberCommentForm(doc,target);
       let rows=0,withActions=0;
