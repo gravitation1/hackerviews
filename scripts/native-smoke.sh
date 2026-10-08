@@ -10,6 +10,6 @@ cat > "$bundle/Contents/Info.plist" <<'EOF'
 EOF
 xcrun swiftc -parse-as-library -swift-version 6 -target arm64-apple-macosx14.0 \
   HackerViews/Core/*.swift HackerViews/RecordStore.swift HackerViews/Sync/CloudSync.swift \
-  HackerViews/Browser/BrowserTab.swift HackerViews/Browser/HNService.swift Tests/NativeSmoke.swift \
+  HackerViews/Browser/BrowserTab.swift HackerViews/Browser/HNService.swift HackerViews/Browser/VisitStore.swift Tests/NativeSmoke.swift \
   -o "$bundle/Contents/MacOS/NativeSmoke"
 "$bundle/Contents/MacOS/NativeSmoke" "$@"
