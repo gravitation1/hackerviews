@@ -1915,6 +1915,16 @@
     rail.onclick=()=>node.toggleButton?.click();
     node.rail=rail;return rail;
   }
+  // Collapsing from the rail, or from the line beside a long comment's text,
+  // can leave the comment itself above the viewport, with whatever followed
+  // its branch pulled up into its place. Then the comment comes to the top,
+  // so the reader is looking at what they collapsed; a comment already in
+  // view keeps its place as its branch folds away below it.
+  function showCollapsed(node) {
+    const own=node.host.querySelector(':scope > .hv-own');
+    if(!own?.getClientRects().length || own.getBoundingClientRect().top>=0)return;
+    own.scrollIntoView({block:'start'});
+  }
   function collapseToggle(node, onToggle) {
     const toggle=document.createElement('button');toggle.type='button';toggle.className='hv-collapse';
     const update=()=>{
@@ -1930,6 +1940,7 @@
       if(node.collapsed)lazyCollapsed.add(node.id);else lazyCollapsed.delete(node.id);
       if(node.children)node.children.host.hidden=node.collapsed;
       onToggle?.(node.collapsed);update();
+      if(node.collapsed)showCollapsed(node);
       post({kind:'collapsedState',ids:[...lazyCollapsed]});lazyPump();
     };
     return toggle;

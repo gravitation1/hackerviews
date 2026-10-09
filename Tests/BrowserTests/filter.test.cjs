@@ -1822,6 +1822,41 @@ test('a comment is its header and its text: HN’s line with reply and note, no 
   p.dom.window.close();
 });
 
+test('collapsing from the rail brings a comment scrolled past back to the top of the viewport; one in view keeps its place', async () => {
+  const p = await lazyPage(); const api = p.dom.window.HackerViews;
+  const scrolled = []; p.dom.window.Element.prototype.scrollIntoView = function (options) { scrolled.push({target: this, block: options?.block}); };
+  let request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  api.lazyResult(request.token, [{id: 1, effect: 'visible', item: {id: 1, type: 'story', by: 'op', title: 'Topic', kids: [2]}}]);
+  await new Promise(r => setTimeout(r, 5));
+  request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  api.lazyResult(request.token, [{id: 2, effect: 'visible', item: {id: 2, type: 'comment', by: 'alice', parent: 1, text: 'Parent', kids: [3, 4]}}]);
+  await new Promise(r => setTimeout(r, 5));
+  request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  api.lazyResult(request.token, [{id: 3, effect: 'visible', item: {id: 3, type: 'comment', by: 'bob', parent: 2, text: 'Child one'}}, {id: 4, effect: 'visible', item: {id: 4, type: 'comment', by: 'carol', parent: 2, text: 'Child two'}}]);
+  await new Promise(r => setTimeout(r, 5));
+  const row = p.doc.getElementById('2'), own = row.closest('.hv-own'), node = row.closest('.hv-node');
+  const children = node.querySelector(':scope > .hv-children'), rail = children.querySelector(':scope > .hv-rail');
+  let top = -640; own.getBoundingClientRect = () => ({top, bottom: top + 90});
+  rail.click();
+  assert.equal(children.hidden, true);
+  assert.equal(scrolled.length, 1, 'the comment, scrolled past, is brought back');
+  assert.equal(scrolled[0].target, own, 'to its own part, not the branch');
+  assert.equal(scrolled[0].block, 'start', 'at the top of the viewport');
+  assert.deepEqual([...p.messages.filter(m => m.kind === 'collapsedState').at(-1).ids], [2], 'and the state still persists');
+  row.querySelector('.hv-collapse').click();
+  assert.equal(children.hidden, false);
+  assert.equal(scrolled.length, 1, 'expanding leaves the viewport alone');
+  top = 40;
+  rail.click();
+  assert.equal(children.hidden, true);
+  assert.equal(scrolled.length, 1, 'a comment already in view keeps its place as its branch folds away below it');
+  row.querySelector('.hv-collapse').click();
+  row.querySelector('.hv-rail-head').click();
+  assert.equal(children.hidden, true);
+  assert.equal(scrolled.length, 1, 'the line beside a comment in view does not move it either');
+  p.dom.window.close();
+});
+
 test('clicking the other arrow while a vote stands switches the vote, and HN is asked before the new vote is cast', async () => {
   const requests = []; let voted = null;
   const p = await lazyPage(); const w = p.dom.window;
