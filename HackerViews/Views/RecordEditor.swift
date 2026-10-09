@@ -430,6 +430,7 @@ private struct FlagContributionView: View {
 
     private var creating: Bool { filterID == createID }
     private var selected: FilterRule? { creating ? newFilter : store.archive.rules.first { $0.id == filterID } }
+    private var filterPrompt: String { userTarget ? "Add \(username) to filter" : "Add contribution to filter" }
     private var canSave: Bool {
         if creating { return !newFilter.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && newFilter.isValid }
         return (filterID.isEmpty || selected != nil) && (!filterID.isEmpty || attached || !annotation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -471,13 +472,19 @@ private struct FlagContributionView: View {
                         Text("This user").tag(true)
                         Text("Only this contribution").tag(false)
                     }.pickerStyle(.segmented)
-                    Picker(userTarget ? "Add \(username) to filter" : "Add contribution to filter", selection: $filterID) {
+                    #if os(macOS)
+                    LabeledContent(filterPrompt) {
+                        MacFilterPicker(selection: $filterID, rules: store.archive.rules, createID: createID, accessibilityLabel: filterPrompt).fixedSize()
+                    }
+                    #else
+                    Picker(filterPrompt, selection: $filterID) {
                         Text("No filter · Note only").tag("")
                         Text("Create filter…").tag(createID)
                         ForEach(store.archive.rules) { rule in
-                            Text(rule.name + " · " + rule.effectLabel + (rule.enabled ? "" : " · Paused")).tag(rule.id)
+                            (rule.nameText + Text(" · " + rule.choiceDetail)).tag(rule.id)
                         }
                     }
+                    #endif
                     if creating {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("New filter").font(.headline)
@@ -490,9 +497,9 @@ private struct FlagContributionView: View {
                         }
                     }
                     if let selected {
-                        Text(userTarget
-                             ? "Adds \(username) to \(selected.name). The filter’s scope and other conditions still apply."
-                             : "Applies to this contribution only.")
+                        (userTarget
+                             ? Text("Adds \(username) to ") + selected.nameText + Text(". The filter’s scope and other conditions still apply.")
+                             : Text("Applies to this contribution only."))
                             .font(.callout).foregroundStyle(.secondary)
                         Text(preview.isEmpty ? "Checking resulting effect…" : preview)
                             .font(.callout)

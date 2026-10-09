@@ -6,6 +6,7 @@ struct FilterNameField: NSViewRepresentable {
     @Binding var text: String
     let placeholder: String
     let active: Bool
+    var accent: NSColor? = nil
     let accessibilityName: String
     var coalescesEdits = false
 
@@ -28,7 +29,8 @@ struct FilterNameField: NSViewRepresentable {
         context.coordinator.parent = self
         if field.currentEditor() == nil && field.stringValue != text { field.stringValue = text }
         field.placeholderString = placeholder
-        field.textColor = active ? .labelColor : .secondaryLabelColor
+        // A highlight filter's name carries its colour, as on the page; paused, the colour fades.
+        field.textColor = accent.map { active ? $0 : $0.withAlphaComponent(0.5) } ?? (active ? .labelColor : .secondaryLabelColor)
         field.setAccessibilityLabel(accessibilityName)
         field.toolTip = "Click to rename; changes save automatically"
     }

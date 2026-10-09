@@ -182,7 +182,7 @@ struct FiltersView: View {
                     store.archive.rules.first(where: { $0.id == row.id })?.name ?? ""
                 }, set: { name in
                     update([row.id]) { $0.name = name }
-                }), placeholder: "Filter name", active: row.rule.enabled,
+                }), placeholder: "Filter name", active: row.rule.enabled, accent: row.rule.nameAccent?.nsColor,
                     accessibilityName: "Filter name, priority \(row.order)", coalescesEdits: true)
                 .onDrop(of: [UTType.text], isTargeted: nil) { _ in drop(on: row.id) }
             }.width(min: 130, ideal: 190)
@@ -210,7 +210,7 @@ struct FiltersView: View {
                         Image(systemName: selection.contains(row.id) ? "checkmark.circle.fill" : "circle")
                     }.buttonStyle(ControlSurfaceStyle()).accessibilityLabel("Select \(row.name)")
                     VStack(alignment: .leading, spacing: 8) {
-                        Button { editing = row.id } label: { Text("\(row.order). \(row.name)").font(.headline) }.buttonStyle(ControlSurfaceStyle())
+                        Button { editing = row.id } label: { (Text("\(row.order). ") + row.rule.nameText).font(.headline) }.buttonStyle(ControlSurfaceStyle())
                         Text(row.matches).font(.caption).foregroundStyle(.secondary)
                         HStack { effectMenu(row.rule); Spacer(); statusMenu(row.rule) }
                     }
@@ -283,6 +283,12 @@ extension FilterRule.Accent {
         let (r, g, b) = rgb
         return Color(red: r, green: g, blue: b)
     }
+    #if os(macOS)
+    var nsColor: NSColor {
+        let (r, g, b) = rgb
+        return NSColor(srgbRed: r, green: g, blue: b, alpha: 1)
+    }
+    #endif
     // Native menus tint SF Symbols with the app accent. An original-color image
     // preserves each swatch's actual RGB value in both the menu and selection.
     var swatch: Image {
@@ -308,6 +314,11 @@ extension FilterRule {
     var effectLabel: String {
         switch effect { case .block: "Block"; case .highlight: "Highlight · " + color.rawValue.capitalized; case .allow: "Show normally"; case .fade: "Fade · " + fade.label }
     }
+    /// What follows the name where a filter is offered as a choice.
+    var choiceDetail: String { effectLabel + (enabled ? "" : " · Paused") }
+    /// The colour a highlight filter's name carries wherever it is listed.
+    var nameAccent: Accent? { effect == .highlight ? color : nil }
+    var nameText: Text { nameAccent.map { Text(name).foregroundStyle($0.swiftUI) } ?? Text(name) }
     var summary: String {
         var values: [String] = []
         let higher = conditions.preferHigher == true
