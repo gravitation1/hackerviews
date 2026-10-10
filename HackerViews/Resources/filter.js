@@ -1621,7 +1621,7 @@
     if(text && data.fade)text.style.opacity=String(data.fade);
   }
   function rememberCanonicalItems(doc,target) {
-    const allowed=new Set(['edit','delete','flag','unflag','hide','unhide','favorite','unfavorite','past']);
+    const allowed=new Set(['edit','delete','flag','unflag','vouch','unvouch','hide','unhide','favorite','unfavorite','past']);
     for(const row of doc.querySelectorAll('tr.athing[id]')) {
       const id=Number(row.id);if(!Number.isSafeInteger(id)||id<=0)continue;
       const sources=[...row.querySelectorAll('.comhead')];
@@ -1631,7 +1631,7 @@
         const label=a.textContent.trim().toLowerCase();
         if(!allowed.has(label))continue;
         let url;try{url=new URL(a.getAttribute('href'),target);}catch(_){continue;}
-        if(url.origin!==location.origin || !['/edit','/delete-confirm','/delete','/flag','/hide','/fave','/front'].includes(url.pathname))continue;
+        if(url.origin!==location.origin || !['/edit','/delete-confirm','/delete','/flag','/vouch','/hide','/fave','/front'].includes(url.pathname))continue;
         if(label!=='past' && url.searchParams.get('id')!==String(id))continue;
         if(!actions.some(action=>action.label===label))actions.push({label,url:url.href});
       }
@@ -1639,13 +1639,15 @@
       // The API carries only "[dead]" or "[flagged]" for such a comment; HN's
       // page, for an account with showdead, carries the text and marks the
       // row after its age. Keep both so the reader can show what HN shows.
+      // The row is a .comtr in a thread, but on the comment's own page it is
+      // HN's fatitem row, with the same .comhead and .commtext and no .comtr.
       const placeholder=!!text && placeholderText(text.textContent);
       const marker=(/\[(dead|flagged)\]/.exec(row.querySelector('.comhead')?.textContent||'')||[])[0]||null;
       const shade=[...(text?.classList||[])].find(name=>/^c[0-9a-f]{2}$/.test(name));
       const countText=row.matches('.comtr')?null:[...(row.nextElementSibling?.querySelectorAll('a[href]')||[])].map(a=>a.textContent).find(t=>/^\s*\d+\s*comments?\s*$/.test(t));
       // HN's live count is what the visit record should remember, not the API's cached total.
       if(countText && id===Number(document.body.dataset.hvTopic))post({kind:'visitCount',id,count:Number(/\d+/.exec(countText)[0])});
-      canonicalItems.set(id,{actions,showDead:!!text && !placeholder,text:row.matches('.comtr') && text && !placeholder ? text.innerHTML : null,marker,
+      canonicalItems.set(id,{actions,showDead:!!text && !placeholder,text:text?.matches('.commtext') && !placeholder ? text.innerHTML : null,marker,
         fade:shade?Math.max(.35,1-parseInt(shade.slice(1),16)/255):null,comments:countText?Number(/\d+/.exec(countText)[0]):null});
       const node=lazyNodes.get(id);
       if(node?.entry?.item && (node.entry.item.dead || placeholderText(node.entry.item.text)))lazyRender(node,node.entry);

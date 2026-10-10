@@ -936,7 +936,7 @@ test('list checks include DOM authors and contribution types for native fast fil
 test('lazy metadata restores authenticated actions, relative age, domain and community fading',async()=>{
   const p=await lazyPage();const api=p.dom.window.HackerViews;
   p.dom.window.IntersectionObserver=class {constructor(callback){this.callback=callback;}observe(target){this.callback([{target,isIntersecting:true}]);}unobserve(){}};
-  p.dom.window.fetch=async()=>({ok:true,text:async()=>`<table><tr class="athing comtr" id="1"><td><span class="comhead"><a href="edit?id=1">edit</a><a href="delete-confirm?id=1">delete</a><a href="https://evil.test/flag?id=1">flag</a></span><span class="commtext c5a">Comment</span></td></tr></table>`});
+  p.dom.window.fetch=async()=>({ok:true,text:async()=>`<table><tr class="athing comtr" id="1"><td><span class="comhead"><a href="edit?id=1">edit</a><a href="delete-confirm?id=1">delete</a><a href="https://evil.test/flag?id=1">flag</a><a href="vouch?id=1&auth=fixture">vouch</a><a href="vouch?id=1&un=t&auth=fixture">unvouch</a></span><span class="commtext c5a">Comment</span></td></tr></table>`});
   let request=p.messages.filter(m=>m.kind==='lazyItems').at(-1);
   api.lazyResult(request.token,[{id:1,effect:'visible',item:{id:1,type:'comment',by:'reader',text:'Comment',time:Date.now()/1000-7200}}]);
   await new Promise(r=>setTimeout(r,20));
@@ -944,6 +944,8 @@ test('lazy metadata restores authenticated actions, relative age, domain and com
   assert.ok(p.doc.querySelector('a[href="https://news.ycombinator.com/edit?id=1"]'));
   assert.ok(p.doc.querySelector('a[href="https://news.ycombinator.com/delete-confirm?id=1"]'));
   assert.equal(p.doc.querySelector('a[href^="https://evil.test"]'),null);
+  assert.equal(p.doc.querySelector('a[href="https://news.ycombinator.com/vouch?id=1&auth=fixture"]')?.textContent,'vouch','HN’s vouch link is kept');
+  assert.equal(p.doc.querySelector('a[href="https://news.ycombinator.com/vouch?id=1&un=t&auth=fixture"]')?.textContent,'unvouch','and so is its undo');
   assert.ok(Number(p.doc.querySelector('.commtext').style.opacity)<1);
   p.dom.window.close();
 });
@@ -966,6 +968,24 @@ test('dead content stays hidden unless authenticated HN HTML includes its text, 
     } else assert.equal(p.doc.querySelector('.hv-tombstone-label')?.textContent,'[moderated]');
     p.dom.window.close();
   }
+});
+
+test('a dead comment opened on its own page shows HN’s text, mark and vouch link from HN’s fatitem row, which has no comtr class',async()=>{
+  const p=await lazyPage();const api=p.dom.window.HackerViews;
+  // HN’s markup for a comment’s own page: the row is the fatitem, not a .comtr.
+  p.dom.window.fetch=async()=>({ok:true,text:async()=>`<table class="fatitem"><tr class="athing" id="1"><td class="ind"></td><td valign="top" class="votelinks"><center><a id="up_1" href="vote?id=1&how=up&auth=fixture"><div class="votearrow" title="upvote"></div></a></center></td><td class="default"><div style="margin-top:2px; margin-bottom:-10px;"><span class="comhead"><a href="user?id=reader" class="hnuser">reader</a> <span class="age" title="2026-10-09T23:24:33"><a href="item?id=1">40 minutes ago</a></span> <span id="unv_1"></span> [dead] <span class="navs"> | <a href="item?id=99">parent</a> | <a href="item?id=98#1" rel="nofollow">context</a> | <a href="flag?id=1&auth=fixture">flag</a> | <a href="vouch?id=1&auth=fixture">vouch</a> | <a href="fave?id=1&auth=fixture">favorite</a><span class="onstory"> |  on: <a href="item?id=98">Topic</a></span></span></span></div><br><div class="comment"><div class="commtext cdd">Moderated <i>text</i></div><div class="reply"></div></div></td></tr></table>`});
+  const request=p.messages.filter(m=>m.kind==='lazyItems').at(-1);
+  api.lazyResult(request.token,[{id:1,effect:'visible',item:{id:1,type:'comment',by:'reader',parent:99,dead:true,text:'[dead]'}}]);
+  assert.equal(p.doc.querySelector('.commtext'),null,'No initial flash of moderated content');
+  await new Promise(r=>setTimeout(r,20));
+  assert.equal(p.doc.querySelector('.hv-tombstone-label'),null,'not a tombstone once HN’s page carries the text');
+  assert.equal(p.doc.querySelector('.commtext')?.textContent,'Moderated text','the text comes from HN’s fatitem row, not the API placeholder');
+  assert.equal(p.doc.querySelector('.hv-dead-mark')?.textContent,' [dead]','with HN’s mark after the age');
+  assert.ok(Number(p.doc.querySelector('.commtext').style.opacity)<1,'faded as HN fades it');
+  const actions=[...p.doc.querySelectorAll('.hv-hn-actions a')].map(a=>a.textContent);
+  assert.deepEqual(actions,['flag','vouch','favorite'],'HN’s actions in HN’s order, vouch among them');
+  assert.equal(p.doc.querySelector('.hv-hn-actions a[href="https://news.ycombinator.com/vouch?id=1&auth=fixture"]')?.textContent,'vouch');
+  p.dom.window.close();
 });
 
 test('a comment still inside its author’s delay is withheld, as HN withholds it, and asked for again once it may have appeared', async () => {
