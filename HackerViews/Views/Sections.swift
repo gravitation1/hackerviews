@@ -79,8 +79,8 @@ struct ReaderSection: View, @preconcurrency Equatable {
 ///   AppKit views (the web view, the filter table) on every switch.
 /// - Filters' search field is the window toolbar's. A hidden view's
 ///   `.searchable` still puts it there, and adding it on each switch builds a
-///   new toolbar item, so on macOS 15 and later it stays and is hidden in
-///   AppKit outside Filters.
+///   new toolbar item, so on macOS 15 and later it stays and is hidden by
+///   `SearchItemVisibility` outside Filters.
 struct SectionStack: View {
     let selection: SectionSelection
     let store: RecordStore
@@ -100,7 +100,7 @@ struct SectionStack: View {
         Group {
             if #available(macOS 15.0, *) {
                 stack.searchable(text: $filterQuery, prompt: FiltersView.searchPrompt)
-                    .background(SearchItemVisibility(shown: section == "filters"))
+                    .background(SearchItemVisibility(section: section))
             } else {
                 stack.overlay {
                     if section == "filters" {
@@ -139,14 +139,23 @@ private struct SettingsSection: View, @preconcurrency Equatable {
     var body: some View { SettingsView(store: store) }
 }
 
+/// Toolbar items whose visibility follows the section.
+enum ToolbarItemID {
+    static let readerActions = "hackerviews.reader-actions"
+}
+
 /// Hides the window's search toolbar item while Filters is not on screen.
-/// The item stays in the toolbar, so showing it again is a layout change, not
-/// a new item. A toolbar that gains a search item again gets the same state.
+/// SwiftUI cannot hide it: `ToolbarItem.hidden` does not reach the item
+/// `.searchable` makes. The item stays in the toolbar, so a switch is one
+/// relayout rather than a new item, which SwiftUI would otherwise build each
+/// time; the change is made without animation, so the toolbar is final in
+/// the switch's own frame. A toolbar that gains a search item again gets the
+/// same state.
 @available(macOS 15.0, *)
-private struct SearchItemVisibility: NSViewRepresentable {
-    let shown: Bool
+struct SearchItemVisibility: NSViewRepresentable {
+    let section: String
     final class Marker: NSView {
-        var shown = false { didSet { apply() } }
+        var section = "" { didSet { if section != oldValue { apply() } } }
         private var observer: NSObjectProtocol?
         override func viewWillMove(toWindow newWindow: NSWindow?) {
             super.viewWillMove(toWindow: newWindow)
@@ -156,7 +165,7 @@ private struct SearchItemVisibility: NSViewRepresentable {
             super.viewDidMoveToWindow()
             guard window != nil else { return }
             // Any toolbar: SwiftUI may build this window's toolbar, and its
-            // search item, after this view is already in the window.
+            // items, after this view is already in the window.
             observer = NotificationCenter.default.addObserver(forName: NSToolbar.willAddItemNotification, object: nil, queue: .main) { [weak self] note in
                 let toolbar = note.object as? NSToolbar
                 // The item is in the toolbar once this notification's turn ends.
@@ -165,11 +174,18 @@ private struct SearchItemVisibility: NSViewRepresentable {
             apply()
         }
         func apply() {
-            for item in window?.toolbar?.items ?? [] where item is NSSearchToolbarItem && item.isHidden == shown { item.isHidden = !shown }
+            let hidden = section != "filters"
+            let changes = (window?.toolbar?.items ?? []).filter { $0 is NSSearchToolbarItem && $0.isHidden != hidden }
+            guard !changes.isEmpty else { return }
+            NSAnimationContext.runAnimationGroup({ context in
+                context.duration = 0
+                context.allowsImplicitAnimation = false
+                for item in changes { item.isHidden = hidden }
+            }, completionHandler: nil)
         }
     }
     func makeNSView(context: Context) -> Marker { Marker() }
-    func updateNSView(_ marker: Marker, context: Context) { marker.shown = shown }
+    func updateNSView(_ marker: Marker, context: Context) { marker.section = section }
 }
 
 /// Reports a fixed minimum size without measuring its content. Under a

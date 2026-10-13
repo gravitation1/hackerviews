@@ -3,9 +3,22 @@ import WebKit
 
 struct BrowserView: View {
     @ObservedObject var workspace: BrowserWorkspace
+    #if os(macOS)
+    @SectionShown private var shown
+    #endif
     @State private var showOpen = false
     @State private var address = ""
     @State private var linkError = false
+
+    #if os(macOS)
+    @ViewBuilder private var readerActions: some View {
+        if let tab = workspace.selected {
+            ReaderToolbarActions(tab: tab,
+                newTab: { workspace.open(URL(string: "https://news.ycombinator.com/")!) },
+                openLink: { showOpen = true })
+        }
+    }
+    #endif
 
     var body: some View {
         VStack(spacing: 0) {
@@ -33,12 +46,14 @@ struct BrowserView: View {
         #endif
         .toolbar {
             #if os(macOS)
-            ToolbarItem(placement: .primaryAction) {
-                if let tab = workspace.selected {
-                    ReaderToolbarActions(tab: tab,
-                        newTab: { workspace.open(URL(string: "https://news.ycombinator.com/")!) },
-                        openLink: { showOpen = true })
-                }
+            if #available(macOS 15.0, *) {
+                // Kept in the toolbar and hidden outside Read, so a switch does not
+                // build a new item. SwiftUI's own hidden state, because it resets
+                // AppKit's when it reconfigures the toolbar.
+                ToolbarItem(id: ToolbarItemID.readerActions, placement: .primaryAction) { readerActions }
+                    .hidden(!shown)
+            } else {
+                ToolbarItem(id: ToolbarItemID.readerActions, placement: .primaryAction) { if shown { readerActions } }
             }
             #else
             ToolbarItemGroup(placement: .primaryAction) {
@@ -399,17 +414,13 @@ private struct ReaderWorkspaceFocus: ViewModifier {
     func body(content: Content) -> some View { content.focusedSceneObject(shown ? workspace : nil) }
 }
 
+/// The reader's toolbar actions. The item stays in the toolbar while other
+/// sections show, so its shortcuts follow the section.
 private struct ReaderToolbarActions: View {
     @ObservedObject var tab: BrowserTab
     let newTab: () -> Void
     let openLink: () -> Void
-    @SectionShown private var shown
-
     var body: some View {
-        if shown { actions }
-    }
-
-    private var actions: some View {
         HStack(spacing: 6) {
             Button(action: tab.back) { Label("Back", systemImage: "chevron.left") }
                 .disabled(!tab.canGoBack).help("Back")
@@ -417,13 +428,13 @@ private struct ReaderToolbarActions: View {
                 .disabled(!tab.canGoForward).help("Forward")
             separator
             Button(action: newTab) { Label("New tab", systemImage: "plus") }
-                .help("New tab (⌘T)").keyboardShortcut("t", modifiers: .command)
+                .help("New tab (⌘T)").modifier(SectionShortcut(shortcut: KeyboardShortcut("t", modifiers: .command)))
             Button(action: tab.reload) { Label("Reload", systemImage: "arrow.clockwise") }
-                .help("Reload (⌘R)").keyboardShortcut("r", modifiers: .command)
+                .help("Reload (⌘R)").modifier(SectionShortcut(shortcut: KeyboardShortcut("r", modifiers: .command)))
             separator
             Button(action: openLink) { Label("Open a link in HackerViews", systemImage: "tray.and.arrow.down") }
                 .help("Open a Hacker News link in HackerViews (⌘L)")
-                .keyboardShortcut("l", modifiers: .command)
+                .modifier(SectionShortcut(shortcut: KeyboardShortcut("l", modifiers: .command)))
             Button(action: tab.openInBrowser) { Label("Open in default browser", systemImage: "arrow.up.forward.square") }
                 .help("Open this page in your default browser")
         }

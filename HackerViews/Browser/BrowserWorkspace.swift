@@ -26,11 +26,16 @@ final class BrowserWorkspace: ObservableObject {
     private var started = false
     @Published var draft: RecordDraft?
     private let store: RecordStore
-    private let service = HNService.shared
+    private let service: HNService
+    private let persistentSession: Bool
     var selected: BrowserTab? { tabs.first { $0.id == selectedID } }
-    init(store: RecordStore, defaults: UserDefaults = .standard) {
+    /// Harnesses pass their own service and a non-persistent session so they
+    /// never touch the app's caches, cookies or HN login.
+    init(store: RecordStore, defaults: UserDefaults = .standard, service: HNService = .shared, persistentSession: Bool = true) {
         self.store = store
         self.defaults = defaults
+        self.service = service
+        self.persistentSession = persistentSession
     }
     func start() {
         guard !started else {
@@ -75,7 +80,7 @@ final class BrowserWorkspace: ObservableObject {
         if let data = try? JSONEncoder().encode(session) { defaults.set(data, forKey: sessionKey) }
     }
     private func makeTab() -> BrowserTab {
-        let tab = BrowserTab(store: store, service: service, retainsPages: true)
+        let tab = BrowserTab(store: store, service: service, persistentSession: persistentSession, retainsPages: true)
         tab.onRecord = { [weak self] in self?.draft = $0 }
         tab.onOpenTab = { [weak self] url, select in self?.open(url, select: select) }
         tab.onSessionChange = { [weak self] in self?.saveSession() }
