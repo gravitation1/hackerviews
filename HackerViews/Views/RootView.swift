@@ -24,6 +24,12 @@ struct RootView: View {
                         sectionToolbar
                     }
             }
+            .overlay {
+                EditorPanel(item: $workspace.draft, prewarm: RecordDraft.panelPrewarm) { draft in
+                    RecordEditor(store: store, draft: draft).environment(\.openURL, openLink)
+                        .id(draft.panelIdentity)
+                }
+            }
             #else
             TabView(selection: Bindable(sections).current) {
                 NavigationStack { ReaderSection(workspace: workspace, available: store.storageAvailable) }
@@ -43,12 +49,7 @@ struct RootView: View {
                 }.font(.caption).padding(8)
             }
         }
-        #if os(macOS)
-        .background(EditorPanelHost(item: $workspace.draft, prewarm: RecordDraft.panelPrewarm) { draft in
-            RecordEditor(store: store, draft: draft).environment(\.openURL, openLink).tint(.orange)
-                .id(draft.panelIdentity)
-        })
-        #else
+        #if os(iOS)
         .sheet(item: $workspace.draft) { draft in
             RecordEditor(store: store, draft: draft)
         }

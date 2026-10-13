@@ -2,212 +2,102 @@
 import AppKit
 import SwiftUI
 
-/// Shows an editor over its window the way a sheet does, without a sheet.
-/// AppKit runs a sheet's opening and closing animations in a nested run loop
-/// that holds the main thread for a quarter of a second or more, and redraws
-/// the whole window behind it for the dimming on every frame of them. The
-/// panel is a borderless child window over the parent's full frame: it dims
-/// the window, title bar and toolbar included, takes the clicks and the keys,
-/// and appears in the next frame.
-struct EditorPanelHost<Item: Identifiable, Editor: View>: NSViewRepresentable {
+/// Whether the editor panel is open. The window's own commands and shortcuts
+/// stand down while it is, as they would for a sheet.
+@MainActor @Observable final class EditorPanelPresence {
+    static let shared = EditorPanelPresence()
+    var isOpen = false
+    /// The text field the panel's editor wants focused when the panel opens,
+    /// registered by the field itself.
+    @ObservationIgnored weak var field: NSView?
+}
+
+/// Shows an editor over the window the way a sheet does, without a sheet and
+/// without another window.
+///
+/// - A sheet runs its animations in a nested run loop that holds the main
+///   thread for a quarter of a second or more, redrawing the whole window
+///   behind it on every frame for the dimming.
+/// - A separate window for the editor would take the keyboard by becoming the
+///   key window, and every change of key window makes the main window redraw
+///   its toolbar, title bar and controls in the inactive look and back, about
+///   35ms each way.
+///
+/// So the editor is drawn in the window, over its content, and the window
+/// stays key. The panel dims the content and refuses clicks outside the card;
+/// a strip over the title bar and toolbar dims and blocks them; Escape closes;
+/// focus moves into the editor and back to where it was.
+///
+/// Editors that keep their identity across items stay built between uses,
+/// hidden, and are built once ahead of the first use from `prewarm`; see
+/// `editorSession`.
+struct EditorPanel<Item: Identifiable, Editor: View>: View {
     @Binding var item: Item?
-    /// Built into the panel shortly after launch, so that the first use opens
-    /// as fast as later ones. Editors that keep their identity across items
-    /// stay built from then on; see `editorSession`.
     var prewarm: Item?
     @ViewBuilder let editor: (Item) -> Editor
+    @State private var lastItem: Item?
+    @State private var session = 0
+    @State private var prewarmed = false
 
-    func makeCoordinator() -> Coordinator { Coordinator() }
-    func makeNSView(context: Context) -> Anchor {
-        let anchor = Anchor()
-        let coordinator = context.coordinator
-        // The prewarm needs the window, which this view joins after its first update.
-        anchor.onWindow = { [weak coordinator] window in coordinator?.schedulePrewarm(over: window) }
-        return anchor
-    }
-
-    final class Anchor: NSView {
-        var onWindow: ((NSWindow) -> Void)?
-        override func viewDidMoveToWindow() {
-            super.viewDidMoveToWindow()
-            if let window { onWindow?(window) }
-        }
-    }
-
-    func updateNSView(_ view: Anchor, context: Context) {
-        let coordinator = context.coordinator
-        let binding = $item
-        let close: @MainActor () -> Void = { binding.wrappedValue = nil }
-        coordinator.make = { item, session in
-            AnyView(EditorPanelBackdrop {
-                editor(item).environment(\.closeEditor, close).environment(\.editorSession, session)
-            })
-        }
-        coordinator.close = close
-        coordinator.prewarm = prewarm
-        if let item {
-            guard coordinator.shownID != AnyHashable(item.id), let window = view.window else { return }
-            coordinator.show(item, over: window)
-        } else if coordinator.shownID != nil {
-            coordinator.hide()
-        }
-        if let window = view.window { coordinator.schedulePrewarm(over: window) }
-    }
-
-    static func dismantleNSView(_ view: Anchor, coordinator: Coordinator) { coordinator.hide() }
-
-    @MainActor final class Coordinator {
-        private(set) var shownID: AnyHashable?
-        private var prewarmScheduled = false
-        var prewarm: Item?
-        var make: ((Item, Int) -> AnyView)?
-        var close: (@MainActor () -> Void)?
-        private var lastItem: Item?
-        private var session = 0
-        private var panel: EditorPanelWindow?
-        private var host: NSHostingView<AnyView>?
-        private weak var parent: NSWindow?
-        private var observers: [NSObjectProtocol] = []
-
-        /// Builds the prewarm editor in the panel without showing it, once,
-        /// after launch has settled: building an editor takes tens of milliseconds.
-        func schedulePrewarm(over parent: NSWindow) {
-            guard !prewarmScheduled, prewarm != nil else { return }
-            prewarmScheduled = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self, weak parent] in
-                MainActor.assumeIsolated {
-                    guard let self, let parent, let prewarm = self.prewarm, self.shownID == nil, self.lastItem == nil else { return }
-                    self.fill(prewarm, over: parent)
+    var body: some View {
+        let visible = item != nil
+        let current = item ?? lastItem ?? (prewarmed ? prewarm : nil)
+        ZStack {
+            if let current {
+                EditorPanelBackdrop(visible: visible) {
+                    editor(current)
+                        .environment(\.closeEditor, close)
+                        .environment(\.editorSession, session)
                 }
+                // Hidden, the panel is transparent and takes no clicks; its
+                // views stay in the window so the next use only fills them in.
+                .opacity(visible ? 1 : 0)
+                .accessibilityHidden(!visible)
             }
         }
-
-        /// Puts the editor for `item` in the panel and lays it out, reusing the
-        /// views already there where the editor keeps its identity.
-        private func fill(_ item: Item, over parent: NSWindow) {
-            guard let make else { return }
-            if self.parent !== parent, self.parent != nil { hide(); panel = nil; host = nil; lastItem = nil }
-            let panel = self.panel ?? makePanel()
-            let host = self.host ?? {
-                let host = NSHostingView(rootView: make(item, session))
-                // The panel's frame is always the parent's, so the hosting view
-                // need not measure the editor to size the window.
-                host.sizingOptions = []
-                panel.contentView = host
-                self.host = host
-                return host
-            }()
-            self.parent = parent
-            lastItem = item
-            host.rootView = make(item, session)
-            panel.setFrame(parent.frame, display: false)
-            host.layoutSubtreeIfNeeded()
-        }
-
-        func show(_ item: Item, over parent: NSWindow) {
-            fill(item, over: parent)
-            guard let panel, let host else { return }
-            shownID = AnyHashable(item.id)
-            panel.onEscape = close
-            // Focus goes where a sheet would put it, the first text field, and
-            // goes there before the window is ordered in: a window ordered in with
-            // nothing focused searches for its first key view, which makes
-            // SwiftUI build the editor's whole focus and gesture graph, ~30ms.
-            // An editor built just now has no text view yet; its note field
-            // focuses itself when it joins the window.
-            if let field = Self.firstTextView(in: host) { panel.makeFirstResponder(field) }
-            if panel.parent !== parent { parent.addChildWindow(panel, ordered: .above) }
-            panel.orderFront(nil)
-            panel.makeKey()
-            observe(parent)
-
-        }
-
-        func hide() {
-            observers.forEach(NotificationCenter.default.removeObserver)
-            observers.removeAll()
-            guard shownID != nil else { return }
-            shownID = nil
-            panel?.onEscape = nil
-            if let panel {
-                panel.parent?.removeChildWindow(panel)
-                panel.orderOut(nil)
+        .background(EditorPanelWindowControl(visible: visible, close: close))
+        .onChange(of: item.map { AnyHashable($0.id) }) { _, id in
+            if id != nil {
+                lastItem = item
+                // Commands and shortcuts stand down right after the panel's first
+                // frame: updating them is menu work the frame need not wait for.
+                DispatchQueue.main.async { EditorPanelPresence.shared.isOpen = item != nil }
+            } else {
+                EditorPanelPresence.shared.isOpen = false
+                // A new session while hidden: a kept editor clears itself for the next
+                // use, a moment after the close is on screen, so that closing is only
+                // hiding.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { session += 1 }
             }
-            // A new session while hidden: a kept editor clears itself for the next use.
-            session += 1
-            if let lastItem, let make { host?.rootView = make(lastItem, session) }
-            parent?.makeKey()
         }
-
-        private static func firstTextView(in view: NSView) -> NSTextView? {
-            if let text = view as? NSTextView, text.isEditable { return text }
-            for child in view.subviews { if let found = firstTextView(in: child) { return found } }
-            return nil
-        }
-
-        private func makePanel() -> EditorPanelWindow {
-            let panel = EditorPanelWindow(contentRect: .zero, styleMask: [.borderless], backing: .buffered, defer: false)
-            panel.isOpaque = false
-            panel.backgroundColor = .clear
-            panel.hasShadow = false
-            panel.animationBehavior = .none
-            panel.isReleasedWhenClosed = false
-            panel.setAccessibilitySubrole(.dialog)
-            self.panel = panel
-            return panel
-        }
-
-        /// The panel covers the parent exactly, so it follows the parent's
-        /// size. Child windows already move with their parent.
-        private func observe(_ parent: NSWindow) {
-            guard observers.isEmpty else { return }
-            let center = NotificationCenter.default
-            for name in [NSWindow.didResizeNotification, NSWindow.didEndLiveResizeNotification] {
-                observers.append(center.addObserver(forName: name, object: parent, queue: .main) { [weak self] _ in
-                    MainActor.assumeIsolated {
-                        guard let self, let panel = self.panel, let parent = self.parent else { return }
-                        panel.setFrame(parent.frame, display: true)
-                    }
-                })
-            }
+        .task {
+            // After launch has settled: building an editor takes tens of milliseconds.
+            try? await Task.sleep(for: .seconds(1))
+            prewarmed = true
         }
     }
+
+    private func close() { item = nil }
 }
 
-/// Borderless windows cannot become key by default; the panel must, to take
-/// the keyboard as a sheet does.
-final class EditorPanelWindow: NSWindow {
-    override var canBecomeKey: Bool { true }
-    override var canBecomeMain: Bool { false }
-    /// Escape closes the panel wherever the focus is. A focused text view
-    /// would otherwise take the key for itself, so no button's shortcut sees
-    /// it; text an input method is still composing keeps it.
-    var onEscape: (@MainActor () -> Void)?
-    override func sendEvent(_ event: NSEvent) {
-        if event.type == .keyDown, event.keyCode == 53,
-           event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting([.capsLock, .numericPad, .function]).isEmpty,
-           !((firstResponder as? NSTextInputClient)?.hasMarkedText() ?? false),
-           let onEscape {
-            onEscape()
-            return
-        }
-        super.sendEvent(event)
-    }
-}
-
-/// The dimmed window and the editor's card, placed where the sheet would be:
+/// The dimmed content and the editor's card, placed where the sheet would be:
 /// centered in the window, never above its title bar.
 private struct EditorPanelBackdrop<Content: View>: View {
+    let visible: Bool
     @ViewBuilder let content: Content
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         ZStack {
             // A sheet dims a light window by about a sixth and leaves a dark one
-            // nearly as it is. Clicks outside the card are refused, as a sheet's are.
+            // nearly as it is. Clicks outside the card are refused, as a sheet's
+            // are. The title bar's share is dimmed by EditorPanelWindowControl.
             Color.black.opacity(colorScheme == .dark ? 0.001 : 0.16)
                 .contentShape(Rectangle())
                 .onTapGesture { NSSound.beep() }
+                // Hidden, it must let the page have its clicks. Toggling hit testing
+                // costs nothing here: it is a plain colour, no AppKit view to re-attach.
+                .allowsHitTesting(visible)
                 .accessibilityHidden(true)
             VStack(spacing: 0) {
                 Spacer(minLength: 32)
@@ -218,8 +108,142 @@ private struct EditorPanelBackdrop<Content: View>: View {
                     .accessibilityAddTraits(.isModal)
                 Spacer(minLength: 8)
             }
+            .ignoresSafeArea()
         }
-        .ignoresSafeArea()
+    }
+}
+
+/// The panel's dealings with its window: the strip over the title bar and
+/// toolbar, Escape, and moving focus in and back out.
+private struct EditorPanelWindowControl: NSViewRepresentable {
+    let visible: Bool
+    let close: @MainActor () -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+    func makeNSView(context: Context) -> PassThrough { PassThrough() }
+    func updateNSView(_ view: PassThrough, context: Context) {
+        let coordinator = context.coordinator
+        coordinator.close = close
+        guard visible != coordinator.visible, let window = view.window else { return }
+        coordinator.visible = visible
+        if visible { coordinator.open(over: window, dark: context.environment.colorScheme == .dark) }
+        else { coordinator.dismiss() }
+    }
+    static func dismantleNSView(_ view: PassThrough, coordinator: Coordinator) { coordinator.dismiss() }
+
+    /// Fills the panel's area to reach its window, and never takes a click.
+    final class PassThrough: NSView {
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    }
+
+    @MainActor final class Coordinator {
+        var visible = false
+        var close: (@MainActor () -> Void)?
+        private weak var window: NSWindow?
+        private weak var previousResponder: NSResponder?
+        private var strip: TitleBarStrip?
+        private var monitor: Any?
+        private var observers: [NSObjectProtocol] = []
+
+        func open(over window: NSWindow, dark: Bool) {
+            self.window = window
+            if let responder = window.firstResponder, responder !== window { previousResponder = responder }
+            showStrip(over: window, dark: dark)
+            // Focus goes where a sheet would put it, the editor's first text field,
+            // right after the panel's first frame: handing focus over from the page
+            // takes ~10ms the frame need not wait for, and no one types within a
+            // frame of clicking. A field built just now registers once it exists,
+            // and focuses itself as it joins the window.
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.visible, let window = self.window,
+                      let field = EditorPanelPresence.shared.field, field.window === window else { return }
+                window.makeFirstResponder(field)
+            }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                // Local monitors run on the main thread.
+                nonisolated(unsafe) let event = event
+                let consumed = MainActor.assumeIsolated { self?.closesOnEscape(event) ?? false }
+                return consumed ? nil : event
+            }
+        }
+
+        func dismiss() {
+            if let monitor { NSEvent.removeMonitor(monitor) }
+            monitor = nil
+            observers.forEach(NotificationCenter.default.removeObserver)
+            observers.removeAll()
+            if let strip {
+                strip.parent?.removeChildWindow(strip)
+                strip.orderOut(nil)
+            }
+            // Focus goes back where it was, such as the page, if it is still there.
+            if let window, let previous = previousResponder as? NSView, previous.window === window {
+                window.makeFirstResponder(previous)
+            } else if let window, previousResponder == nil {
+                window.makeFirstResponder(nil)
+            }
+            previousResponder = nil
+        }
+
+        /// Escape closes the panel wherever focus is in it. A focused text view
+        /// would otherwise take the key for itself; text an input method is
+        /// still composing keeps it.
+        private func closesOnEscape(_ event: NSEvent) -> Bool {
+            guard let window, event.window === window, event.keyCode == 53,
+                  event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting([.capsLock, .numericPad, .function]).isEmpty,
+                  !((window.firstResponder as? NSTextInputClient)?.hasMarkedText() ?? false) else { return false }
+            close?()
+            return true
+        }
+
+        /// The title bar and toolbar are outside the content the panel draws
+        /// over; a borderless strip that never takes the keyboard dims them and
+        /// refuses their clicks, as a sheet's dimming does.
+        private func showStrip(over window: NSWindow, dark: Bool) {
+            let strip = self.strip ?? TitleBarStrip()
+            self.strip = strip
+            strip.backgroundColor = NSColor.black.withAlphaComponent(dark ? 0.001 : 0.16)
+            strip.setFrame(Self.titleBarFrame(of: window), display: false)
+            if strip.parent !== window { window.addChildWindow(strip, ordered: .above) }
+            strip.orderFront(nil)
+            let center = NotificationCenter.default
+            for name in [NSWindow.didResizeNotification, NSWindow.didEndLiveResizeNotification] {
+                observers.append(center.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated {
+                        guard let self, let window = self.window, let strip = self.strip else { return }
+                        strip.setFrame(Self.titleBarFrame(of: window), display: true)
+                    }
+                })
+            }
+        }
+
+        private static func titleBarFrame(of window: NSWindow) -> NSRect {
+            let frame = window.frame
+            let height = max(0, frame.height - window.contentLayoutRect.height)
+            return NSRect(x: frame.minX, y: frame.maxY - height, width: frame.width, height: height)
+        }
+    }
+}
+
+/// A transparent strip over the title bar that never becomes key, so the
+/// main window keeps the keyboard, and refuses clicks.
+private final class TitleBarStrip: NSWindow {
+    init() {
+        super.init(contentRect: .zero, styleMask: [.borderless], backing: .buffered, defer: false)
+        isOpaque = false
+        hasShadow = false
+        animationBehavior = .none
+        isReleasedWhenClosed = false
+        contentView = RefusingView()
+        setAccessibilityElement(false)
+    }
+    override var canBecomeKey: Bool { false }
+    override var canBecomeMain: Bool { false }
+
+    private final class RefusingView: NSView {
+        override func mouseDown(with event: NSEvent) { NSSound.beep() }
+        override func rightMouseDown(with event: NSEvent) { NSSound.beep() }
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     }
 }
 #endif

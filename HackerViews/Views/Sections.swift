@@ -43,7 +43,13 @@ extension EnvironmentValues {
 struct SectionShortcut: ViewModifier {
     let shortcut: KeyboardShortcut
     @SectionShown private var shown
-    func body(content: Content) -> some View { content.keyboardShortcut(shown ? shortcut : nil) }
+    func body(content: Content) -> some View {
+        #if os(macOS)
+        content.keyboardShortcut(shown && !EditorPanelPresence.shared.isOpen ? shortcut : nil)
+        #else
+        content.keyboardShortcut(shown ? shortcut : nil)
+        #endif
+    }
 }
 
 /// Runs `action` when the enclosing section is shown (true) or hidden (false).
@@ -116,11 +122,23 @@ struct SectionStack: View {
     private func layer(_ name: String, _ section: String, _ content: some View) -> some View {
         let shown = section == name
         return content
+            .transformEnvironment(\.controlActiveState) { state in if !shown { Self.pinActive(&state) } }
             .environment(\.sectionName, name)
             .opacity(shown ? 1 : 0)
             .zIndex(shown ? 1 : 0)
             .accessibilityHidden(!shown)
     }
+}
+
+extension SectionStack {
+    /// A hidden section keeps the active appearance. Whether the window is key
+    /// reaches every view drawn with it, and when the editor panel or a sheet
+    /// takes the keyboard, the hidden Filters table and Settings form would
+    /// otherwise re-render and lay out again, unseen, on each change. The
+    /// section on screen gets the real state. `appearsActive` follows this
+    /// state before macOS 27; it cannot be set itself.
+    @available(macOS, deprecated: 100000)
+    fileprivate static func pinActive(_ state: inout ControlActiveState) { state = .key }
 }
 
 /// Equal for the same store: the query binding and the profile action always

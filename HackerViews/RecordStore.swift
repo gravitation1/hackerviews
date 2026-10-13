@@ -2,7 +2,7 @@ import SwiftUI
 
 @MainActor
 final class RecordStore: ObservableObject {
-    @Published private(set) var archive = RecordArchive()
+    @Published private(set) var archive = RecordArchive() { didSet { peopleCache = nil } }
     @Published var error: String?
     @Published private(set) var recoveryNotice: String?
     @Published private(set) var syncStatus = "Saved on this device"
@@ -14,7 +14,15 @@ final class RecordStore: ObservableObject {
     private let journal: RecordJournal
     private let sync = CloudSync()
     private var readFailed = false
-    var people: [PersonRevision] { archive.current }
+    /// Everyone's latest record, built once per archive change: views such as
+    /// Settings and the reader's saved-excerpt check read it on every render.
+    var people: [PersonRevision] {
+        if let peopleCache { return peopleCache }
+        let people = archive.current
+        peopleCache = people
+        return people
+    }
+    private var peopleCache: [PersonRevision]?
     var blocked: Set<String> { archive.blockedUsers }
     var cloudEnabled: Bool { CloudSync.isConfigured }
 

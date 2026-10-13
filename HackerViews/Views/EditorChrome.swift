@@ -87,10 +87,10 @@ struct EditorChrome<Content: View>: View {
                 Spacer()
                 if let cancel {
                     // The sheet's Cancel is a plain gray button, not in the accent colour.
-                    Button("Cancel", action: cancel).keyboardShortcut(.cancelAction).tint(.primary)
+                    Button("Cancel", action: cancel).modifier(PanelShortcut(shortcut: .cancelAction)).tint(.primary)
                 }
                 Button(confirmTitle, action: confirm)
-                    .keyboardShortcut(.defaultAction)
+                    .modifier(PanelShortcut(shortcut: .defaultAction))
                     .buttonStyle(.borderedProminent)
                     .disabled(confirmDisabled)
             }
@@ -101,6 +101,18 @@ struct EditorChrome<Content: View>: View {
     }
     #endif
 }
+
+#if os(macOS)
+/// A shortcut that works only while the editor panel is open: a kept editor
+/// stays in the window while hidden, and its Return and Escape must not act
+/// on the window then. Only this modifier follows the panel's state.
+private struct PanelShortcut: ViewModifier {
+    let shortcut: KeyboardShortcut
+    func body(content: Content) -> some View {
+        content.keyboardShortcut(EditorPanelPresence.shared.isOpen ? shortcut : nil)
+    }
+}
+#endif
 
 /// The sheet's measurements on macOS 26, which the panel reproduces.
 enum EditorPanelMetrics {

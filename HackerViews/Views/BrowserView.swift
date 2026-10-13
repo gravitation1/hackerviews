@@ -349,7 +349,7 @@ struct ReaderNavigationCommands: Commands {
     @FocusedObject private var tab: BrowserTab?
     /// A sheet or the editor panel has the keyboard: reader commands wait.
     private var hasSheet: Bool {
-        NSApp.keyWindow?.attachedSheet != nil || NSApp.keyWindow?.sheetParent != nil || NSApp.keyWindow is EditorPanelWindow
+        NSApp.keyWindow?.attachedSheet != nil || NSApp.keyWindow?.sheetParent != nil || EditorPanelPresence.shared.isOpen
     }
     private var closesTab: Bool { !hasSheet && (workspace?.tabs.count ?? 0) > 1 }
     var body: some Commands {
@@ -377,18 +377,20 @@ struct ReaderNavigationCommands: Commands {
 
 struct PageFindCommands: Commands {
     @FocusedValue(\.pageFind) private var find
+    /// The editor panel covers the page, as a sheet would.
+    private var panelOpen: Bool { EditorPanelPresence.shared.isOpen }
     var body: some Commands {
         CommandGroup(after: .textEditing) {
             Divider()
-            Button("Find in Page…") { find?.show() }
+            Button("Find in Page…") { if !panelOpen { find?.show() } }
                 .keyboardShortcut("f", modifiers: .command)
-                .disabled(find == nil)
-            Button("Find Next") { find?.next() }
+                .disabled(find == nil || panelOpen)
+            Button("Find Next") { if !panelOpen { find?.next() } }
                 .keyboardShortcut("g", modifiers: .command)
-                .disabled(find == nil)
-            Button("Find Previous") { find?.previous() }
+                .disabled(find == nil || panelOpen)
+            Button("Find Previous") { if !panelOpen { find?.previous() } }
                 .keyboardShortcut("g", modifiers: [.command, .shift])
-                .disabled(find == nil)
+                .disabled(find == nil || panelOpen)
         }
     }
 }

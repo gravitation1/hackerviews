@@ -36,6 +36,9 @@ struct AccountNotesEditor: NSViewRepresentable {
         context.coordinator.text = $text
         context.coordinator.onBlur = onBlur
         guard let editor = scroll.documentView as? NotesTextView else { return }
+        // The editor panel focuses this field itself each time it opens: a kept
+        // editor's field never rejoins the window to focus itself.
+        if focusOnAppear, context.environment.closeEditor != nil { EditorPanelPresence.shared.field = editor }
         editor.placeholder = placeholder
         if editor.string != text { editor.string = text }
         editor.needsDisplay = true
