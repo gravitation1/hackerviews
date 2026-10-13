@@ -379,6 +379,17 @@
     .commtext a:any-link:hover, .toptext a:any-link:hover {
       color: var(--qhn-text) !important;
     }
+    .hv-preview { position: fixed; z-index: 2147483000; box-sizing: border-box; width: min(520px, calc(100vw - 16px));
+      padding: 10px 12px; color: var(--qhn-text); background: var(--qhn-panel); border: 1px solid var(--qhn-line);
+      border-radius: 8px; box-shadow: 0 6px 24px rgba(0,0,0,.25); font-size: 13px; line-height: 1.5; }
+    .hv-preview-title { font-weight: 600; font-size: 14px; }
+    .hv-preview-site, .hv-preview-meta, .hv-preview-url, .hv-preview-note { color: var(--qhn-muted); font-size: 12px; }
+    .hv-preview-text { margin-top: 6px; max-height: 12.5em; overflow: hidden; overflow-wrap: anywhere; }
+    .hv-preview-text.hv-clipped { -webkit-mask-image: linear-gradient(to bottom, #000 80%, transparent); mask-image: linear-gradient(to bottom, #000 80%, transparent); }
+    .hv-preview-text p { margin: 4px 0 0; }
+    .hv-preview-text pre { margin: 4px 0 0; white-space: pre-wrap; }
+    .hv-preview-text a { color: var(--qhn-accent); }
+    .hv-preview-url { margin-top: 6px; overflow-wrap: anywhere; }
     pre { max-width: 85vw; overflow: auto; }
     textarea, input, select { font: inherit; color: var(--qhn-text); background: var(--qhn-hover); border: 1px solid var(--qhn-line); border-radius: 5px; padding: 6px; }
     textarea { max-width: 100%; box-sizing: border-box; }
@@ -802,6 +813,9 @@
       if (a.closest('.sitebit')) continue;
       const target = rewriteLink(a.getAttribute('href'));
       a.classList.toggle('hv-rewritten', !!target);
+      const item = !target && !a.closest('.titleline') && hnItemID(a.getAttribute('href'));
+      if (item) { a.dataset.hvPreview = item; a.removeAttribute('title'); continue; }
+      delete a.dataset.hvPreview;
       linkTip(a, target);
     }
     for (const title of root.querySelectorAll('.titleline')) {
@@ -813,6 +827,111 @@
         site.textContent = target.hostname.replace(/^www\./, ''); bit.title = 'Originally ' + site.dataset.hvOriginal;
       } else if (site.dataset.hvOriginal) { site.textContent = site.dataset.hvOriginal; delete site.dataset.hvOriginal; bit.removeAttribute('title'); }
     }
+  }
+  // A link to an HN item in a comment previews the item on hover: a story's
+  // title, points and comment count, or a comment's author and text. The app
+  // fetches the item and checks it against the filters first, so the preview
+  // names the matching filter instead of showing what it hides. The card
+  // carries the link's full address in place of the tooltip other links have.
+  function hnItemID(href) {
+    let url; try { url = new URL(href, location.href); } catch (_) { return 0; }
+    if (url.hostname !== 'news.ycombinator.com' || url.pathname !== '/item') return 0;
+    const id = Number(url.searchParams.get('id'));
+    return Number.isSafeInteger(id) && id > 0 ? id : 0;
+  }
+  const previews = new Map(), previewRequested = new Set();
+  let previewCard = null, previewLink = null, previewShow = 0, previewHide = 0;
+  const previewDelay = () => window.__hackerViewsPreviewDelay ?? 400;
+  function previewLine(className, ...parts) { const line = document.createElement('div'); line.className = className; line.append(...parts); return line; }
+  function previewBody(entry) {
+    if (!entry) return [previewLine('hv-preview-note', 'Loading…')];
+    if (filteredEffect(entry.effect)) return [previewLine('hv-preview-note', 'Hidden by your filter' + (entry.label ? ': ' + entry.label : ''))];
+    const item = entry.item;
+    if (entry.effect === 'unresolved' || !item) return [previewLine('hv-preview-note', entry.label || 'This item couldn’t be checked against your filters.')];
+    if (item.deleted) return [previewLine('hv-preview-note', '[deleted]')];
+    const parts = [], meta = [];
+    if (item.type !== 'comment') {
+      const title = previewLine('hv-preview-title', safeBody(item.title || 'Untitled'));
+      let site = null; try { site = item.url && new URL(item.url).hostname.replace(/^www\./, ''); } catch (_) {}
+      if (site) { const span = document.createElement('span'); span.className = 'hv-preview-site'; span.textContent = ' (' + site + ')'; title.append(span); }
+      parts.push(title);
+      if (Number.isFinite(item.score)) meta.push(item.score + (item.score === 1 ? ' point' : ' points'));
+    }
+    if (item.by) meta.push((item.type === 'comment' ? '' : 'by ') + item.by);
+    if (item.time) meta.push(relativeTime(item.time));
+    if (item.type !== 'comment' && Number.isFinite(item.descendants)) meta.push(item.descendants + (item.descendants === 1 ? ' comment' : ' comments'));
+    if (item.dead) meta.push('[dead]');
+    parts.push(previewLine('hv-preview-meta', meta.join(' · ')));
+    if (item.text) {
+      const text = previewLine('hv-preview-text', safeBody(item.text));
+      if (/^fade:(25|50|75)$/.test(entry.effect)) text.style.opacity = String(1 - Number(entry.effect.slice(5)) / 100);
+      parts.push(text);
+    }
+    return parts;
+  }
+  function renderPreview() {
+    if (!previewCard || !previewLink) return;
+    previewCard.replaceChildren(...previewBody(previews.get(Number(previewLink.dataset.hvPreview))), previewLine('hv-preview-url', previewLink.href));
+    const text = previewCard.querySelector('.hv-preview-text');
+    if (text) text.classList.toggle('hv-clipped', text.scrollHeight > text.clientHeight);
+    // Below the link, or above it when there is no room below; the last line
+    // of a wrapped link is the one the pointer is nearest.
+    const rects = previewLink.getClientRects(), first = rects[0], last = rects[rects.length - 1];
+    if (!first) return;
+    const width = previewCard.offsetWidth, height = previewCard.offsetHeight;
+    let top = last.bottom + 6;
+    if (top + height > innerHeight - 8 && first.top - 6 - height >= 8) top = first.top - 6 - height;
+    previewCard.style.left = Math.max(8, Math.min(last.left, innerWidth - width - 8)) + 'px';
+    previewCard.style.top = top + 'px';
+  }
+  function showPreview(link) {
+    clearTimeout(previewShow); clearTimeout(previewHide);
+    if (!link.isConnected) return;
+    previewLink?.removeAttribute('aria-describedby');
+    previewLink = link;
+    const id = Number(link.dataset.hvPreview);
+    if (!previewRequested.has(id)) { previewRequested.add(id); post({kind: 'linkPreview', id}); }
+    if (!previewCard) {
+      previewCard = document.createElement('div'); previewCard.className = 'hv-preview'; previewCard.id = 'hv-preview'; previewCard.setAttribute('role', 'tooltip');
+      previewCard.addEventListener('mouseenter', () => clearTimeout(previewHide));
+      previewCard.addEventListener('mouseleave', schedulePreviewHide);
+    }
+    document.body.append(previewCard);
+    link.setAttribute('aria-describedby', 'hv-preview');
+    renderPreview();
+  }
+  function hidePreview() {
+    clearTimeout(previewShow); clearTimeout(previewHide);
+    previewLink?.removeAttribute('aria-describedby'); previewLink = null; previewCard?.remove();
+  }
+  function schedulePreviewHide() { clearTimeout(previewHide); previewHide = setTimeout(hidePreview, 200); }
+  function hoverPreview(link) {
+    clearTimeout(previewHide);
+    if (link === previewLink) return;
+    clearTimeout(previewShow);
+    previewShow = setTimeout(() => showPreview(link), previewDelay());
+  }
+  document.addEventListener('mouseover', event => {
+    if (previewCard?.contains(event.target)) { clearTimeout(previewHide); return; }
+    const link = event.target.closest?.('a[data-hv-preview]');
+    if (link) hoverPreview(link);
+  });
+  document.addEventListener('mouseout', event => {
+    const link = event.target.closest?.('a[data-hv-preview]');
+    if (!link || link.contains(event.relatedTarget)) return;
+    clearTimeout(previewShow);
+    if (link === previewLink && !previewCard?.contains(event.relatedTarget)) schedulePreviewHide();
+  });
+  document.addEventListener('focusin', event => { const link = event.target.closest?.('a[data-hv-preview]'); if (link) hoverPreview(link); });
+  document.addEventListener('focusout', event => { if (event.target === previewLink || event.target.closest?.('a[data-hv-preview]')) { clearTimeout(previewShow); schedulePreviewHide(); } });
+  document.addEventListener('keydown', event => { if (event.key === 'Escape' && previewLink) hidePreview(); });
+  document.addEventListener('click', event => { if (previewLink && !previewCard?.contains(event.target)) hidePreview(); }, true);
+  window.addEventListener('scroll', () => { if (previewLink) hidePreview(); }, {passive: true});
+  // Filter changes can change what a preview may show, so they ask again.
+  function forgetPreviews() { previews.clear(); previewRequested.clear(); hidePreview(); }
+  function linkPreview(id, entry) {
+    previews.set(id, entry);
+    if (previewLink && Number(previewLink.dataset.hvPreview) === id) renderPreview();
   }
   function addControls() {
     renderHeader();
@@ -2474,11 +2593,13 @@
     profileRecord, profileSaveStatus,
     resolveProfile,
     setOrdered(active, local = false) {
+      forgetPreviews();
       ordered = true; blocked = new Set(); preferred = new Set(); highlightActive = false; revealAll = false;
       accountFiltersActive = !!active;
       if(local)localRecheck();else {captureFilterAnchor();process();}
     },
     configure(names, active, favorites, highlightRules) {
+      forgetPreviews();
       blocked = new Set(names); accountFiltersActive = !!active;
       preferred = new Set(favorites); highlightActive = !!highlightRules; process();
     },
@@ -2492,11 +2613,12 @@
       revealedID = Number(new URL(location.href).searchParams.get('id'));
       process();
     },
-    setFilters(names, active) { blocked = new Set(names); accountFiltersActive = !!active; process(); },
-    setBlocked(names) { blocked = new Set(names); process(); },
+    setFilters(names, active) { forgetPreviews(); blocked = new Set(names); accountFiltersActive = !!active; process(); },
+    setBlocked(names) { forgetPreviews(); blocked = new Set(names); process(); },
     resolvePartial(token, decisions, labels = {}, inherited = {}) { finish(token, decisions, false, labels, true, inherited); },
     resolve(token, decisions, labels = {}, inherited = {}) { finish(token, decisions, false, labels, false, inherited); },
     visitResults(results) { paintVisits(results); },
+    linkPreview,
     setLinkRewrites(rules) { linkRewrites = (rules || []).filter(rule => rule && rule.from && rule.to); annotateLinks(document); },
     refreshVisits,
     retry() { process(); }

@@ -644,6 +644,26 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
             }
             guard !results.isEmpty else { return }
             webView.callAsyncJavaScript("window.HackerViews?.visitResults(results)", arguments: ["results": results], in: nil, in: Self.world, completionHandler: nil)
+        case "linkPreview":
+            // A hovered link to an HN item previews it. The item goes through the
+            // same filter check as a contribution on the page, so a preview never
+            // shows what the filters would hide.
+            guard let itemID = body["id"] as? Int, itemID > 0 else { return }
+            let epoch = navigationID
+            let policy = store.archive.policy
+            Task { [weak self] in
+                guard let self else { return }
+                let decisions = await service.checkedContribution(itemID, rules: policy.rules)
+                let effect = decisions.effects[String(itemID)] ?? "unresolved"
+                var entry: [String: Any] = ["effect": effect, "label": decisions.labels[String(itemID)] ?? ""]
+                if !["blocked", "hidden-item", "unresolved"].contains(effect) {
+                    if let item = try? await service.item(itemID), let data = try? JSONEncoder().encode(item), let object = try? JSONSerialization.jsonObject(with: data) {
+                        entry["item"] = object
+                    } else { entry["effect"] = "unresolved"; entry["label"] = "This item is no longer available from Hacker News." }
+                }
+                guard navigationID == epoch, store.archive.policy == policy else { return }
+                webView.callAsyncJavaScript("window.HackerViews?.linkPreview(id, entry)", arguments: ["id": itemID, "entry": entry], in: nil, in: Self.world, completionHandler: nil)
+            }
         case "canonical":
             // The reader hands the discussion to HN's own page, such as when
             // HN's HTML offers no comment form the reader can host.

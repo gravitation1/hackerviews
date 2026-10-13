@@ -2039,14 +2039,14 @@ test('link rewrites are announced on the page: the story domain shows the site i
   w.HackerViews.lazyResult(request.token, [{id: 2, effect: 'visible', item: {id: 2, type: 'comment', by: 'a', parent: 1, text: 'See <a href="https://mobile.x.com/p/2">this</a>, <a href="https://medium.com/@me/post">that</a> and <a href="https://news.ycombinator.com/item?id=3">this thread</a> and <a href="https://example.org/">nothing</a>'}}]);
   await new Promise(r => setTimeout(r, 5));
   const links = [...q.doc.getElementById('2').querySelectorAll('.commtext a')];
-  assert.deepEqual(links.map(a => a.title || ''), ['Opens as https://xcancel.com/p/2\nOriginally https://mobile.x.com/p/2', 'Opens as https://scribe.rip/@me/post\nOriginally https://medium.com/@me/post', 'https://news.ycombinator.com/item?id=3', 'https://example.org/'], 'subdomains match, templates resolve, HN and unrelated links show their address');
+  assert.deepEqual(links.map(a => a.title || ''), ['Opens as https://xcancel.com/p/2\nOriginally https://mobile.x.com/p/2', 'Opens as https://scribe.rip/@me/post\nOriginally https://medium.com/@me/post', '', 'https://example.org/'], 'subdomains match, templates resolve, unrelated links show their address and an HN item link previews instead');
   const rewritten = (href) => { const [a] = [...q.doc.querySelectorAll('.commtext a')].filter(x => x.getAttribute('href') === href); return a; };
   assert.ok(rewritten('https://medium.com/@me/post'), 'the medium link is present for the template check');
   assert.deepEqual(links.map(a => a.classList.contains('hv-rewritten')), [true, true, false, false]);
   w.HackerViews.setLinkRewrites([]);
   assert.equal(title.querySelector('.sitestr').textContent, 'x.com', 'removing the rules restores the label');
   assert.equal(title.querySelector('.sitebit').hasAttribute('title'), false);
-  assert.deepEqual([...q.doc.getElementById('2').querySelectorAll('.commtext a')].map(a => a.title || ''), ['https://mobile.x.com/p/2', 'https://medium.com/@me/post', 'https://news.ycombinator.com/item?id=3', 'https://example.org/'], 'and the tooltips go back to the addresses');
+  assert.deepEqual([...q.doc.getElementById('2').querySelectorAll('.commtext a')].map(a => a.title || ''), ['https://mobile.x.com/p/2', 'https://medium.com/@me/post', '', 'https://example.org/'], 'and the tooltips go back to the addresses');
   q.dom.window.close();
 });
 
@@ -2082,5 +2082,40 @@ test('on HN’s own feed pages the same annotation applies to titles and domains
   assert.equal(row(101).querySelector(':scope > a').title, 'Opens as https://xcancel.com/a/status/9\nOriginally https://x.com/a/status/9');
   assert.equal(row(102).querySelector('.sitestr').textContent, 'example.org');
   assert.equal(row(102).querySelector(':scope > a').title, 'https://example.org/b', 'an ordinary title shows its address');
+  p.dom.window.close();
+});
+
+test('a link to an HN item in a comment previews the item on hover, after the filters have checked it', async () => {
+  const p = await page(`<table class="comment-tree"><tr class="athing comtr" id="11"><td><a class="hnuser" href="user?id=gus">gus</a><div class="comment"><span class="commtext">Here: <a href="https://news.ycombinator.com/item?id=49508506" rel="nofollow">https://news.ycombinator.com/item?id=49508506</a>, <a href="item?id=7">a comment</a>, <a href="item?id=8">a hidden one</a> and <a href="https://example.org/">elsewhere</a></span></div></td></tr></table>`, {blocked: [], url: 'https://news.ycombinator.com/item?id=10'});
+  const w = p.dom.window; w.__hackerViewsPreviewDelay = 0;
+  const [story, comment, hidden, other] = p.doc.querySelectorAll('.commtext a');
+  assert.equal(story.hasAttribute('title'), false, 'the preview replaces the address tooltip');
+  assert.equal(other.title, 'https://example.org/', 'other links keep theirs');
+  const hover = async link => { link.dispatchEvent(new w.MouseEvent('mouseover', {bubbles: true})); await new Promise(r => setTimeout(r, 5)); };
+  await hover(story);
+  assert.deepEqual(p.messages.filter(m => m.kind === 'linkPreview').map(m => m.id), [49508506], 'the app is asked for the item');
+  const card = () => p.doc.querySelector('.hv-preview');
+  assert.match(card().textContent, /Loading/);
+  assert.match(card().textContent, /https:\/\/news\.ycombinator\.com\/item\?id=49508506/, 'the card carries the full address');
+  w.HackerViews.linkPreview(49508506, {effect: 'visible', item: {id: 49508506, type: 'story', by: 'pg', title: 'I think the military commissary&#x27;s freezers were hacked', url: 'https://www.example.com/a', score: 412, descendants: 239, time: Date.now() / 1000 - 7200}});
+  assert.equal(card().querySelector('.hv-preview-title').textContent, 'I think the military commissary\'s freezers were hacked (example.com)');
+  assert.equal(card().querySelector('.hv-preview-meta').textContent, '412 points · by pg · 2 hours ago · 239 comments');
+  assert.equal(story.getAttribute('aria-describedby'), 'hv-preview');
+  await hover(comment);
+  w.HackerViews.linkPreview(7, {effect: 'visible', item: {id: 7, type: 'comment', by: 'dang', time: Date.now() / 1000 - 60, text: 'Thanks! <script>alert(1)</script><a href="item?id=3">Macroexpanded</a>'}});
+  assert.equal(card().querySelector('.hv-preview-meta').textContent, 'dang · 1 minute ago');
+  assert.equal(card().querySelector('.hv-preview-text').textContent, 'Thanks! Macroexpanded', 'comment text is rendered safely');
+  assert.equal(card().querySelector('script'), null);
+  await hover(hidden);
+  w.HackerViews.linkPreview(8, {effect: 'blocked', label: 'Trolls'});
+  assert.equal(card().textContent.startsWith('Hidden by your filter: Trolls'), true, 'a filtered item is never shown');
+  await hover(story);
+  assert.equal(p.messages.filter(m => m.kind === 'linkPreview').length, 3, 'a preview already fetched is not asked for again');
+  assert.match(card().textContent, /239 comments/);
+  p.doc.dispatchEvent(new w.KeyboardEvent('keydown', {key: 'Escape'}));
+  assert.equal(card(), null, 'Escape dismisses the preview');
+  w.HackerViews.setOrdered(false, true);
+  await hover(story);
+  assert.equal(p.messages.filter(m => m.kind === 'linkPreview').length, 4, 'a filter change asks again');
   p.dom.window.close();
 });
