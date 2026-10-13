@@ -10,6 +10,17 @@ extension EnvironmentValues {
     }
 }
 
+private struct EditorSessionKey: EnvironmentKey { static let defaultValue = 0 }
+extension EnvironmentValues {
+    /// Counts the editor panel's uses. The panel keeps an editor that keeps its
+    /// identity built between uses, and a change here is the editor's cue to
+    /// clear what the last use left.
+    var editorSession: Int {
+        get { self[EditorSessionKey.self] }
+        set { self[EditorSessionKey.self] = newValue }
+    }
+}
+
 /// An editor's title and its Cancel and confirm buttons around its form. In
 /// a sheet they are the navigation title and toolbar; in the editor panel,
 /// which has no window chrome of its own, they are drawn the way the sheet

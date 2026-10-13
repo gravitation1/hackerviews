@@ -11,64 +11,116 @@ import SwiftUI
 /// and appears in the next frame.
 struct EditorPanelHost<Item: Identifiable, Editor: View>: NSViewRepresentable {
     @Binding var item: Item?
+    /// Built into the panel shortly after launch, so that the first use opens
+    /// as fast as later ones. Editors that keep their identity across items
+    /// stay built from then on; see `editorSession`.
+    var prewarm: Item?
     @ViewBuilder let editor: (Item) -> Editor
 
     func makeCoordinator() -> Coordinator { Coordinator() }
-    func makeNSView(context: Context) -> NSView { NSView() }
-
-    func updateNSView(_ view: NSView, context: Context) {
+    func makeNSView(context: Context) -> Anchor {
+        let anchor = Anchor()
         let coordinator = context.coordinator
-        if let item {
-            guard coordinator.shownID != AnyHashable(item.id), let window = view.window else { return }
-            let binding = $item
-            let close: @MainActor () -> Void = { binding.wrappedValue = nil }
-            coordinator.show(AnyView(EditorPanelBackdrop { editor(item).environment(\.closeEditor, close) }),
-                             id: AnyHashable(item.id), over: window, close: close)
-        } else if coordinator.shownID != nil {
-            coordinator.hide()
+        // The prewarm needs the window, which this view joins after its first update.
+        anchor.onWindow = { [weak coordinator] window in coordinator?.schedulePrewarm(over: window) }
+        return anchor
+    }
+
+    final class Anchor: NSView {
+        var onWindow: ((NSWindow) -> Void)?
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if let window { onWindow?(window) }
         }
     }
 
-    static func dismantleNSView(_ view: NSView, coordinator: Coordinator) { coordinator.hide() }
+    func updateNSView(_ view: Anchor, context: Context) {
+        let coordinator = context.coordinator
+        let binding = $item
+        let close: @MainActor () -> Void = { binding.wrappedValue = nil }
+        coordinator.make = { item, session in
+            AnyView(EditorPanelBackdrop {
+                editor(item).environment(\.closeEditor, close).environment(\.editorSession, session)
+            })
+        }
+        coordinator.close = close
+        coordinator.prewarm = prewarm
+        if let item {
+            guard coordinator.shownID != AnyHashable(item.id), let window = view.window else { return }
+            coordinator.show(item, over: window)
+        } else if coordinator.shownID != nil {
+            coordinator.hide()
+        }
+        if let window = view.window { coordinator.schedulePrewarm(over: window) }
+    }
+
+    static func dismantleNSView(_ view: Anchor, coordinator: Coordinator) { coordinator.hide() }
 
     @MainActor final class Coordinator {
         private(set) var shownID: AnyHashable?
+        private var prewarmScheduled = false
+        var prewarm: Item?
+        var make: ((Item, Int) -> AnyView)?
+        var close: (@MainActor () -> Void)?
+        private var lastItem: Item?
+        private var session = 0
         private var panel: EditorPanelWindow?
         private var host: NSHostingView<AnyView>?
         private weak var parent: NSWindow?
         private var observers: [NSObjectProtocol] = []
 
-        func show(_ content: AnyView, id: AnyHashable, over parent: NSWindow, close: @escaping @MainActor () -> Void) {
-            if self.parent !== parent { hide(); panel = nil; host = nil }
+        /// Builds the prewarm editor in the panel without showing it, once,
+        /// after launch has settled: building an editor takes tens of milliseconds.
+        func schedulePrewarm(over parent: NSWindow) {
+            guard !prewarmScheduled, prewarm != nil else { return }
+            prewarmScheduled = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self, weak parent] in
+                MainActor.assumeIsolated {
+                    guard let self, let parent, let prewarm = self.prewarm, self.shownID == nil, self.lastItem == nil else { return }
+                    self.fill(prewarm, over: parent)
+                }
+            }
+        }
+
+        /// Puts the editor for `item` in the panel and lays it out, reusing the
+        /// views already there where the editor keeps its identity.
+        private func fill(_ item: Item, over parent: NSWindow) {
+            guard let make else { return }
+            if self.parent !== parent, self.parent != nil { hide(); panel = nil; host = nil; lastItem = nil }
             let panel = self.panel ?? makePanel()
-            let host = self.host ?? NSHostingView(rootView: AnyView(EmptyView()))
-            if self.host == nil {
+            let host = self.host ?? {
+                let host = NSHostingView(rootView: make(item, session))
                 // The panel's frame is always the parent's, so the hosting view
                 // need not measure the editor to size the window.
                 host.sizingOptions = []
                 panel.contentView = host
                 self.host = host
-            }
-            shownID = id
+                return host
+            }()
             self.parent = parent
-            panel.onEscape = close
+            lastItem = item
+            host.rootView = make(item, session)
             panel.setFrame(parent.frame, display: false)
-            // Ordered in while still empty: ordering a window in looks for its
-            // first key view, which in a full editor means SwiftUI building its
-            // whole focus and gesture graph inside the call, about 30ms.
-            host.rootView = AnyView(EmptyView())
+            host.layoutSubtreeIfNeeded()
+        }
+
+        func show(_ item: Item, over parent: NSWindow) {
+            fill(item, over: parent)
+            guard let panel, let host else { return }
+            shownID = AnyHashable(item.id)
+            panel.onEscape = close
+            // Focus goes where a sheet would put it, the first text field, and
+            // goes there before the window is ordered in: a window ordered in with
+            // nothing focused searches for its first key view, which makes
+            // SwiftUI build the editor's whole focus and gesture graph, ~30ms.
+            // An editor built just now has no text view yet; its note field
+            // focuses itself when it joins the window.
+            if let field = Self.firstTextView(in: host) { panel.makeFirstResponder(field) }
             if panel.parent !== parent { parent.addChildWindow(panel, ordered: .above) }
             panel.orderFront(nil)
             panel.makeKey()
-            host.rootView = content
             observe(parent)
-            // A sheet starts with its first key view focused, such as the note
-            // field. The editor's views exist once its first layout has run.
-            DispatchQueue.main.async { [weak panel] in
-                guard let panel, panel.isVisible, panel.firstResponder === panel else { return }
-                panel.recalculateKeyViewLoop()
-                panel.selectNextKeyView(nil)
-            }
+
         }
 
         func hide() {
@@ -77,12 +129,20 @@ struct EditorPanelHost<Item: Identifiable, Editor: View>: NSViewRepresentable {
             guard shownID != nil else { return }
             shownID = nil
             panel?.onEscape = nil
-            host?.rootView = AnyView(EmptyView())
             if let panel {
                 panel.parent?.removeChildWindow(panel)
                 panel.orderOut(nil)
             }
+            // A new session while hidden: a kept editor clears itself for the next use.
+            session += 1
+            if let lastItem, let make { host?.rootView = make(lastItem, session) }
             parent?.makeKey()
+        }
+
+        private static func firstTextView(in view: NSView) -> NSTextView? {
+            if let text = view as? NSTextView, text.isEditable { return text }
+            for child in view.subviews { if let found = firstTextView(in: child) { return found } }
+            return nil
         }
 
         private func makePanel() -> EditorPanelWindow {

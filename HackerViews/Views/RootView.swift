@@ -44,8 +44,9 @@ struct RootView: View {
             }
         }
         #if os(macOS)
-        .background(EditorPanelHost(item: $workspace.draft) { draft in
+        .background(EditorPanelHost(item: $workspace.draft, prewarm: RecordDraft.panelPrewarm) { draft in
             RecordEditor(store: store, draft: draft).environment(\.openURL, openLink).tint(.orange)
+                .id(draft.panelIdentity)
         })
         #else
         .sheet(item: $workspace.draft) { draft in

@@ -1,5 +1,25 @@
 import SwiftUI
 
+extension RecordDraft {
+    /// The flag editor is one editor reused across contributions (its form
+    /// clears between uses); every other draft gets an editor of its own,
+    /// because the record editor reads the person's saved record when created.
+    var panelIdentity: String { isFlag ? "flag" : id.uuidString }
+    /// The HN item a citation points at, when there is one.
+    var contributionID: Int? {
+        guard let link = citation?.url, let url = URLComponents(string: link),
+              url.host == "news.ycombinator.com", url.path == "/item",
+              let raw = url.queryItems?.first(where: { $0.name == "id" })?.value,
+              let id = Int(raw), id > 0 else { return nil }
+        return id
+    }
+    /// Whether this draft opens the flag editor rather than the record editor.
+    var isFlag: Bool { citation != nil && contributionID != nil && !filtersOnly }
+    /// A flag draft to build the flag editor with before its first use.
+    static let panelPrewarm = RecordDraft(username: "hackerviews", citation: Citation(
+        url: "https://news.ycombinator.com/item?id=1", author: "hackerviews", excerpt: "", context: "Hacker News"))
+}
+
 struct RecordEditor: View {
     @ObservedObject var store: RecordStore
     let draft: RecordDraft
@@ -18,6 +38,8 @@ struct RecordEditor: View {
     @State private var contributionSummary = "Checking contribution effect…"
     @State private var accountService = HNService.shared
     @State private var noteSaveTask: Task<Void, Never>?
+    @State private var flagForm = FlagForm()
+    @Environment(\.editorSession) private var editorSession
     @FocusState private var editingUsername: Bool
 
     init(store: RecordStore, draft: RecordDraft) {
@@ -30,8 +52,11 @@ struct RecordEditor: View {
     }
 
     var body: some View {
-        if let source = draft.citation, let id = contributionID, !draft.filtersOnly {
-            FlagContributionView(store: store, username: draft.username, source: source, itemID: id)
+        if draft.isFlag, let source = draft.citation, let id = draft.contributionID {
+            FlagContributionView(store: store, username: draft.username, source: source, itemID: id, form: flagForm)
+                // The panel keeps this editor between uses and ends a session when it
+                // closes; the next flag starts from a cleared form.
+                .onChange(of: editorSession) { _, _ in flagForm.reset() }
         } else {
             legacyEditor
         }
@@ -74,7 +99,7 @@ struct RecordEditor: View {
                 }
                 if !draft.filtersOnly {
                 Section("Notes") {
-                    AccountNotesEditor(text: $note, onBlur: { saveChanges() })
+                    AccountNotesEditor(text: $note, focusOnAppear: savedUsername != nil, onBlur: { saveChanges() })
                         .frame(height: 96)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -169,13 +194,7 @@ struct RecordEditor: View {
         #endif
     }
     private func close() { if let closeEditor { closeEditor() } else { dismiss() } }
-    private var contributionID: Int? {
-        guard let link = draft.citation?.url, let url = URLComponents(string: link),
-              url.host == "news.ycombinator.com", url.path == "/item",
-              let raw = url.queryItems?.first(where: { $0.name == "id" })?.value,
-              let id = Int(raw), id > 0 else { return nil }
-        return id
-    }
+    private var contributionID: Int? { draft.contributionID }
     private func assignContribution(_ id: Int, filter: FilterRule, assigned: Bool) {
         var updated = filter
         var ids = updated.itemIDs ?? []
@@ -408,25 +427,44 @@ private struct CitationEditor: View {
 
 /// A contribution is evidence for a user flag by default. All edits remain local
 /// until the single archive transaction succeeds.
+/// What the flag editor's user has chosen and typed. It lives outside the
+/// view so that the editor panel can keep one editor built between uses and
+/// clear it when it closes, rather than build a new one for every flag.
+@MainActor @Observable final class FlagForm {
+    var userTarget = true
+    var filterID = ""
+    var annotation = ""
+    var attached = true
+    var newFilter = FlagForm.freshFilter()
+    var preview = ""
+    var failed = false
+    private static func freshFilter() -> FilterRule {
+        var rule = FilterRule()
+        rule.effect = .highlight
+        return rule
+    }
+    func reset() {
+        userTarget = true; filterID = ""; annotation = ""; attached = true
+        newFilter = Self.freshFilter(); preview = ""; failed = false
+    }
+}
+
 private struct FlagContributionView: View {
     @ObservedObject var store: RecordStore
     let username: String
     let source: Citation
     let itemID: Int
+    @Bindable var form: FlagForm
     @Environment(\.dismiss) private var dismiss
     @Environment(\.closeEditor) private var closeEditor
-    @State private var userTarget = true
-    @State private var filterID = ""
-    @State private var annotation = ""
-    @State private var attached = true
-    @State private var newFilter: FilterRule = {
-        var rule = FilterRule()
-        rule.effect = .highlight
-        return rule
-    }()
+    private var userTarget: Bool { form.userTarget }
+    private var filterID: String { form.filterID }
+    private var annotation: String { form.annotation }
+    private var attached: Bool { form.attached }
+    private var newFilter: FilterRule { form.newFilter }
+    private var preview: String { form.preview }
+    private var failed: Bool { form.failed }
     private let createID = "create-new-filter"
-    @State private var preview = ""
-    @State private var failed = false
     @State private var service = HNService.shared
 
     private var creating: Bool { filterID == createID }
@@ -463,7 +501,8 @@ private struct FlagContributionView: View {
         return rules
     }
     private var previewKey: String {
-        String(userTarget) + filterID + String(describing: newFilter) + (store.archive.effectiveFilterRevision?.id.uuidString ?? "default")
+        // The contribution too: a kept editor shows a different one each time.
+        String(itemID) + username + String(userTarget) + filterID + String(describing: newFilter) + (store.archive.effectiveFilterRevision?.id.uuidString ?? "default")
     }
     private func close() { if let closeEditor { closeEditor() } else { dismiss() } }
     private static var size: CGSize? {
@@ -477,16 +516,16 @@ private struct FlagContributionView: View {
         EditorChrome(title: username, cancel: close, confirmTitle: "Save", confirmDisabled: !canSave, confirm: save, size: Self.size) {
             Form {
                 Section {
-                    Picker("Apply to", selection: $userTarget) {
+                    Picker("Apply to", selection: $form.userTarget) {
                         Text("This user").tag(true)
                         Text("Only this contribution").tag(false)
                     }.pickerStyle(.segmented)
                     #if os(macOS)
                     LabeledContent(filterPrompt) {
-                        MacFilterPicker(selection: $filterID, rules: store.archive.rules, createID: createID, accessibilityLabel: filterPrompt).fixedSize()
+                        MacFilterPicker(selection: $form.filterID, rules: store.archive.rules, createID: createID, accessibilityLabel: filterPrompt).fixedSize()
                     }
                     #else
-                    Picker(filterPrompt, selection: $filterID) {
+                    Picker(filterPrompt, selection: $form.filterID) {
                         Text("No filter · Note only").tag("")
                         Text("Create filter…").tag(createID)
                         ForEach(store.archive.rules) { rule in
@@ -497,10 +536,10 @@ private struct FlagContributionView: View {
                     if creating {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("New filter").font(.headline)
-                            TextField("Filter name", text: $newFilter.name)
+                            TextField("Filter name", text: $form.newFilter.name)
                                 .textFieldStyle(.roundedBorder).labelsHidden()
                                 .accessibilityLabel("New filter name")
-                            HStack { Text("Effect"); Spacer(); FilterEffectPicker(rule: $newFilter) }
+                            HStack { Text("Effect"); Spacer(); FilterEffectPicker(rule: $form.newFilter) }
                             Text("Added at the top of your filter list. New filters here start with Highlight; choose Block to hide matching contributions. You can change priority and conditions in Filters.")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
@@ -522,15 +561,18 @@ private struct FlagContributionView: View {
                                 Link("View original contribution", destination: url).font(.callout)
                             }
                             Spacer()
-                            Button("Remove attachment") { attached = false }
+                            Button("Remove attachment") { form.attached = false }
                                 .buttonStyle(ControlSurfaceStyle())
                         }
                     } else {
-                        Button("Attach this contribution") { attached = true }
+                        Button("Attach this contribution") { form.attached = true }
                     }
                 }
                 Section("Your note") {
-                    AccountNotesEditor(text: $annotation, placeholder: "Add an optional note…")
+                    // Focused when it joins the window, as a sheet focuses its first
+                    // key view; the editor panel's own focusing reaches only views
+                    // already built.
+                    AccountNotesEditor(text: $form.annotation, placeholder: "Add an optional note…", focusOnAppear: true)
                         .frame(height: 100)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -543,7 +585,7 @@ private struct FlagContributionView: View {
             .formStyle(.grouped)
         }
         .task(id: previewKey) {
-            preview = ""
+            form.preview = ""
             guard let selected, !creating || canSave else { return }
             do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
             let result = await service.decisions(ids: [itemID], rules: proposedRules)
@@ -556,16 +598,16 @@ private struct FlagContributionView: View {
             else if effect.hasPrefix("fade:") { outcome = "Faded" }
             else if effect == "visible" { outcome = "Shown normally" }
             else { outcome = "Could not verify the resulting effect" }
-            preview = "This contribution: " + outcome + (label.map { " · " + $0 } ?? "")
-            if !selected.enabled { preview += ". Selected filter is paused." }
+            form.preview = "This contribution: " + outcome + (label.map { " · " + $0 } ?? "")
+            if !selected.enabled { form.preview += ". Selected filter is paused." }
             else if let label, !label.hasPrefix(selected.name) {
-                preview += ". Another matching filter or blocked ancestor takes priority."
+                form.preview += ". Another matching filter or blocked ancestor takes priority."
             }
         }
     }
 
     private func save() {
-        guard canSave else { failed = true; return }
+        guard canSave else { form.failed = true; return }
         let current = store.current(username)
         var references = current?.citations ?? []
         var personalNote = current?.note ?? ""
@@ -585,13 +627,13 @@ private struct FlagContributionView: View {
             personalNote += (personalNote.isEmpty ? "" : "\n\n") + annotation
         }
         if !attached && annotation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            if store.saveRules(proposedRules) { close() } else { failed = true }
+            if store.saveRules(proposedRules) { close() } else { form.failed = true }
             return
         }
         if store.save(username: username, blocked: current?.isBlocked ?? false,
                       note: personalNote, citations: references,
                       preferred: current?.isPreferred ?? false, rules: proposedRules) {
             close()
-        } else { failed = true }
+        } else { form.failed = true }
     }
 }
