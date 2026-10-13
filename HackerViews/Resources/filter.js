@@ -983,7 +983,8 @@
     button.addEventListener('click', event => {
       event.preventDefault(); event.stopPropagation();
       editedRow = row?.id || null;
-      post(capture(author, row, link));
+      // When the click happened, for the app's debug timing of the editor opening.
+      post({...capture(author, row, link), clickedAt: performance.timeOrigin + event.timeStamp});
     });
     return button;
   }

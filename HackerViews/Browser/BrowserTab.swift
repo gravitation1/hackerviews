@@ -715,6 +715,11 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
                 citation = Citation(url: link, author: username, excerpt: body["excerpt"] as? String ?? "",
                                     context: body["context"] as? String ?? "Hacker News")
             }
+            #if os(macOS) && DEBUG
+            if let clickedAt = body["clickedAt"] as? Double {
+                InteractionTiming.begin("note.open", ["profile": source.path == "/user"], since1970: clickedAt / 1000, inputKind: "pageClick", view: webView)
+            }
+            #endif
             onRecord?(RecordDraft(username: username, citation: citation, filtersOnly: source.path == "/user"))
         case "originalPoster":
             guard let id = body["id"] as? Int, id > 0, source.path == "/item",

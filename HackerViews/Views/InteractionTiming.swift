@@ -2,11 +2,13 @@
 import AppKit
 import QuartzCore
 
-/// Times a section switch in the running app and writes it to the debug
-/// performance trace as `section.switch`, all in milliseconds from the
-/// timestamp of the input event that made it (`input` names its kind):
+/// Times an interaction in the running app, such as a section switch
+/// (`section.switch`) or opening the note editor (`note.open`), and writes it
+/// to the debug performance trace with the caller's fields, all in
+/// milliseconds from the timestamp of the input that made it (`input` names
+/// its kind):
 ///
-/// - `actionMs`: the section control's action runs.
+/// - `actionMs`: the app handles the input.
 /// - `commitMs`: the end of the switch's own work, the first run of busy
 ///   main-thread passes after the action (its view update, layout and
 ///   commit); `cpuMs` is the main thread's CPU time from the action to then.
@@ -16,17 +18,18 @@ import QuartzCore
 ///   work within the observation window, which includes toolbar animation
 ///   and anything else the switch set off; `busyPasses` and `busyCpuMs` count
 ///   those passes and their CPU time.
-@MainActor final class SectionSwitchTiming: NSObject {
-    private static var current: SectionSwitchTiming?
+@MainActor final class InteractionTiming: NSObject {
+    private static var current: InteractionTiming?
     /// A pass that uses less main-thread CPU than this counts as idle.
     private static let busyThreshold = 0.25
     private static let window = 0.8
 
-    private let from: String, to: String
+    private let event: String
+    private let fields: [String: Any]
     private let input: CFTimeInterval
     private let inputKind: String
     private let action = CACurrentMediaTime()
-    private let actionCPU = SectionSwitchTiming.threadCPU()
+    private let actionCPU = InteractionTiming.threadCPU()
     private var observer: CFRunLoopObserver?
     private var displayLink: CADisplayLink?
     private var commit: CFTimeInterval?
@@ -38,23 +41,34 @@ import QuartzCore
     private var busyPasses = 0
     private var busyCPU = 0.0
 
-    static func begin(from: String, to: String, event: NSEvent?, view: NSView?) {
-        current?.finish()
+    /// Times from an AppKit event.
+    static func begin(_ event: String, _ fields: [String: Any], input: NSEvent?, view: NSView?) {
         let kind: String
-        switch event?.type {
+        switch input?.type {
         case .leftMouseDown?: kind = "mouseDown"
         case .leftMouseUp?: kind = "mouseUp"
         case .keyDown?: kind = "keyDown"
         case nil: kind = "none"
         default: kind = "other"
         }
-        let timing = SectionSwitchTiming(from: from, to: to, input: event?.timestamp ?? CACurrentMediaTime(), inputKind: kind)
+        begin(event, fields, input: input?.timestamp ?? CACurrentMediaTime(), inputKind: kind, view: view)
+    }
+
+    /// Times from a wall-clock time, such as a page event's, in seconds since 1970.
+    static func begin(_ event: String, _ fields: [String: Any], since1970: Double, inputKind: String, view: NSView?) {
+        let input = CACurrentMediaTime() - (Date().timeIntervalSince1970 - since1970)
+        begin(event, fields, input: input, inputKind: inputKind, view: view)
+    }
+
+    private static func begin(_ event: String, _ fields: [String: Any], input: CFTimeInterval, inputKind: String, view: NSView?) {
+        current?.finish()
+        let timing = InteractionTiming(event: event, fields: fields, input: input, inputKind: inputKind)
         current = timing
         timing.start(view: view)
     }
 
-    private init(from: String, to: String, input: CFTimeInterval, inputKind: String) {
-        self.from = from; self.to = to; self.input = input; self.inputKind = inputKind
+    private init(event: String, fields: [String: Any], input: CFTimeInterval, inputKind: String) {
+        self.event = event; self.fields = fields; self.input = input; self.inputKind = inputKind
         lastPassCPU = actionCPU
         settled = action
     }
@@ -105,12 +119,12 @@ import QuartzCore
         if Self.current === self { Self.current = nil }
         func ms(_ time: CFTimeInterval?) -> Double { time.map { ($0 - input) * 1000 } ?? -1 }
         let frame = commit.flatMap { commit in refreshes.first { $0 >= commit } }
-        ReaderTrace.event("section.switch", [
-            "from": from, "to": to, "input": inputKind,
+        ReaderTrace.event(event, fields.merging([
+            "input": inputKind,
             "actionMs": ms(action), "commitMs": ms(commit), "cpuMs": commitCPU,
             "frameMs": ms(frame), "settledMs": ms(settled),
             "busyPasses": busyPasses, "busyCpuMs": busyCPU,
-        ])
+        ]) { _, timing in timing })
     }
 }
 #endif

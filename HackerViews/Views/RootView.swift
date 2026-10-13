@@ -43,24 +43,16 @@ struct RootView: View {
                 }.font(.caption).padding(8)
             }
         }
+        #if os(macOS)
+        .background(EditorPanelHost(item: $workspace.draft) { draft in
+            RecordEditor(store: store, draft: draft).environment(\.openURL, openLink).tint(.orange)
+        })
+        #else
         .sheet(item: $workspace.draft) { draft in
             RecordEditor(store: store, draft: draft)
         }
-        .environment(\.openURL, OpenURLAction { url in
-            guard BrowserTab.isHN(url) else {
-                #if os(macOS)
-                ExternalBrowser.open(url)
-                return .handled
-                #else
-                return .systemAction
-                #endif
-            }
-            NotificationCenter.default.post(name: Notification.Name("HackerViewsOpenReference"), object: nil)
-            workspace.draft = nil
-            workspace.open(url)
-            sections.current = "read"
-            return .handled
-        })
+        #endif
+        .environment(\.openURL, openLink)
         .alert("Couldn’t save your records", isPresented: Binding(get: { store.error != nil }, set: { if !$0 { store.error = nil } })) {
             Button("OK") { store.error = nil }
         } message: { Text(store.error ?? "") }
@@ -125,6 +117,25 @@ struct RootView: View {
     }
     #endif
 
+    /// Links in the app: HN pages open in the reader, others leave the app.
+    private var openLink: OpenURLAction {
+        OpenURLAction { url in
+            guard BrowserTab.isHN(url) else {
+                #if os(macOS)
+                ExternalBrowser.open(url)
+                return .handled
+                #else
+                return .systemAction
+                #endif
+            }
+            NotificationCenter.default.post(name: Notification.Name("HackerViewsOpenReference"), object: nil)
+            workspace.draft = nil
+            workspace.open(url)
+            sections.current = "read"
+            return .handled
+        }
+    }
+
     private func openProfile(_ username: String) {
         var components = URLComponents(string: "https://news.ycombinator.com/user")!
         components.queryItems = [URLQueryItem(name: "id", value: username)]
@@ -185,7 +196,7 @@ private struct ReaderSectionControl: NSViewRepresentable {
             if next == "read" && parent.selection == "read" { parent.readAgain() }
             else {
                 #if DEBUG
-                SectionSwitchTiming.begin(from: parent.selection, to: next, event: NSApp.currentEvent, view: sender.window?.contentView)
+                InteractionTiming.begin("section.switch", ["from": parent.selection, "to": next], input: NSApp.currentEvent, view: sender.window?.contentView)
                 #endif
                 parent.select(next)
             }

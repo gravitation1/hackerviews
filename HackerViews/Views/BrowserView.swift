@@ -347,7 +347,10 @@ extension FocusedValues {
 struct ReaderNavigationCommands: Commands {
     @FocusedObject private var workspace: BrowserWorkspace?
     @FocusedObject private var tab: BrowserTab?
-    private var hasSheet: Bool { NSApp.keyWindow?.attachedSheet != nil || NSApp.keyWindow?.sheetParent != nil }
+    /// A sheet or the editor panel has the keyboard: reader commands wait.
+    private var hasSheet: Bool {
+        NSApp.keyWindow?.attachedSheet != nil || NSApp.keyWindow?.sheetParent != nil || NSApp.keyWindow is EditorPanelWindow
+    }
     private var closesTab: Bool { !hasSheet && (workspace?.tabs.count ?? 0) > 1 }
     var body: some Commands {
         CommandGroup(replacing: .saveItem) {

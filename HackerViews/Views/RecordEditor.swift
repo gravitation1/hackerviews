@@ -5,6 +5,7 @@ struct RecordEditor: View {
     let draft: RecordDraft
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.closeEditor) private var closeEditor
     @State private var username: String
     @State private var note: String
     @State private var citations: [Citation]
@@ -37,7 +38,8 @@ struct RecordEditor: View {
     }
 
     private var legacyEditor: some View {
-        NavigationStack {
+        EditorChrome(title: draft.filtersOnly ? "Filters for " + username : (username.isEmpty ? "New user record" : username),
+                     confirmTitle: "Done", confirm: { saveChanges(); if !saveFailed { close() } }, size: Self.size(filtersOnly: draft.filtersOnly)) {
             Form {
                 if savedUsername == nil {
                     TextField("HN username", text: $username).textFieldStyle(.roundedBorder).autocorrectionDisabled()
@@ -121,54 +123,52 @@ struct RecordEditor: View {
                 }
             }
             .formStyle(.grouped)
-            .navigationTitle(draft.filtersOnly ? "Filters for " + username : (username.isEmpty ? "New user record" : username))
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { saveChanges(); if !saveFailed { dismiss() } }
-                        .keyboardShortcut(.defaultAction)
-                }
-            }
-            .sheet(isPresented: $addingCitation) {
-                CitationEditor(author: username) { citation in
-                    if let index = citations.firstIndex(where: { $0.id == citation.id }) { citations[index] = citation }
-                    else { citations.append(citation) }
-                }
-            }
-            .toggleStyle(.switch)
-            .onChange(of: note) { _, _ in
-                noteSaveTask?.cancel()
-                noteSaveTask = Task { @MainActor in
-                    do { try await Task.sleep(for: .seconds(5)) } catch { return }
-                    saveChanges()
-                }
-            }
-            .onDisappear { noteSaveTask?.cancel(); saveChanges() }
-            .onChange(of: scenePhase) { _, phase in
-                if phase != .active { noteSaveTask?.cancel(); saveChanges() }
-            }
-            #if os(macOS)
-            .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
-                noteSaveTask?.cancel(); saveChanges()
-            }
-            #endif
-            .onChange(of: citations) { _, _ in
-                noteSaveTask?.cancel()
-                noteSaveTask = Task { @MainActor in
-                    do { try await Task.sleep(for: .seconds(5)) } catch { return }
-                    saveChanges()
-                }
-            }
-            .onChange(of: editingUsername) { _, editing in if !editing { saveChanges() } }
-            .onAppear {
-                guard !started else { return }
-                started = true
-
+        }
+        .sheet(isPresented: $addingCitation) {
+            CitationEditor(author: username) { citation in
+                if let index = citations.firstIndex(where: { $0.id == citation.id }) { citations[index] = citation }
+                else { citations.append(citation) }
             }
         }
+        .toggleStyle(.switch)
+        .onChange(of: note) { _, _ in
+            noteSaveTask?.cancel()
+            noteSaveTask = Task { @MainActor in
+                do { try await Task.sleep(for: .seconds(5)) } catch { return }
+                saveChanges()
+            }
+        }
+        .onDisappear { noteSaveTask?.cancel(); saveChanges() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { noteSaveTask?.cancel(); saveChanges() }
+        }
         #if os(macOS)
-        .frame(width: 680, height: draft.filtersOnly ? 460 : 760)
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+            noteSaveTask?.cancel(); saveChanges()
+        }
+        #endif
+        .onChange(of: citations) { _, _ in
+            noteSaveTask?.cancel()
+            noteSaveTask = Task { @MainActor in
+                do { try await Task.sleep(for: .seconds(5)) } catch { return }
+                saveChanges()
+            }
+        }
+        .onChange(of: editingUsername) { _, editing in if !editing { saveChanges() } }
+        .onAppear {
+            guard !started else { return }
+            started = true
+
+        }
+    }
+    private static func size(filtersOnly: Bool) -> CGSize? {
+        #if os(macOS)
+        CGSize(width: 680, height: filtersOnly ? 460 : 760)
+        #else
+        nil
         #endif
     }
+    private func close() { if let closeEditor { closeEditor() } else { dismiss() } }
     private var contributionID: Int? {
         guard let link = draft.citation?.url, let url = URLComponents(string: link),
               url.host == "news.ycombinator.com", url.path == "/item",
@@ -414,6 +414,7 @@ private struct FlagContributionView: View {
     let source: Citation
     let itemID: Int
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.closeEditor) private var closeEditor
     @State private var userTarget = true
     @State private var filterID = ""
     @State private var annotation = ""
@@ -464,8 +465,16 @@ private struct FlagContributionView: View {
     private var previewKey: String {
         String(userTarget) + filterID + String(describing: newFilter) + (store.archive.effectiveFilterRevision?.id.uuidString ?? "default")
     }
+    private func close() { if let closeEditor { closeEditor() } else { dismiss() } }
+    private static var size: CGSize? {
+        #if os(macOS)
+        CGSize(width: 640, height: 640)
+        #else
+        nil
+        #endif
+    }
     var body: some View {
-        NavigationStack {
+        EditorChrome(title: username, cancel: close, confirmTitle: "Save", confirmDisabled: !canSave, confirm: save, size: Self.size) {
             Form {
                 Section {
                     Picker("Apply to", selection: $userTarget) {
@@ -532,40 +541,27 @@ private struct FlagContributionView: View {
                 }
             }
             .formStyle(.grouped)
-            .navigationTitle(username)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save", action: save).keyboardShortcut(.defaultAction)
-                        .disabled(!canSave)
-                }
-            }
-            .task(id: previewKey) {
-                preview = ""
-                guard let selected, !creating || canSave else { return }
-                do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
-                let result = await service.decisions(ids: [itemID], rules: proposedRules)
-                guard !Task.isCancelled else { return }
-                let effect = result.effects[String(itemID)] ?? "unresolved"
-                let label = result.labels[String(itemID)]
-                let outcome: String
-                if effect == "blocked" || effect == "hidden-item" { outcome = "Blocked" }
-                else if effect.hasPrefix("highlight:") { outcome = "Highlighted" }
-                else if effect.hasPrefix("fade:") { outcome = "Faded" }
-                else if effect == "visible" { outcome = "Shown normally" }
-                else { outcome = "Could not verify the resulting effect" }
-                preview = "This contribution: " + outcome + (label.map { " · " + $0 } ?? "")
-                if !selected.enabled { preview += ". Selected filter is paused." }
-                else if let label, !label.hasPrefix(selected.name) {
-                    preview += ". Another matching filter or blocked ancestor takes priority."
-                }
+        }
+        .task(id: previewKey) {
+            preview = ""
+            guard let selected, !creating || canSave else { return }
+            do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
+            let result = await service.decisions(ids: [itemID], rules: proposedRules)
+            guard !Task.isCancelled else { return }
+            let effect = result.effects[String(itemID)] ?? "unresolved"
+            let label = result.labels[String(itemID)]
+            let outcome: String
+            if effect == "blocked" || effect == "hidden-item" { outcome = "Blocked" }
+            else if effect.hasPrefix("highlight:") { outcome = "Highlighted" }
+            else if effect.hasPrefix("fade:") { outcome = "Faded" }
+            else if effect == "visible" { outcome = "Shown normally" }
+            else { outcome = "Could not verify the resulting effect" }
+            preview = "This contribution: " + outcome + (label.map { " · " + $0 } ?? "")
+            if !selected.enabled { preview += ". Selected filter is paused." }
+            else if let label, !label.hasPrefix(selected.name) {
+                preview += ". Another matching filter or blocked ancestor takes priority."
             }
         }
-        #if os(macOS)
-        .frame(width: 640, height: 640)
-        #endif
     }
 
     private func save() {
@@ -589,13 +585,13 @@ private struct FlagContributionView: View {
             personalNote += (personalNote.isEmpty ? "" : "\n\n") + annotation
         }
         if !attached && annotation.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            if store.saveRules(proposedRules) { dismiss() } else { failed = true }
+            if store.saveRules(proposedRules) { close() } else { failed = true }
             return
         }
         if store.save(username: username, blocked: current?.isBlocked ?? false,
                       note: personalNote, citations: references,
                       preferred: current?.isPreferred ?? false, rules: proposedRules) {
-            dismiss()
+            close()
         } else { failed = true }
     }
 }
