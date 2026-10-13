@@ -21,8 +21,9 @@ struct EditorPanelHost<Item: Identifiable, Editor: View>: NSViewRepresentable {
         if let item {
             guard coordinator.shownID != AnyHashable(item.id), let window = view.window else { return }
             let binding = $item
-            coordinator.show(AnyView(EditorPanelBackdrop { editor(item).environment(\.closeEditor, { binding.wrappedValue = nil }) }),
-                             id: AnyHashable(item.id), over: window)
+            let close: @MainActor () -> Void = { binding.wrappedValue = nil }
+            coordinator.show(AnyView(EditorPanelBackdrop { editor(item).environment(\.closeEditor, close) }),
+                             id: AnyHashable(item.id), over: window, close: close)
         } else if coordinator.shownID != nil {
             coordinator.hide()
         }
@@ -37,7 +38,7 @@ struct EditorPanelHost<Item: Identifiable, Editor: View>: NSViewRepresentable {
         private weak var parent: NSWindow?
         private var observers: [NSObjectProtocol] = []
 
-        func show(_ content: AnyView, id: AnyHashable, over parent: NSWindow) {
+        func show(_ content: AnyView, id: AnyHashable, over parent: NSWindow, close: @escaping @MainActor () -> Void) {
             if self.parent !== parent { hide(); panel = nil; host = nil }
             let panel = self.panel ?? makePanel()
             let host = self.host ?? NSHostingView(rootView: AnyView(EmptyView()))
@@ -50,6 +51,7 @@ struct EditorPanelHost<Item: Identifiable, Editor: View>: NSViewRepresentable {
             }
             shownID = id
             self.parent = parent
+            panel.onEscape = close
             panel.setFrame(parent.frame, display: false)
             // Ordered in while still empty: ordering a window in looks for its
             // first key view, which in a full editor means SwiftUI building its
@@ -74,6 +76,7 @@ struct EditorPanelHost<Item: Identifiable, Editor: View>: NSViewRepresentable {
             observers.removeAll()
             guard shownID != nil else { return }
             shownID = nil
+            panel?.onEscape = nil
             host?.rootView = AnyView(EmptyView())
             if let panel {
                 panel.parent?.removeChildWindow(panel)
@@ -116,6 +119,20 @@ struct EditorPanelHost<Item: Identifiable, Editor: View>: NSViewRepresentable {
 final class EditorPanelWindow: NSWindow {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
+    /// Escape closes the panel wherever the focus is. A focused text view
+    /// would otherwise take the key for itself, so no button's shortcut sees
+    /// it; text an input method is still composing keeps it.
+    var onEscape: (@MainActor () -> Void)?
+    override func sendEvent(_ event: NSEvent) {
+        if event.type == .keyDown, event.keyCode == 53,
+           event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting([.capsLock, .numericPad, .function]).isEmpty,
+           !((firstResponder as? NSTextInputClient)?.hasMarkedText() ?? false),
+           let onEscape {
+            onEscape()
+            return
+        }
+        super.sendEvent(event)
+    }
 }
 
 /// The dimmed window and the editor's card, placed where the sheet would be:
