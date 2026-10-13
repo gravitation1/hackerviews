@@ -482,7 +482,9 @@ enum ReaderTrace {
         payload["time"] = Date().timeIntervalSince1970
         guard let data = try? JSONSerialization.data(withJSONObject: payload) else { return }
         queue.async {
-            let url = URL.cachesDirectory.appendingPathComponent("HackerViews-performance.jsonl")
+            // Harnesses point the trace elsewhere so they never write into the app's.
+            let url = ProcessInfo.processInfo.environment["HACKERVIEWS_TRACE"].map { URL(fileURLWithPath: $0) }
+                ?? URL.cachesDirectory.appendingPathComponent("HackerViews-performance.jsonl")
             let manager = FileManager.default
             if let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size > 8_000_000 {
                 let previous = url.deletingLastPathComponent().appendingPathComponent("HackerViews-performance-previous.jsonl")

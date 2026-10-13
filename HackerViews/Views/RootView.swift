@@ -170,7 +170,12 @@ private struct ReaderSectionControl: NSViewRepresentable {
             guard ReaderSectionControl.sections.indices.contains(sender.selectedSegment) else { return }
             let next = ReaderSectionControl.sections[sender.selectedSegment]
             if next == "read" && parent.selection == "read" { parent.readAgain() }
-            else { parent.select(next) }
+            else {
+                #if DEBUG
+                SectionSwitchTiming.begin(from: parent.selection, to: next, event: NSApp.currentEvent, view: sender.window?.contentView)
+                #endif
+                parent.select(next)
+            }
         }
     }
 }
