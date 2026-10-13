@@ -17,13 +17,14 @@ private struct FilterTableRow: Identifiable {
 }
 
 struct FiltersView: View {
+    static let searchPrompt = "Search filters, notes, and citations"
     @ObservedObject var store: RecordStore
+    @Binding var query: String
     var openProfile: (String) -> Void
     @State private var selection = Set<String>()
     @State private var editing: String?
     @State private var mobileSort = "order"
     @State private var dragging: String?
-    @State private var query = ""
     @State private var statusFilter = "all"
     @State private var effectFilter = "all"
     @State private var typeFilter = "all"
@@ -67,7 +68,7 @@ struct FiltersView: View {
                 Text("\(rows.count) of \(store.archive.rules.count) filters").font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 if !deletions.isEmpty {
-                    Button("Undo deletion") { undoDeletion() }.keyboardShortcut("z", modifiers: .command)
+                    Button("Undo deletion") { undoDeletion() }.modifier(SectionShortcut(shortcut: KeyboardShortcut("z", modifiers: .command)))
                 }
                 Button("Saved notes") { showRecords = true }
             }.padding(12)
@@ -77,8 +78,8 @@ struct FiltersView: View {
         }
         #if os(iOS)
         .navigationTitle("Filters")
+        .searchable(text: $query, prompt: Self.searchPrompt)
         #endif
-        .searchable(text: $query, prompt: "Search filters, notes, and citations")
         .onChange(of: rows.map(\.id)) { _, ids in
             selection.formIntersection(Set(ids))
         }
@@ -142,7 +143,7 @@ struct FiltersView: View {
     private var bulkControls: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 14) {
-                Button("Select all shown") { selectAllInContext() }.keyboardShortcut("a", modifiers: .command)
+                Button("Select all shown") { selectAllInContext() }.modifier(SectionShortcut(shortcut: KeyboardShortcut("a", modifiers: .command)))
                 if !selection.isEmpty {
                     Text("\(selection.count) \(selection.count == 1 ? "filter" : "filters") selected").font(.caption)
                     Button("Clear") { selection.removeAll() }

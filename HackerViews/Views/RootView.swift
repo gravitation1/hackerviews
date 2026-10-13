@@ -3,7 +3,10 @@ import SwiftUI
 struct RootView: View {
     @ObservedObject var store: RecordStore
     @StateObject private var workspace: BrowserWorkspace
-    @AppStorage("HackerViews.lastSection") private var section = "read"
+    // Held, not observed: a switch re-renders the views that show the section,
+    // never this one.
+    @State private var sections = SectionSelection()
+    @State private var filterQuery = ""
     @Environment(\.scenePhase) private var phase
 
     init(store: RecordStore) {
@@ -22,10 +25,10 @@ struct RootView: View {
                     }
             }
             #else
-            TabView(selection: $section) {
-                NavigationStack { reading }
+            TabView(selection: Bindable(sections).current) {
+                NavigationStack { ReaderSection(workspace: workspace, available: store.storageAvailable) }
                     .tabItem { Label("Read", systemImage: "newspaper") }.tag("read")
-                NavigationStack { FiltersView(store: store, openProfile: openProfile) }
+                NavigationStack { FiltersView(store: store, query: $filterQuery, openProfile: openProfile) }
                     .tabItem { Label("Filters", systemImage: "line.3.horizontal.decrease") }.tag("filters")
                 NavigationStack { SettingsView(store: store) }
                     .tabItem { Label("Settings", systemImage: "gearshape") }.tag("settings")
@@ -36,7 +39,7 @@ struct RootView: View {
             if store.recoveryNotice != nil {
                 HStack {
                     Text("Recovery was incomplete. Some edits may be missing.")
-                    Button("Review in Settings") { section = "settings" }
+                    Button("Review in Settings") { sections.current = "settings" }
                 }.font(.caption).padding(8)
             }
         }
@@ -55,7 +58,7 @@ struct RootView: View {
             NotificationCenter.default.post(name: Notification.Name("HackerViewsOpenReference"), object: nil)
             workspace.draft = nil
             workspace.open(url)
-            section = "read"
+            sections.current = "read"
             return .handled
         })
         .alert("Couldn’t save your records", isPresented: Binding(get: { store.error != nil }, set: { if !$0 { store.error = nil } })) {
@@ -70,21 +73,25 @@ struct RootView: View {
             }
         }
         .onChange(of: phase) { _, value in
+            sections.save()
             workspace.saveSession()
             if value != .active { workspace.recordVisits() }
             if value == .active { Task { await store.synchronize() } }
         }
+        #if os(macOS)
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in sections.save() }
+        #endif
         .onOpenURL { incoming in
             var url = incoming
             if incoming.scheme == "hackerviews", let components = URLComponents(url: incoming, resolvingAgainstBaseURL: false),
                let value = components.queryItems?.first(where: { $0.name == "url" })?.value, let target = URL(string: value) { url = target }
-            if BrowserTab.isHN(url) { workspace.open(url); section = "read" }
+            if BrowserTab.isHN(url) { workspace.open(url); sections.current = "read" }
         }
     }
 
     #if os(macOS)
     private var sectionPicker: some View {
-        ReaderSectionControl(selection: $section) {
+        SectionPicker(selection: sections) {
             workspace.selected?.scrollToTop()
         }
         .frame(width: 250)
@@ -103,35 +110,18 @@ struct RootView: View {
     #endif
 
     #if os(macOS)
-    /// The reader stays mounted under Filters and Settings: rebuilding it on
-    /// each switch would re-attach the web view, making WebKit lay the page
-    /// out again, and drop the page's own state such as an open find bar.
-    @ViewBuilder private var content: some View {
-        let readerShown = section == "read"
-        ZStack {
-            reading
-                .opacity(readerShown ? 1 : 0)
-                .allowsHitTesting(readerShown)
-                .accessibilityHidden(!readerShown)
-                .environment(\.readerActive, readerShown)
-            switch section {
-            case "filters": FiltersView(store: store, openProfile: openProfile)
-            case "settings": SettingsView(store: store)
-            default: EmptyView()
-            }
-        }
-        .onChange(of: section) { _, value in moveKeyFocus(toReader: value == "read") }
+    private var content: some View {
+        SectionStack(selection: sections, store: store, workspace: workspace, readerAvailable: store.storageAvailable,
+                     filterQuery: $filterQuery, openProfile: openProfile, onSwitch: moveKeyFocus)
     }
 
-    /// Keys typed in Filters or Settings must not reach the hidden page, and
-    /// back in the reader they go to the page again.
-    private func moveKeyFocus(toReader: Bool) {
-        guard let webView = workspace.selected?.displayedPage.webView, let window = webView.window else { return }
-        if toReader {
-            if window.firstResponder === window { window.makeFirstResponder(webView) }
-        } else if let responder = window.firstResponder as? NSView, responder === webView || responder.isDescendant(of: webView) {
-            window.makeFirstResponder(nil)
-        }
+    /// Keys typed in one section must not reach a hidden one: the reader's page
+    /// takes focus when it shows, and any other switch clears it.
+    private func moveKeyFocus(to section: String) {
+        let webView = workspace.selected?.displayedPage.webView
+        guard let window = webView?.window ?? NSApp.keyWindow else { return }
+        if section == "read", let webView, webView.window === window { window.makeFirstResponder(webView) }
+        else { window.makeFirstResponder(nil) }
     }
     #endif
 
@@ -140,24 +130,26 @@ struct RootView: View {
         components.queryItems = [URLQueryItem(name: "id", value: username)]
         guard let url = components.url else { return }
         workspace.open(url)
-        section = "read"
-    }
-
-    @ViewBuilder private var reading: some View {
-        if store.storageAvailable { BrowserView(workspace: workspace) }
-        else {
-            ContentUnavailableView("Your records need recovery", systemImage: "externaldrive.badge.exclamationmark",
-                                   description: Text("Browsing is paused so your blocklist is not bypassed. In Settings, restore the recovery copy or import a valid backup. The unreadable file is preserved."))
-        }
+        sections.current = "read"
     }
 }
 
 #if os(macOS)
+/// The section control, the only part of the toolbar that follows the section.
+private struct SectionPicker: View {
+    let selection: SectionSelection
+    var readAgain: () -> Void
+    var body: some View {
+        ReaderSectionControl(selection: selection.current, select: { selection.current = $0 }, readAgain: readAgain)
+    }
+}
+
 // Target/action also fires when the selected segment is clicked again.
 private struct ReaderSectionControl: NSViewRepresentable {
-    @Binding var selection: String
+    var selection: String
+    var select: (String) -> Void
     var readAgain: () -> Void
-    private static let sections = ["read", "filters", "settings"]
+    private static let sections = SectionSelection.sections
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeNSView(context: Context) -> NSSegmentedControl {
@@ -178,7 +170,7 @@ private struct ReaderSectionControl: NSViewRepresentable {
             guard ReaderSectionControl.sections.indices.contains(sender.selectedSegment) else { return }
             let next = ReaderSectionControl.sections[sender.selectedSegment]
             if next == "read" && parent.selection == "read" { parent.readAgain() }
-            else { parent.selection = next }
+            else { parent.select(next) }
         }
     }
 }

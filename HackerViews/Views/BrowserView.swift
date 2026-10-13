@@ -1,20 +1,8 @@
 import SwiftUI
 import WebKit
 
-/// Whether the reader is the section on screen. On the Mac the reader stays
-/// mounted under the other sections, so switching back is immediate and the
-/// page keeps its state; while hidden it offers no toolbar, title or commands.
-private struct ReaderActiveKey: EnvironmentKey { static let defaultValue = true }
-extension EnvironmentValues {
-    var readerActive: Bool {
-        get { self[ReaderActiveKey.self] }
-        set { self[ReaderActiveKey.self] = newValue }
-    }
-}
-
 struct BrowserView: View {
     @ObservedObject var workspace: BrowserWorkspace
-    @Environment(\.readerActive) private var active
     @State private var showOpen = false
     @State private var address = ""
     @State private var linkError = false
@@ -38,7 +26,7 @@ struct BrowserView: View {
         .navigationTitle("HackerViews")
         #else
         .navigationTitle("")
-        .focusedSceneObject(active ? workspace : nil)
+        .modifier(ReaderWorkspaceFocus(workspace: workspace))
         #endif
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -46,7 +34,7 @@ struct BrowserView: View {
         .toolbar {
             #if os(macOS)
             ToolbarItem(placement: .primaryAction) {
-                if active, let tab = workspace.selected {
+                if let tab = workspace.selected {
                     ReaderToolbarActions(tab: tab,
                         newTab: { workspace.open(URL(string: "https://news.ycombinator.com/")!) },
                         openLink: { showOpen = true })
@@ -112,7 +100,6 @@ private struct BrowserPage: View {
     @State private var findFailed = false
     @State private var findGeneration = 0
     @FocusState private var findFocused: Bool
-    @Environment(\.readerActive) private var active
 
     private func search(backwards: Bool = false) {
         findGeneration += 1
@@ -215,12 +202,10 @@ private struct BrowserPage: View {
             }
         }
         #if os(macOS)
-        .navigationTitle(active && tab.url.flatMap(BrowserTab.topicID) != nil ? (tab.threadTitle ?? "") : "")
-        .focusedSceneObject(active ? tab : nil)
-        .focusedSceneValue(\.pageFind, active ? PageFindActions(
+        .modifier(ReaderPageFocus(tab: tab, find: PageFindActions(
             show: showFind,
             next: { showFind(); search() },
-            previous: { showFind(); search(backwards: true) }) : nil)
+            previous: { showFind(); search(backwards: true) })))
         #endif
         .sheet(isPresented: $showExcerpt) {
             NavigationStack {
@@ -393,12 +378,38 @@ struct PageFindCommands: Commands {
 
 
 #if os(macOS)
+/// The reader's place in the scene while it is on screen: the window title,
+/// and the tab and find actions the menu commands act on. On the Mac the
+/// reader stays mounted under the other sections, which offer none of these.
+private struct ReaderPageFocus: ViewModifier {
+    @ObservedObject var tab: BrowserTab
+    let find: PageFindActions
+    @SectionShown private var shown
+    func body(content: Content) -> some View {
+        content
+            .navigationTitle(shown && tab.url.flatMap(BrowserTab.topicID) != nil ? (tab.threadTitle ?? "") : "")
+            .focusedSceneObject(shown ? tab : nil)
+            .focusedSceneValue(\.pageFind, shown ? find : nil)
+    }
+}
+
+private struct ReaderWorkspaceFocus: ViewModifier {
+    let workspace: BrowserWorkspace
+    @SectionShown private var shown
+    func body(content: Content) -> some View { content.focusedSceneObject(shown ? workspace : nil) }
+}
+
 private struct ReaderToolbarActions: View {
     @ObservedObject var tab: BrowserTab
     let newTab: () -> Void
     let openLink: () -> Void
+    @SectionShown private var shown
 
     var body: some View {
+        if shown { actions }
+    }
+
+    private var actions: some View {
         HStack(spacing: 6) {
             Button(action: tab.back) { Label("Back", systemImage: "chevron.left") }
                 .disabled(!tab.canGoBack).help("Back")

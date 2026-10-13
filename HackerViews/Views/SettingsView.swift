@@ -130,6 +130,11 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .onAppear { rewrites = store.archive.linkRewrites }
         .onChange(of: rewrites) { _, _ in scheduleRewriteSave() }
+        // On the Mac, Settings stays mounted while another section shows, so
+        // leaving it and coming back count as disappearing and appearing.
+        .modifier(SectionVisibilityChange { shown in
+            if shown { rewrites = store.archive.linkRewrites } else { rewriteSave?.cancel(); saveRewrites() }
+        })
         .onDisappear { rewriteSave?.cancel(); saveRewrites() }
         #if os(iOS)
         .navigationTitle("Settings & backups")

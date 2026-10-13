@@ -95,7 +95,7 @@ import SwiftUI
         _ = store.saveRules(rules)
         for (appearance, suffix) in [(NSAppearance.Name.aqua, "light"), (.darkAqua, "dark")] {
             await snapshot(NSHostingView(rootView: FlagSample(store: store, createID: createID, filterID: rules[1].id)), size: NSSize(width: 640, height: 200), appearance: appearance, to: directory + "/flag-" + suffix + ".png")
-            await snapshot(NSHostingView(rootView: FiltersView(store: store, openProfile: { _ in })), size: NSSize(width: 1100, height: 420), appearance: appearance, to: directory + "/filters-" + suffix + ".png")
+            await snapshot(NSHostingView(rootView: FiltersView(store: store, query: .constant(""), openProfile: { _ in })), size: NSSize(width: 1100, height: 420), appearance: appearance, to: directory + "/filters-" + suffix + ".png")
         }
         try? FileManager.default.removeItem(at: dir)
     }
