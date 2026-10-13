@@ -51,7 +51,7 @@ final class RecordStore: ObservableObject {
         } catch { self.error = "Couldn’t dismiss the recovery notice: \(error.localizedDescription)" }
     }
 
-    func current(_ username: String) -> PersonRevision? { people.first { $0.username == username } }
+    func current(_ username: String) -> PersonRevision? { archive.current(for: username) }
 
     @discardableResult
     func save(username: String, blocked: Bool, note: String, citations: [Citation], preferred: Bool? = nil, rules: [FilterRule]? = nil) -> Bool {

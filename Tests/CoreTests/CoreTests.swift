@@ -15,6 +15,18 @@ import Testing
     #expect(left.revisions.count == 2)
 }
 
+@Test func onePersonsCurrentRevisionMatchesTheFullList() throws {
+    var revisions: [PersonRevision] = []
+    for (index, name) in ["carol", "alice", "bob", "alice", "carol", "alice"].enumerated() {
+        var revision = PersonRevision(username: name, isBlocked: index % 2 == 0, note: "Note \(index)", citations: [])
+        revision.modifiedAt = Date(timeIntervalSince1970: index == 5 ? 103 : Double(100 + index % 4))
+        revisions.append(revision)
+    }
+    let archive = RecordArchive(revisions: revisions)
+    for person in archive.current { #expect(archive.current(for: person.username) == person) }
+    #expect(archive.current(for: "dave") == nil)
+}
+
 @Test func unblockingKeepsCitationsAndEarlierReason() throws {
     let citation = Citation(url: "https://news.ycombinator.com/item?id=123", author: "alice", excerpt: "Evidence before deletion", context: "A discussion")
     var first = PersonRevision(username: "alice", isBlocked: true, note: "Original reason", citations: [citation])

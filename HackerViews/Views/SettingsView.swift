@@ -134,7 +134,9 @@ struct SettingsView: View {
         #if os(iOS)
         .navigationTitle("Settings & backups")
         #endif
-        .fileExporter(isPresented: $exporting, document: BackupDocument(archive: store.archive), contentType: .json,
+        // The backup is encoded only while the exporter is open: encoding the
+        // whole archive is too slow to repeat on every render.
+        .fileExporter(isPresented: $exporting, document: exporting ? BackupDocument(archive: store.archive) : nil, contentType: .json,
                       defaultFilename: "hackerviews-\(Date().formatted(.iso8601.year().month().day()))") { result in
             if case .failure(let error) = result { store.error = error.localizedDescription }
         }

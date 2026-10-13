@@ -34,15 +34,18 @@ struct FiltersView: View {
     @State private var profileToOpen: String?
     private var rows: [FilterTableRow] {
         store.archive.rules.enumerated().map { FilterTableRow(rule: $0.element, order: $0.offset + 1) }.filter { row in
-            let people = row.rule.assignedUsers.compactMap { store.current($0) }
-            let searchable = [row.name, row.matches, row.effectText] + Array(row.rule.assignedUsers) + people.flatMap { person in
-                [person.note] + person.citations.flatMap { [$0.context, $0.excerpt, $0.annotation, $0.url] }
-            }
-            return (query.isEmpty || searchable.contains { $0.localizedCaseInsensitiveContains(query) }) &&
+            (query.isEmpty || matchesQuery(row)) &&
                 (statusFilter == "all" || row.rule.enabled == (statusFilter == "active")) &&
                 (effectFilter == "all" || row.rule.effect.rawValue == effectFilter) &&
                 (typeFilter == "all" || (typeFilter == "account" ? !row.rule.assignedUsers.isEmpty : row.rule.conditions.isActive))
         }.sorted(using: sortOrder)
+    }
+    private func matchesQuery(_ row: FilterTableRow) -> Bool {
+        let people = row.rule.assignedUsers.compactMap { store.current($0) }
+        let searchable = [row.name, row.matches, row.effectText] + Array(row.rule.assignedUsers) + people.flatMap { person in
+            [person.note] + person.citations.flatMap { [$0.context, $0.excerpt, $0.annotation, $0.url] }
+        }
+        return searchable.contains { $0.localizedCaseInsensitiveContains(query) }
     }
     private var canReorder: Bool {
         query.isEmpty && statusFilter == "all" && effectFilter == "all" && typeFilter == "all" &&

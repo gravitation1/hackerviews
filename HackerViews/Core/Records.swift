@@ -77,6 +77,11 @@ public struct RecordArchive: Codable, Sendable {
         }.sorted { $0.username.localizedStandardCompare($1.username) == .orderedAscending }
     }
 
+    /// The latest revision for one person, without building the whole list.
+    public func current(for username: String) -> PersonRevision? {
+        revisions.filter { $0.username == username }.max(by: Self.older)
+    }
+
     public var blockedUsers: Set<String> { Set(current.filter(\.isBlocked).map(\.username)) }
 
     public func history(for username: String) -> [PersonRevision] {
