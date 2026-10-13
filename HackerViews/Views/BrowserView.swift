@@ -1,8 +1,20 @@
 import SwiftUI
 import WebKit
 
+/// Whether the reader is the section on screen. On the Mac the reader stays
+/// mounted under the other sections, so switching back is immediate and the
+/// page keeps its state; while hidden it offers no toolbar, title or commands.
+private struct ReaderActiveKey: EnvironmentKey { static let defaultValue = true }
+extension EnvironmentValues {
+    var readerActive: Bool {
+        get { self[ReaderActiveKey.self] }
+        set { self[ReaderActiveKey.self] = newValue }
+    }
+}
+
 struct BrowserView: View {
     @ObservedObject var workspace: BrowserWorkspace
+    @Environment(\.readerActive) private var active
     @State private var showOpen = false
     @State private var address = ""
     @State private var linkError = false
@@ -26,7 +38,7 @@ struct BrowserView: View {
         .navigationTitle("HackerViews")
         #else
         .navigationTitle("")
-        .focusedSceneObject(workspace)
+        .focusedSceneObject(active ? workspace : nil)
         #endif
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
@@ -34,7 +46,7 @@ struct BrowserView: View {
         .toolbar {
             #if os(macOS)
             ToolbarItem(placement: .primaryAction) {
-                if let tab = workspace.selected {
+                if active, let tab = workspace.selected {
                     ReaderToolbarActions(tab: tab,
                         newTab: { workspace.open(URL(string: "https://news.ycombinator.com/")!) },
                         openLink: { showOpen = true })
@@ -100,6 +112,7 @@ private struct BrowserPage: View {
     @State private var findFailed = false
     @State private var findGeneration = 0
     @FocusState private var findFocused: Bool
+    @Environment(\.readerActive) private var active
 
     private func search(backwards: Bool = false) {
         findGeneration += 1
@@ -202,12 +215,12 @@ private struct BrowserPage: View {
             }
         }
         #if os(macOS)
-        .navigationTitle(tab.url.flatMap(BrowserTab.topicID) != nil ? (tab.threadTitle ?? "") : "")
-        .focusedSceneObject(tab)
-        .focusedSceneValue(\.pageFind, PageFindActions(
+        .navigationTitle(active && tab.url.flatMap(BrowserTab.topicID) != nil ? (tab.threadTitle ?? "") : "")
+        .focusedSceneObject(active ? tab : nil)
+        .focusedSceneValue(\.pageFind, active ? PageFindActions(
             show: showFind,
             next: { showFind(); search() },
-            previous: { showFind(); search(backwards: true) }))
+            previous: { showFind(); search(backwards: true) }) : nil)
         #endif
         .sheet(isPresented: $showExcerpt) {
             NavigationStack {

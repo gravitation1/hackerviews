@@ -102,13 +102,38 @@ struct RootView: View {
     }
     #endif
 
+    #if os(macOS)
+    /// The reader stays mounted under Filters and Settings: rebuilding it on
+    /// each switch would re-attach the web view, making WebKit lay the page
+    /// out again, and drop the page's own state such as an open find bar.
     @ViewBuilder private var content: some View {
-        switch section {
-        case "filters": FiltersView(store: store, openProfile: openProfile)
-        case "settings": SettingsView(store: store)
-        default: reading
+        let readerShown = section == "read"
+        ZStack {
+            reading
+                .opacity(readerShown ? 1 : 0)
+                .allowsHitTesting(readerShown)
+                .accessibilityHidden(!readerShown)
+                .environment(\.readerActive, readerShown)
+            switch section {
+            case "filters": FiltersView(store: store, openProfile: openProfile)
+            case "settings": SettingsView(store: store)
+            default: EmptyView()
+            }
+        }
+        .onChange(of: section) { _, value in moveKeyFocus(toReader: value == "read") }
+    }
+
+    /// Keys typed in Filters or Settings must not reach the hidden page, and
+    /// back in the reader they go to the page again.
+    private func moveKeyFocus(toReader: Bool) {
+        guard let webView = workspace.selected?.displayedPage.webView, let window = webView.window else { return }
+        if toReader {
+            if window.firstResponder === window { window.makeFirstResponder(webView) }
+        } else if let responder = window.firstResponder as? NSView, responder === webView || responder.isDescendant(of: webView) {
+            window.makeFirstResponder(nil)
         }
     }
+    #endif
 
     private func openProfile(_ username: String) {
         var components = URLComponents(string: "https://news.ycombinator.com/user")!
