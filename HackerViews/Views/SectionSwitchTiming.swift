@@ -4,7 +4,7 @@ import QuartzCore
 
 /// Times a section switch in the running app and writes it to the debug
 /// performance trace as `section.switch`, all in milliseconds from the
-/// click's event timestamp:
+/// timestamp of the input event that made it (`input` names its kind):
 ///
 /// - `actionMs`: the section control's action runs.
 /// - `commitMs`: the end of the switch's own work, the first run of busy
@@ -24,6 +24,7 @@ import QuartzCore
 
     private let from: String, to: String
     private let input: CFTimeInterval
+    private let inputKind: String
     private let action = CACurrentMediaTime()
     private let actionCPU = SectionSwitchTiming.threadCPU()
     private var observer: CFRunLoopObserver?
@@ -39,13 +40,21 @@ import QuartzCore
 
     static func begin(from: String, to: String, event: NSEvent?, view: NSView?) {
         current?.finish()
-        let timing = SectionSwitchTiming(from: from, to: to, input: event?.timestamp ?? CACurrentMediaTime())
+        let kind: String
+        switch event?.type {
+        case .leftMouseDown?: kind = "mouseDown"
+        case .leftMouseUp?: kind = "mouseUp"
+        case .keyDown?: kind = "keyDown"
+        case nil: kind = "none"
+        default: kind = "other"
+        }
+        let timing = SectionSwitchTiming(from: from, to: to, input: event?.timestamp ?? CACurrentMediaTime(), inputKind: kind)
         current = timing
         timing.start(view: view)
     }
 
-    private init(from: String, to: String, input: CFTimeInterval) {
-        self.from = from; self.to = to; self.input = input
+    private init(from: String, to: String, input: CFTimeInterval, inputKind: String) {
+        self.from = from; self.to = to; self.input = input; self.inputKind = inputKind
         lastPassCPU = actionCPU
         settled = action
     }
@@ -97,7 +106,7 @@ import QuartzCore
         func ms(_ time: CFTimeInterval?) -> Double { time.map { ($0 - input) * 1000 } ?? -1 }
         let frame = commit.flatMap { commit in refreshes.first { $0 >= commit } }
         ReaderTrace.event("section.switch", [
-            "from": from, "to": to,
+            "from": from, "to": to, "input": inputKind,
             "actionMs": ms(action), "commitMs": ms(commit), "cpuMs": commitCPU,
             "frameMs": ms(frame), "settledMs": ms(settled),
             "busyPasses": busyPasses, "busyCpuMs": busyCPU,

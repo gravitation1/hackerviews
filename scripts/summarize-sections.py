@@ -34,4 +34,4 @@ for target in sorted(by_target):
     print(f'{target:10} {len(group):3}  ' + '  '.join(f'{stats([r.get(f, -1) for r in group]):>20}' for f in fields))
 print('\nLast 10:')
 for row in rows[-10:]:
-    print(f'  {row["from"]:>8} -> {row["to"]:<8} ' + ' '.join(f'{f}={row.get(f, -1):.1f}' for f in fields))
+    print(f'  {row["from"]:>8} -> {row["to"]:<8} {row.get("input", "?"):>9} ' + ' '.join(f'{f}={row.get(f, -1):.1f}' for f in fields))

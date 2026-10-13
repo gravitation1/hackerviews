@@ -153,8 +153,8 @@ private struct ReaderSectionControl: NSViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
     func makeNSView(context: Context) -> NSSegmentedControl {
-        let control = NSSegmentedControl(labels: ["Read", "Filters", "Settings"], trackingMode: .selectOne,
-                                         target: context.coordinator, action: #selector(Coordinator.select(_:)))
+        let control = PressSegmentedControl(labels: ["Read", "Filters", "Settings"], trackingMode: .selectOne,
+                                            target: context.coordinator, action: #selector(Coordinator.select(_:)))
         control.segmentDistribution = .fillEqually
         control.setAccessibilityLabel("Section")
         return control
@@ -162,6 +162,19 @@ private struct ReaderSectionControl: NSViewRepresentable {
     func updateNSView(_ control: NSSegmentedControl, context: Context) {
         context.coordinator.parent = self
         control.selectedSegment = Self.sections.firstIndex(of: selection) ?? 0
+    }
+    /// Switches on mouse-down, as browser tab strips do. A segmented control
+    /// sends its action on mouse-up, which keeps every switch waiting for the
+    /// button's release, about a tenth of a second.
+    final class PressSegmentedControl: NSSegmentedControl {
+        override func mouseDown(with event: NSEvent) {
+            guard segmentCount > 0, bounds.width > 0 else { return super.mouseDown(with: event) }
+            let point = convert(event.locationInWindow, from: nil)
+            let index = min(segmentCount - 1, max(0, Int(point.x / (bounds.width / CGFloat(segmentCount)))))
+            guard isEnabled(forSegment: index) else { return }
+            selectedSegment = index
+            sendAction(action, to: target)
+        }
     }
     @MainActor final class Coordinator: NSObject {
         var parent: ReaderSectionControl
