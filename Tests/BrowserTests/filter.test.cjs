@@ -2231,3 +2231,33 @@ test('hovering a username previews the newest note saved about them, and a name 
   p.dom.window.close();
 });
 
+test('a preview of a flagged or dead comment shows HN\'s text for a showdead account, as the thread does', async () => {
+  const p = await lazyPage(); const w = p.dom.window, api = w.HackerViews; w.__hackerViewsPreviewDelay = 0;
+  const hnRow = (id, mark, body) => `<tr class="athing comtr" id="${id}"><td class="default"><span class="comhead"><a href="user?id=reader" class="hnuser">reader</a> <span class="age"><a href="item?id=${id}">1 hour ago</a></span> ${mark} </span><div class="comment"><div class="commtext c5a">${body}</div></div></td></tr>`;
+  const fetched = [];
+  w.fetch = async url => { fetched.push(String(url)); return {ok: true, text: async () => String(url).endsWith('id=1') ? `<table class="fatitem"><tr class="athing" id="1"><td><span class="titleline"><a href="https://example.com">Topic</a></span></td></tr></table><table class="comment-tree">${hnRow(2, '[flagged]', 'Plainly <i>visible</i>')}</table>` : `<table class="fatitem">${hnRow(50, '[dead]', 'Elsewhere')}</table>`}; };
+  let request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  api.lazyResult(request.token, [{id: 1, effect: 'visible', item: {id: 1, type: 'story', by: 'op', title: 'Topic', kids: [2, 3]}}]);
+  await new Promise(r => setTimeout(r, 5));
+  request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  api.lazyResult(request.token, [
+    {id: 2, effect: 'visible', item: {id: 2, type: 'comment', by: 'reader', parent: 1, time: Date.now() / 1000 - 3600, dead: true, text: '[flagged]'}},
+    {id: 3, effect: 'visible', item: {id: 3, type: 'comment', by: 'other', parent: 1, time: Date.now() / 1000 - 60, text: 'See <a href="item?id=50">this</a>'}}]);
+  await new Promise(r => setTimeout(r, 20));
+  assert.equal(p.doc.getElementById('2').querySelector('.commtext').textContent, 'Plainly visible', 'the thread shows HN\'s text');
+  const card = () => p.doc.querySelector('.hv-preview');
+  const hover = async link => { link.dispatchEvent(new w.MouseEvent('mouseover', {bubbles: true})); await new Promise(r => setTimeout(r, 20)); };
+  await hover([...p.doc.getElementById('3').querySelectorAll('.hv-comment-nav a')].find(a => a.textContent === 'prev'));
+  assert.equal(card().querySelector('.hv-preview-text').textContent, 'Plainly visible', 'and so does the preview');
+  assert.equal(card().querySelector('.hv-preview-meta').textContent, 'reader · 1 hour ago · [flagged]');
+  assert.deepEqual(fetched, ['https://news.ycombinator.com/item?id=1'], 'from the thread\'s copy of HN\'s page, with no request of its own');
+  const before = fetched.length;
+  await hover(p.doc.getElementById('3').querySelector('.commtext a'));
+  api.linkPreview(50, {effect: 'visible', item: {id: 50, type: 'comment', by: 'reader', time: Date.now() / 1000 - 3600, dead: true, text: '[dead]'}});
+  await new Promise(r => setTimeout(r, 20));
+  assert.deepEqual(fetched.slice(before), ['https://news.ycombinator.com/item?id=50'], 'a comment not in the thread is read from HN\'s page for it');
+  assert.equal(card().querySelector('.hv-preview-text').textContent, 'Elsewhere');
+  assert.equal(card().querySelector('.hv-preview-meta').textContent, 'reader · 1 hour ago · [dead]');
+  p.dom.window.close();
+});
+

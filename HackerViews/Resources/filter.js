@@ -873,13 +873,38 @@
   let previewCard = null, previewLink = null, previewShow = 0, previewHide = 0;
   const previewDelay = () => window.__hackerViewsPreviewDelay ?? 400;
   function previewLine(className, ...parts) { const line = document.createElement('div'); line.className = className; line.append(...parts); return line; }
+  // The API carries only "[dead]" or "[flagged]" for a comment HN shows an
+  // account with showdead. The preview shows HN's text, as the thread does:
+  // from the thread's copy of HN's page, or else from HN's page for that one
+  // comment, fetched once. Null until known, or when HN shows no text either.
+  const previewCanonical = new Map(), previewCanonicalRequested = new Set();
+  function previewModerated(item) {
+    if (item.type !== 'comment' || item.deleted || !(item.dead === true || placeholderText(item.text))) return null;
+    const known = canonicalItems.get(item.id) || previewCanonical.get(item.id);
+    if (known) return known.text ? known : null;
+    if (!previewCanonicalRequested.has(item.id)) { previewCanonicalRequested.add(item.id); void loadPreviewCanonical(item.id); }
+    return null;
+  }
+  async function loadPreviewCanonical(id) {
+    if (typeof fetch !== 'function') return;
+    try {
+      const response = await pooledFetch(new URL('/item?id=' + id, 'https://news.ycombinator.com/').href, {credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(10000)});
+      if (!response.ok) throw new Error('status');
+      const row = new DOMParser().parseFromString(await response.text(), 'text/html').getElementById(String(id));
+      if (!row) throw new Error('page');
+      const text = row.querySelector('.commtext');
+      previewCanonical.set(id, {text: text && !placeholderText(text.textContent) ? text.innerHTML : null,
+        marker: (/\[(dead|flagged)\]/.exec(row.querySelector('.comhead')?.textContent || '') || [])[0] || null});
+    } catch (_) { previewCanonicalRequested.delete(id); return; }
+    if (previewLink && Number(previewLink.dataset.hvPreview) === id) renderPreview();
+  }
   function previewBody(entry) {
     if (!entry) return [previewLine('hv-preview-note', 'Loading…')];
     if (filteredEffect(entry.effect)) return [previewLine('hv-preview-note', 'Hidden by your filter' + (entry.label ? ': ' + entry.label : ''))];
     const item = entry.item;
     if (entry.effect === 'unresolved' || !item) return [previewLine('hv-preview-note', entry.label || 'This item couldn’t be checked against your filters.')];
     if (item.deleted) return [previewLine('hv-preview-note', '[deleted]')];
-    const parts = [], meta = [];
+    const parts = [], meta = [], moderated = previewModerated(item);
     if (item.type !== 'comment') {
       const title = previewLine('hv-preview-title', safeBody(item.title || 'Untitled'));
       let site = null; try { site = item.url && new URL(item.url).hostname.replace(/^www\./, ''); } catch (_) {}
@@ -890,10 +915,11 @@
     if (item.by) meta.push((item.type === 'comment' ? '' : 'by ') + item.by);
     if (item.time) meta.push(relativeTime(item.time));
     if (item.type !== 'comment' && Number.isFinite(item.descendants)) meta.push(item.descendants + (item.descendants === 1 ? ' comment' : ' comments'));
-    if (item.dead) meta.push('[dead]');
+    if (moderated) meta.push(moderated.marker || (item.dead ? '[dead]' : '[flagged]'));
+    else if (item.dead) meta.push('[dead]');
     parts.push(previewLine('hv-preview-meta', meta.join(' · ')));
-    if (item.text) {
-      const text = previewLine('hv-preview-text', safeBody(item.text));
+    if (moderated?.text || item.text) {
+      const text = previewLine('hv-preview-text', safeBody(moderated?.text || item.text));
       if (/^fade:(25|50|75)$/.test(entry.effect)) text.style.opacity = String(1 - Number(entry.effect.slice(5)) / 100);
       parts.push(text);
     }
