@@ -2176,6 +2176,15 @@ test('next new previews the new comment it jumps to, and HN\'s own comment navig
   assert.equal(card.querySelector('.hv-preview-text').textContent, 'New reply');
   assert.equal(card.querySelector('.hv-preview-url').textContent, 'Next new comment · N');
   assert.equal(p.messages.filter(m => m.kind === 'linkPreview').length, 0);
+  p.doc.dispatchEvent(new w.KeyboardEvent('keydown', {key: 'Escape'}));
+  // The visit line's Next new button previews the comment it would jump to from here.
+  const button = p.doc.querySelector('.hv-visit .hv-next-new');
+  button.dispatchEvent(new w.MouseEvent('mouseover', {bubbles: true})); await new Promise(r => setTimeout(r, 5));
+  assert.equal(p.doc.querySelector('.hv-preview .hv-preview-text').textContent, 'Nested new', 'the first unread comment in thread order');
+  assert.equal(p.doc.querySelector('.hv-preview .hv-preview-url').textContent, 'Next new comment · N');
+  assert.equal(button.hasAttribute('title'), false, 'the card replaces the tooltip');
+  p.doc.dispatchEvent(new w.KeyboardEvent('keydown', {key: 'Escape'}));
+  assert.equal(button.title, 'Jump to the next new comment (N)', 'which comes back when the card closes');
   w.close();
 
   const flat = await page(`<table><tr class="athing" id="20"><td class="default"><span class="comhead"><a href="user?id=gus" class="hnuser">gus</a><span class="navs"> | <a href="item?id=9">parent</a> | <a href="item?id=8#20">context</a> | <a href="#21" class="clicky">next</a><span class="onstory"> | on: <a href="item?id=8">Topic</a></span></span></span><div class="comment"><div class="commtext c00">Flat</div></div></td></tr></table>`, {blocked: [], url: 'https://news.ycombinator.com/threads?id=gus'});

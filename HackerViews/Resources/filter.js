@@ -862,8 +862,8 @@
     return /^[A-Za-z0-9_-]{1,100}$/.test(name) ? name : '';
   }
   const previewTarget = node => {
-    const link = node?.closest?.('a[data-hv-preview], a.hnuser');
-    return link && (link.dataset.hvPreview || noteAuthor(link)) ? link : null;
+    const link = node?.closest?.('a[data-hv-preview], a.hnuser, button.hv-next-new');
+    return link && (link.dataset.hvPreview || noteAuthor(link) || link.matches('button.hv-next-new:not(:disabled)')) ? link : null;
   };
   function requestUserNote(name) {
     if (userNotes.has(name) || userNoteRequested.has(name)) return;
@@ -918,11 +918,13 @@
   function renderPreview() {
     if (!previewCard || !previewLink) return;
     const name = noteAuthor(previewLink), id = Number(previewLink.dataset.hvPreview);
+    // The card takes over the control's own tooltip while it is open.
+    const covered = name ? !!userNotes.get(name) : !!id;
+    if (covered && previewLink.title) { previewLink.dataset.hvTitle = previewLink.title; previewLink.removeAttribute('title'); }
     if (name) {
       const note = userNotes.get(name);
       // Until the app answers, or when nothing is saved, there is no card.
       if (!note) { previewCard.remove(); previewLink.removeAttribute('aria-describedby'); return; }
-      if (previewLink.title) { previewLink.dataset.hvTitle = previewLink.title; previewLink.removeAttribute('title'); }
       previewCard.replaceChildren(...noteBody(note, previewLink.dataset.hvTitle));
     } else if (id) {
       previewCard.replaceChildren(...previewBody(previewEntry(id)), previewLine('hv-preview-url', previewLink.dataset.hvPreviewNote || previewLink.href));
@@ -948,8 +950,10 @@
   }
   function showPreview(link) {
     clearTimeout(previewShow); clearTimeout(previewHide);
+    // Next new leads wherever the reader now is in the thread.
+    if (link.matches('button.hv-next-new')) { const row = nextNewRow(); if (row) link.dataset.hvPreview = row.id; else delete link.dataset.hvPreview; }
     const id = Number(link.dataset.hvPreview);
-    if (!link.isConnected || !previewTarget(link)) return;
+    if (!link.isConnected || !previewTarget(link) || (link.matches('button') && !id)) return;
     releasePreviewLink();
     previewLink = link;
     if (id && !lazyNodes.get(id)?.entry && !previewRequested.has(id)) { previewRequested.add(id); post({kind: 'linkPreview', id}); }
@@ -1729,7 +1733,7 @@
     if (count || !complete) {
       const next = document.createElement('button'); next.type = 'button'; next.className = 'hv-next-new';
       next.textContent = pendingNextNew ? 'Loading…' : 'Next new'; next.disabled = pendingNextNew;
-      next.title = 'Jump to the next new comment (N)'; next.onclick = () => jumpToNextNew(next); line.append(next);
+      next.title = 'Jump to the next new comment (N)'; next.dataset.hvPreviewNote = 'Next new comment · N'; next.onclick = () => jumpToNextNew(next); line.append(next);
     }
     const anchor = visitBaseline.anchor;
     if (anchor && !visitBaseline.reload && Number.isSafeInteger(anchor.id) && anchor.id > 0 && anchor.id !== topic) {
@@ -1743,9 +1747,10 @@
     lazyRestoreAnchor = {id: anchor.id, top: anchor.top || 0, ancestors: Array.isArray(anchor.ancestors) ? anchor.ancestors : []};
     lazyRestoreY = anchor.y || 0; localPaused = false; lazyPump();
   }
-  function jumpToNextNew(button) {
-    // Thread order, including comments inside collapsed branches, which sit
-    // where their collapsed ancestor sits on screen.
+  // The first unread comment below the top of the viewport, in thread order,
+  // including comments inside collapsed branches, which sit where their
+  // collapsed ancestor sits on screen; the first unread one when none is below.
+  function nextNewRow() {
     const rowTop = row => {
       if (row.getClientRects().length) return row.getBoundingClientRect().top;
       let host = row.closest('.hv-node');
@@ -1753,7 +1758,10 @@
       return host ? host.getBoundingClientRect().top : Infinity;
     };
     const rows = [...document.querySelectorAll('tr.comtr.hv-new')];
-    const target = rows.find(row => rowTop(row) > 60) || rows[0];
+    return rows.find(row => rowTop(row) > 60) || rows[0];
+  }
+  function jumpToNextNew(button) {
+    const target = nextNewRow();
     if (target) { goToRow(target); return; }
     if (threadComplete()) return;
     // Nothing new is loaded yet: keep loading and jump when one arrives.
