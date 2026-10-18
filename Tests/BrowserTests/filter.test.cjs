@@ -2261,3 +2261,18 @@ test('a preview of a flagged or dead comment shows HN\'s text for a showdead acc
   p.dom.window.close();
 });
 
+test('a comment on HN\'s own pages carries note in its navigation line, as the reader\'s comments do', async () => {
+  const comment = (id, togg) => `<tr class="athing comtr" id="${id}"><td><table><tr><td class="ind" indent="0"></td><td class="default"><div><span class="comhead"><a href="user?id=gus" class="hnuser">gus</a> <span class="age"><a href="item?id=${id}">8 hours ago</a></span> <span class="navs"> | <a href="item?id=9">parent</a> | <a href="item?id=8#${id}">context</a>${togg ? ' <a class="togg clicky" n="1" href="javascript:void(0)">[–]</a>' : ''}<span class="onstory"> | on: <a href="item?id=8">Topic</a></span></span></span></div><div class="comment"><div class="commtext c00">Text</div></div></td></tr></table></td></tr>`;
+  const p = await page(`<table>${comment(20, true)}${comment(21, false)}</table>`, {blocked: [], url: 'https://news.ycombinator.com/threads?id=gus'});
+  const line = id => p.doc.getElementById(String(id)).querySelector('.comhead').textContent.replace(/\s+/g, ' ').trim();
+  assert.equal(line(20), 'gus 8 hours ago | parent | context | note [–] | on: Topic');
+  assert.equal(line(21), 'gus 8 hours ago | parent | context | note | on: Topic');
+  const note = p.doc.getElementById('20').querySelector('.navs .qhn-record-text');
+  assert.equal(p.doc.getElementById('20').querySelectorAll('.qhn-record').length, 1, 'no ⋯ beside the name as well');
+  note.click();
+  const record = p.messages.filter(m => m.kind === 'record').at(-1);
+  assert.equal(record.username, 'gus');
+  assert.equal(record.url, 'https://news.ycombinator.com/item?id=20', 'the note is about this comment');
+  p.dom.window.close();
+});
+

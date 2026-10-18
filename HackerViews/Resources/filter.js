@@ -222,6 +222,8 @@
     .hv-reader-actions button, .qhn-record-text { display: inline; min-width: 0; min-height: 0; width: auto; height: auto; padding: 0; margin: 0; border: 0; border-radius: 0;
       background: none; font: inherit; color: inherit; line-height: inherit; vertical-align: baseline; cursor: pointer; }
     .hv-reader-actions button:hover, .qhn-record-text:hover, .hv-reader-actions button.hv-open { color: var(--qhn-accent); text-decoration: underline; }
+    .navs .qhn-record-text { margin: 0; padding: 0; min-width: 0; min-height: 0; border-radius: 0; font: inherit; line-height: inherit; vertical-align: baseline; color: var(--qhn-muted); }
+    .navs .qhn-record-text:hover, .navs .qhn-record-text:focus-visible { background: none; color: var(--qhn-accent); text-decoration: underline; }
     .hv-visit { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin: 8px 0 2px; font-size: 12px; color: var(--qhn-muted); }
     .hv-visit-new { color: var(--qhn-accent); font-weight: 600; }
     .hv-visit-loading { color: var(--qhn-muted); }
@@ -1074,6 +1076,15 @@
       if (!row) {
         const metadata = link.closest('tr');
         if (metadata?.previousElementSibling?.matches('.athing')) row = metadata.previousElementSibling;
+      }
+      // A comment on HN's own pages (a user's comments, new comments) carries
+      // "note" in its navigation line, where the reader's comments have it.
+      const navs = row?.matches('.comtr') && link.closest('.comhead')?.querySelector(':scope .navs');
+      if (navs) {
+        const before = navs.querySelector(':scope > .togg, :scope > .onstory');
+        const parts = [' | ', recordButton(author, row, link, 'note')];
+        if (before) before.before(...parts, ' '); else navs.append(...parts);
+        return;
       }
       (link.nextElementSibling?.matches('.qhn-op') ? link.nextElementSibling : link).after(recordButton(author, row, link));
     });
