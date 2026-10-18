@@ -2119,3 +2119,67 @@ test('a link to an HN item in a comment previews the item on hover, after the fi
   assert.equal(p.messages.filter(m => m.kind === 'linkPreview').length, 4, 'a filter change asks again');
   p.dom.window.close();
 });
+
+test('a comment\'s root, parent, prev and next links preview the comment they lead to', async () => {
+  const p = await lazyPage(); const w = p.dom.window, api = w.HackerViews; w.__hackerViewsPreviewDelay = 0;
+  let request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  api.lazyResult(request.token, [{id: 1, effect: 'visible', item: {id: 1, type: 'story', by: 'op', title: 'Topic', score: 5, descendants: 12, kids: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11]}}]);
+  await new Promise(r => setTimeout(r, 5));
+  request = p.messages.filter(m => m.kind === 'lazyItems').find(m => m.ids.includes(9));
+  api.lazyResult(request.token, request.ids.map(id => ({id, effect: 'visible', item: {id, type: 'comment', by: 'user' + id, parent: 1, time: Date.now() / 1000 - 60, text: 'Comment ' + id}})));
+  // Keep the next batch outside the viewport, so 10 and 11 stay unloaded.
+  w.Element.prototype.getBoundingClientRect = function () { return {top: 10000, bottom: 10100}; };
+  await new Promise(r => setTimeout(r, 5));
+  const nav = (id, label) => [...p.doc.getElementById(String(id)).querySelectorAll('.hv-comment-nav a')].find(a => a.textContent === label);
+  const card = () => p.doc.querySelector('.hv-preview');
+  const hover = async link => { link.dispatchEvent(new w.MouseEvent('mouseover', {bubbles: true})); await new Promise(r => setTimeout(r, 5)); };
+  await hover(nav(3, 'parent'));
+  assert.equal(card().querySelector('.hv-preview-title').textContent, 'Topic');
+  await hover(nav(3, 'prev'));
+  assert.equal(card().querySelector('.hv-preview-meta').textContent, 'user2 · 1 minute ago');
+  assert.equal(card().querySelector('.hv-preview-text').textContent, 'Comment 2');
+  await hover(nav(3, 'next'));
+  assert.equal(card().querySelector('.hv-preview-text').textContent, 'Comment 4');
+  assert.equal(nav(3, 'next').getAttribute('aria-describedby'), 'hv-preview');
+  assert.equal(p.messages.filter(m => m.kind === 'linkPreview').length, 0, 'comments already in the thread are previewed without asking the app');
+  await hover(nav(9, 'next'));
+  assert.deepEqual(p.messages.filter(m => m.kind === 'linkPreview').map(m => m.id), [10], 'a sibling not loaded yet is fetched and checked like any other item');
+  assert.match(card().textContent, /Loading/);
+  api.linkPreview(10, {effect: 'visible', item: {id: 10, type: 'comment', by: 'later', time: Date.now() / 1000 - 60, text: 'Further down'}});
+  assert.equal(card().querySelector('.hv-preview-text').textContent, 'Further down');
+  w.close();
+});
+
+test('next new previews the new comment it jumps to, and HN\'s own comment navigation previews its targets', async () => {
+  const viewedAt = 1700000000;
+  const p = await lazyPage(undefined, {visit: {viewedAt, leftAt: viewedAt + 600, descendants: 3}});
+  const w = p.dom.window, api = w.HackerViews; w.__hackerViewsPreviewDelay = 0;
+  let request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  api.lazyResult(request.token, [{id: 1, effect: 'visible', item: {id: 1, type: 'story', by: 'op', title: 'Topic', descendants: 5, kids: [2, 3]}}]);
+  await new Promise(r => setTimeout(r, 5));
+  request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  api.lazyResult(request.token, [
+    {id: 2, effect: 'visible', item: {id: 2, type: 'comment', by: 'old', parent: 1, time: viewedAt - 100, text: 'Seen before', kids: [4]}},
+    {id: 3, effect: 'visible', item: {id: 3, type: 'comment', by: 'fresh', parent: 1, time: viewedAt + 100, text: 'New reply'}}]);
+  await new Promise(r => setTimeout(r, 5));
+  const newLink = id => p.doc.getElementById(String(id)).querySelector('.hv-comment-nav .hv-new-nav a');
+  assert.equal(newLink(3).hasAttribute('data-hv-preview'), false, 'while its target may not have loaded yet there is nothing to preview');
+  assert.equal(newLink(3).title, 'Jump to the next new comment (N)');
+  request = p.messages.filter(m => m.kind === 'lazyItems').find(m => m.ids.includes(4));
+  api.lazyResult(request.token, [{id: 4, effect: 'visible', item: {id: 4, type: 'comment', by: 'fresh', parent: 2, time: viewedAt + 200, text: 'Nested new'}}]);
+  await new Promise(r => setTimeout(r, 5));
+  assert.equal(newLink(4).dataset.hvPreview, '3');
+  assert.equal(newLink(3).dataset.hvPreview, '4', 'first new previews the first one in thread order');
+  assert.equal(newLink(4).hasAttribute('title'), false, 'the card replaces the tooltip');
+  newLink(4).dispatchEvent(new w.MouseEvent('mouseover', {bubbles: true})); await new Promise(r => setTimeout(r, 5));
+  const card = p.doc.querySelector('.hv-preview');
+  assert.equal(card.querySelector('.hv-preview-text').textContent, 'New reply');
+  assert.equal(card.querySelector('.hv-preview-url').textContent, 'Next new comment · N');
+  assert.equal(p.messages.filter(m => m.kind === 'linkPreview').length, 0);
+  w.close();
+
+  const flat = await page(`<table><tr class="athing" id="20"><td class="default"><span class="comhead"><a href="user?id=gus" class="hnuser">gus</a><span class="navs"> | <a href="item?id=9">parent</a> | <a href="item?id=8#20">context</a> | <a href="#21" class="clicky">next</a><span class="onstory"> | on: <a href="item?id=8">Topic</a></span></span></span><div class="comment"><div class="commtext c00">Flat</div></div></td></tr></table>`, {blocked: [], url: 'https://news.ycombinator.com/threads?id=gus'});
+  const links = Object.fromEntries([...flat.doc.querySelectorAll('.navs a')].map(a => [a.textContent, a.dataset.hvPreview]));
+  assert.deepEqual(links, {parent: '9', context: undefined, next: '21', Topic: undefined});
+  flat.dom.window.close();
+});

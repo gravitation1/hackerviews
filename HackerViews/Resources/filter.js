@@ -818,6 +818,11 @@
       delete a.dataset.hvPreview;
       linkTip(a, target);
     }
+    for (const a of root.querySelectorAll('.comhead .navs a[href]')) {
+      if (!['root', 'parent', 'prev', 'next'].includes(a.textContent.trim())) continue;
+      const href = a.getAttribute('href'), item = /^#\d+$/.test(href) ? Number(href.slice(1)) : hnItemID(href);
+      if (item) a.dataset.hvPreview = item;
+    }
     for (const title of root.querySelectorAll('.titleline')) {
       const link = title.querySelector(':scope > a[href]'), site = title.querySelector('.sitebit .sitestr'), bit = title.querySelector('.sitebit');
       if (!link || !site) continue;
@@ -833,6 +838,9 @@
   // fetches the item and checks it against the filters first, so the preview
   // names the matching filter instead of showing what it hides. The card
   // carries the link's full address in place of the tooltip other links have.
+  // A comment's root, parent, prev, next and next new links preview the
+  // comment they lead to the same way; one already loaded in the thread is
+  // shown as the thread has it, with no request.
   function hnItemID(href) {
     let url; try { url = new URL(href, location.href); } catch (_) { return 0; }
     if (url.hostname !== 'news.ycombinator.com' || url.pathname !== '/item') return 0;
@@ -869,9 +877,12 @@
     }
     return parts;
   }
+  const previewEntry = id => lazyNodes.get(id)?.entry || previews.get(id);
   function renderPreview() {
     if (!previewCard || !previewLink) return;
-    previewCard.replaceChildren(...previewBody(previews.get(Number(previewLink.dataset.hvPreview))), previewLine('hv-preview-url', previewLink.href));
+    const id = Number(previewLink.dataset.hvPreview);
+    if (!id) { hidePreview(); return; }
+    previewCard.replaceChildren(...previewBody(previewEntry(id)), previewLine('hv-preview-url', previewLink.dataset.hvPreviewNote || previewLink.href));
     const text = previewCard.querySelector('.hv-preview-text');
     if (text) text.classList.toggle('hv-clipped', text.scrollHeight > text.clientHeight);
     // Below the link, or above it when there is no room below; the last line
@@ -886,11 +897,11 @@
   }
   function showPreview(link) {
     clearTimeout(previewShow); clearTimeout(previewHide);
-    if (!link.isConnected) return;
+    const id = Number(link.dataset.hvPreview);
+    if (!link.isConnected || !id) return;
     previewLink?.removeAttribute('aria-describedby');
     previewLink = link;
-    const id = Number(link.dataset.hvPreview);
-    if (!previewRequested.has(id)) { previewRequested.add(id); post({kind: 'linkPreview', id}); }
+    if (!lazyNodes.get(id)?.entry && !previewRequested.has(id)) { previewRequested.add(id); post({kind: 'linkPreview', id}); }
     if (!previewCard) {
       previewCard = document.createElement('div'); previewCard.className = 'hv-preview'; previewCard.id = 'hv-preview'; previewCard.setAttribute('role', 'tooltip');
       previewCard.addEventListener('mouseenter', () => clearTimeout(previewHide));
@@ -1626,10 +1637,14 @@
     const unread = [...document.querySelectorAll('tr.comtr.hv-new')], complete = threadComplete();
     for (const wrap of document.querySelectorAll('tr.comtr .hv-new-nav')) {
       const row = wrap.closest('tr.comtr'), link = wrap.querySelector('a');
-      const after = unread.some(other => follows(row, other)), others = unread.some(other => other !== row);
+      const after = unread.find(other => follows(row, other)), others = unread.find(other => other !== row);
       const label = after ? 'next new' : !complete ? 'next new' : others ? 'first new' : '';
       wrap.hidden = !label;
       if (label) link.textContent = pendingNextNew && link === pendingLink ? 'loading…' : label;
+      // The card names the shortcut the tooltip would, so the two never overlap.
+      const target = after || (complete && others);
+      if (target) { link.dataset.hvPreview = target.id; link.removeAttribute('title'); }
+      else { delete link.dataset.hvPreview; link.title = 'Jump to the next new comment (N)'; }
     }
   }
   function renderVisitLine() {
@@ -1964,7 +1979,7 @@
     const link=(label,id)=> {
       if(!id)return;
       if(nav.childNodes.length)nav.append(' | ');
-      const a=hnLink(label,'/item?id='+id);
+      const a=hnLink(label,'/item?id='+id);a.dataset.hvPreview=id;
       a.onclick=event=>{
         if(event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)return;
         if(label==='next' || label==='prev') {
@@ -1990,7 +2005,7 @@
       // A new comment carries the way to the next one, so after a jump the
       // control is where the reader is looking. Labels follow the loaded set.
       const wrap=document.createElement('span');wrap.className='hv-new-nav';
-      const a=document.createElement('a');a.href='#';a.className='hv-new-link';a.textContent='next new';a.title='Jump to the next new comment (N)';
+      const a=document.createElement('a');a.href='#';a.className='hv-new-link';a.textContent='next new';a.title='Jump to the next new comment (N)';a.dataset.hvPreviewNote='Next new comment · N';
       a.onclick=event=>{event.preventDefault();jumpFromNew(node,a);};
       if(nav.childNodes.length)wrap.append(' | ');wrap.append(a);nav.append(wrap);
     }
