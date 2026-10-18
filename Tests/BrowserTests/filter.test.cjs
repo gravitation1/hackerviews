@@ -2183,3 +2183,42 @@ test('next new previews the new comment it jumps to, and HN\'s own comment navig
   assert.deepEqual(links, {parent: '9', context: undefined, next: '21', Topic: undefined});
   flat.dom.window.close();
 });
+
+test('hovering a username previews the newest note saved about them, and a name with none shows nothing', async () => {
+  const p = await page(`<table class="comment-tree"><tr class="athing comtr" id="11"><td><span class="comhead"><a class="hnuser" href="user?id=gus">gus</a> <a class="hnuser" href="user?id=amy">amy</a></span><div class="comment"><span class="commtext">Hi</span></div></td></tr></table>`, {blocked: [], url: 'https://news.ycombinator.com/item?id=10'});
+  const w = p.dom.window, api = w.HackerViews; w.__hackerViewsPreviewDelay = 0;
+  const [gus, amy] = p.doc.querySelectorAll('.comhead .hnuser');
+  gus.title = 'Matching filter: Pedants';
+  const card = () => p.doc.querySelector('.hv-preview');
+  const asked = () => p.messages.filter(m => m.kind === 'userNote').map(m => m.username);
+  const over = link => link.dispatchEvent(new w.MouseEvent('mouseover', {bubbles: true}));
+  over(gus);
+  assert.deepEqual(asked(), ['gus'], 'the note is asked for as soon as the pointer arrives');
+  await new Promise(r => setTimeout(r, 5));
+  assert.equal(card(), null, 'no card until the app answers');
+  api.userNote('gus', {text: 'Argues in bad faith', url: 'https://news.ycombinator.com/item?id=42', title: 'Some story', excerpt: 'Line one\nline two', date: Date.now() / 1000 - 3 * 86400, others: 2});
+  assert.equal(card().querySelector('.hv-preview-mine').textContent, 'Argues in bad faith');
+  assert.equal(card().querySelector('.hv-preview-quote').textContent, 'Line one\nline two');
+  assert.equal(card().querySelector('.hv-preview-meta').textContent, 'Saved 3 days ago · Some story · 2 more');
+  assert.equal(card().querySelector('.hv-preview-meta a').href, 'https://news.ycombinator.com/item?id=42');
+  assert.equal(card().querySelector('.hv-preview-url').textContent, 'Matching filter: Pedants', 'the name\'s tooltip moves into the card');
+  assert.equal(gus.hasAttribute('title'), false);
+  assert.equal(gus.getAttribute('aria-describedby'), 'hv-preview');
+  p.doc.dispatchEvent(new w.KeyboardEvent('keydown', {key: 'Escape'}));
+  assert.equal(card(), null);
+  assert.equal(gus.title, 'Matching filter: Pedants', 'and comes back when the card closes');
+  over(amy); await new Promise(r => setTimeout(r, 5));
+  api.userNote('amy', null);
+  assert.equal(card(), null, 'a name with nothing saved shows no card');
+  over(gus); await new Promise(r => setTimeout(r, 5));
+  assert.deepEqual(asked(), ['gus', 'amy'], 'an answer is kept');
+  assert.ok(card());
+  api.forgetUserNotes();
+  assert.deepEqual(asked(), ['gus', 'amy', 'gus'], 'a change to saved notes asks again for the open card');
+  assert.ok(card(), 'which stays until the answer comes');
+  api.userNote('gus', {text: 'About their profile', url: '', title: '', excerpt: '', date: Date.now() / 1000 - 60, others: 0});
+  assert.equal(card().querySelector('.hv-preview-meta').textContent, 'Profile note · 1 minute ago');
+  assert.equal(card().querySelector('.hv-preview-quote'), null);
+  p.dom.window.close();
+});
+

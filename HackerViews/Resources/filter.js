@@ -390,6 +390,10 @@
     .hv-preview-text pre { margin: 4px 0 0; white-space: pre-wrap; }
     .hv-preview-text a { color: var(--qhn-accent); }
     .hv-preview-url { margin-top: 6px; overflow-wrap: anywhere; }
+    .hv-preview-mine { margin-top: 0; white-space: pre-wrap; }
+    .hv-preview-quote { white-space: pre-wrap; padding-left: 8px; border-left: 2px solid var(--qhn-line); color: var(--qhn-muted); }
+    .hv-preview-meta a { color: var(--qhn-accent); }
+    .hv-preview-text + .hv-preview-meta { margin-top: 6px; }
     pre { max-width: 85vw; overflow: auto; }
     textarea, input, select { font: inherit; color: var(--qhn-text); background: var(--qhn-hover); border: 1px solid var(--qhn-line); border-radius: 5px; padding: 6px; }
     textarea { max-width: 100%; box-sizing: border-box; }
@@ -847,6 +851,24 @@
     const id = Number(url.searchParams.get('id'));
     return Number.isSafeInteger(id) && id > 0 ? id : 0;
   }
+  // A username with a note saved about them previews the newest one on hover:
+  // the note, the comment it points at, and how many more there are. A name
+  // with nothing saved shows no card. The card takes over the name's own
+  // tooltip, such as a matching filter, while it is open.
+  const userNotes = new Map(), userNoteRequested = new Set();
+  function noteAuthor(link) {
+    if (!link.classList.contains('hnuser') || link.closest('.pagetop, .hv-header')) return '';
+    const name = link.textContent.trim();
+    return /^[A-Za-z0-9_-]{1,100}$/.test(name) ? name : '';
+  }
+  const previewTarget = node => {
+    const link = node?.closest?.('a[data-hv-preview], a.hnuser');
+    return link && (link.dataset.hvPreview || noteAuthor(link)) ? link : null;
+  };
+  function requestUserNote(name) {
+    if (userNotes.has(name) || userNoteRequested.has(name)) return;
+    userNoteRequested.add(name); post({kind: 'userNote', username: name});
+  }
   const previews = new Map(), previewRequested = new Set();
   let previewCard = null, previewLink = null, previewShow = 0, previewHide = 0;
   const previewDelay = () => window.__hackerViewsPreviewDelay ?? 400;
@@ -877,14 +899,37 @@
     }
     return parts;
   }
+  function noteBody(note, tip) {
+    const parts = [];
+    if (note.text) parts.push(previewLine('hv-preview-text hv-preview-mine', note.text));
+    if (note.excerpt) parts.push(previewLine('hv-preview-text hv-preview-quote', note.excerpt));
+    const meta = previewLine('hv-preview-meta', (note.url ? 'Saved ' : 'Profile note · ') + relativeTime(note.date));
+    let url = null; try { url = note.url && new URL(note.url); } catch (_) {}
+    if (url && ['http:', 'https:'].includes(url.protocol)) {
+      const source = document.createElement('a'); source.href = url.href; source.textContent = note.title || url.href;
+      meta.append(' · ', source);
+    }
+    if (note.others) meta.append(' · ' + note.others + ' more');
+    parts.push(meta);
+    if (tip) parts.push(previewLine('hv-preview-url', tip));
+    return parts;
+  }
   const previewEntry = id => lazyNodes.get(id)?.entry || previews.get(id);
   function renderPreview() {
     if (!previewCard || !previewLink) return;
-    const id = Number(previewLink.dataset.hvPreview);
-    if (!id) { hidePreview(); return; }
-    previewCard.replaceChildren(...previewBody(previewEntry(id)), previewLine('hv-preview-url', previewLink.dataset.hvPreviewNote || previewLink.href));
-    const text = previewCard.querySelector('.hv-preview-text');
-    if (text) text.classList.toggle('hv-clipped', text.scrollHeight > text.clientHeight);
+    const name = noteAuthor(previewLink), id = Number(previewLink.dataset.hvPreview);
+    if (name) {
+      const note = userNotes.get(name);
+      // Until the app answers, or when nothing is saved, there is no card.
+      if (!note) { previewCard.remove(); previewLink.removeAttribute('aria-describedby'); return; }
+      if (previewLink.title) { previewLink.dataset.hvTitle = previewLink.title; previewLink.removeAttribute('title'); }
+      previewCard.replaceChildren(...noteBody(note, previewLink.dataset.hvTitle));
+    } else if (id) {
+      previewCard.replaceChildren(...previewBody(previewEntry(id)), previewLine('hv-preview-url', previewLink.dataset.hvPreviewNote || previewLink.href));
+    } else { hidePreview(); return; }
+    if (!previewCard.isConnected) document.body.append(previewCard);
+    previewLink.setAttribute('aria-describedby', 'hv-preview');
+    for (const text of previewCard.querySelectorAll('.hv-preview-text')) text.classList.toggle('hv-clipped', text.scrollHeight > text.clientHeight);
     // Below the link, or above it when there is no room below; the last line
     // of a wrapped link is the one the pointer is nearest.
     const rects = previewLink.getClientRects(), first = rects[0], last = rects[rects.length - 1];
@@ -895,46 +940,53 @@
     previewCard.style.left = Math.max(8, Math.min(last.left, innerWidth - width - 8)) + 'px';
     previewCard.style.top = top + 'px';
   }
+  function releasePreviewLink() {
+    if (!previewLink) return;
+    previewLink.removeAttribute('aria-describedby');
+    if (previewLink.dataset.hvTitle !== undefined) { if (!previewLink.title) previewLink.title = previewLink.dataset.hvTitle; delete previewLink.dataset.hvTitle; }
+    previewLink = null;
+  }
   function showPreview(link) {
     clearTimeout(previewShow); clearTimeout(previewHide);
     const id = Number(link.dataset.hvPreview);
-    if (!link.isConnected || !id) return;
-    previewLink?.removeAttribute('aria-describedby');
+    if (!link.isConnected || !previewTarget(link)) return;
+    releasePreviewLink();
     previewLink = link;
-    if (!lazyNodes.get(id)?.entry && !previewRequested.has(id)) { previewRequested.add(id); post({kind: 'linkPreview', id}); }
+    if (id && !lazyNodes.get(id)?.entry && !previewRequested.has(id)) { previewRequested.add(id); post({kind: 'linkPreview', id}); }
     if (!previewCard) {
       previewCard = document.createElement('div'); previewCard.className = 'hv-preview'; previewCard.id = 'hv-preview'; previewCard.setAttribute('role', 'tooltip');
       previewCard.addEventListener('mouseenter', () => clearTimeout(previewHide));
       previewCard.addEventListener('mouseleave', schedulePreviewHide);
     }
-    document.body.append(previewCard);
-    link.setAttribute('aria-describedby', 'hv-preview');
     renderPreview();
   }
   function hidePreview() {
     clearTimeout(previewShow); clearTimeout(previewHide);
-    previewLink?.removeAttribute('aria-describedby'); previewLink = null; previewCard?.remove();
+    releasePreviewLink(); previewCard?.remove();
   }
   function schedulePreviewHide() { clearTimeout(previewHide); previewHide = setTimeout(hidePreview, 200); }
   function hoverPreview(link) {
     clearTimeout(previewHide);
     if (link === previewLink) return;
     clearTimeout(previewShow);
+    // A note is local to the app, so it is asked for at once and is ready
+    // by the time the card is due.
+    const name = noteAuthor(link); if (name) requestUserNote(name);
     previewShow = setTimeout(() => showPreview(link), previewDelay());
   }
   document.addEventListener('mouseover', event => {
     if (previewCard?.contains(event.target)) { clearTimeout(previewHide); return; }
-    const link = event.target.closest?.('a[data-hv-preview]');
+    const link = previewTarget(event.target);
     if (link) hoverPreview(link);
   });
   document.addEventListener('mouseout', event => {
-    const link = event.target.closest?.('a[data-hv-preview]');
+    const link = previewTarget(event.target);
     if (!link || link.contains(event.relatedTarget)) return;
     clearTimeout(previewShow);
     if (link === previewLink && !previewCard?.contains(event.relatedTarget)) schedulePreviewHide();
   });
-  document.addEventListener('focusin', event => { const link = event.target.closest?.('a[data-hv-preview]'); if (link) hoverPreview(link); });
-  document.addEventListener('focusout', event => { if (event.target === previewLink || event.target.closest?.('a[data-hv-preview]')) { clearTimeout(previewShow); schedulePreviewHide(); } });
+  document.addEventListener('focusin', event => { const link = previewTarget(event.target); if (link) hoverPreview(link); });
+  document.addEventListener('focusout', event => { if (event.target === previewLink || previewTarget(event.target)) { clearTimeout(previewShow); schedulePreviewHide(); } });
   document.addEventListener('keydown', event => { if (event.key === 'Escape' && previewLink) hidePreview(); });
   document.addEventListener('click', event => { if (previewLink && !previewCard?.contains(event.target)) hidePreview(); }, true);
   window.addEventListener('scroll', () => { if (previewLink) hidePreview(); }, {passive: true});
@@ -943,6 +995,17 @@
   function linkPreview(id, entry) {
     previews.set(id, entry);
     if (previewLink && Number(previewLink.dataset.hvPreview) === id) renderPreview();
+  }
+  function userNote(name, note) {
+    userNoteRequested.delete(name); userNotes.set(name, note || null);
+    if (previewLink && noteAuthor(previewLink) === name) renderPreview();
+  }
+  // Saved notes changed: an open card asks again and keeps showing until
+  // the answer replaces it.
+  function forgetUserNotes() {
+    userNotes.clear(); userNoteRequested.clear();
+    const name = previewLink && noteAuthor(previewLink);
+    if (name) requestUserNote(name);
   }
   function addControls() {
     renderHeader();
@@ -2634,7 +2697,7 @@
     resolvePartial(token, decisions, labels = {}, inherited = {}) { finish(token, decisions, false, labels, true, inherited); },
     resolve(token, decisions, labels = {}, inherited = {}) { finish(token, decisions, false, labels, false, inherited); },
     visitResults(results) { paintVisits(results); },
-    linkPreview,
+    linkPreview, userNote, forgetUserNotes,
     setLinkRewrites(rules) { linkRewrites = (rules || []).filter(rule => rule && rule.from && rule.to); annotateLinks(document); },
     refreshVisits,
     retry() { process(); }

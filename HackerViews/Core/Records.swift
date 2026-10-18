@@ -184,6 +184,41 @@ public struct RecordArchive: Codable, Sendable {
     }
 }
 
+/// The newest thing saved about a person, for the preview on their name.
+public struct LatestNote: Equatable, Sendable {
+    public var text: String
+    /// The saved reference's permalink, title and captured text; empty for the profile note.
+    public var url = "", title = "", excerpt = ""
+    public var date: Date
+    /// How many other notes and references the person has.
+    public var others: Int
+}
+
+extension RecordArchive {
+    /// The person's newest saved reference, or their profile note when it was
+    /// last written after that reference was saved.
+    public func latestNote(for username: String) -> LatestNote? {
+        guard let person = current(for: username) else { return nil }
+        let note = person.note.trimmingCharacters(in: .whitespacesAndNewlines)
+        let total = person.citations.count + (note.isEmpty ? 0 : 1)
+        guard total > 0 else { return nil }
+        var noteDate = person.modifiedAt
+        if !note.isEmpty {
+            for revision in history(for: username) {
+                guard revision.note == person.note else { break }
+                noteDate = revision.modifiedAt
+            }
+        }
+        let citation = person.citations.max { $0.capturedAt < $1.capturedAt }
+        if let citation, note.isEmpty || citation.capturedAt >= noteDate {
+            return LatestNote(text: citation.annotation.trimmingCharacters(in: .whitespacesAndNewlines),
+                              url: citation.url, title: citation.context, excerpt: citation.excerpt,
+                              date: citation.capturedAt, others: total - 1)
+        }
+        return LatestNote(text: note, date: noteDate, others: total - 1)
+    }
+}
+
 public enum ArchiveError: LocalizedError {
     case unsupportedVersion, invalidRecord, tooLarge, conflictingID
     public var errorDescription: String? {

@@ -513,3 +513,32 @@ import Testing
     archive.filterRevisions?.append(legacy)
     #expect(archive.effectiveFilterRevision?.id == tied.id)
 }
+
+@Test func latestNoteIsTheNewestReferenceOrTheProfileNoteWrittenAfterIt() throws {
+    let at = { (t: Double) in Date(timeIntervalSince1970: t) }
+    var old = Citation(url: "https://news.ycombinator.com/item?id=1", author: "gus", excerpt: "First", context: "Story one")
+    old.capturedAt = at(100)
+    var recent = Citation(url: "https://news.ycombinator.com/item?id=2", author: "gus", excerpt: "Second", context: "Story two")
+    recent.capturedAt = at(300); recent.annotation = "  Pointer  "
+    var first = PersonRevision(username: "gus", isBlocked: false, note: "Profile", citations: [old])
+    first.modifiedAt = at(200)
+    var second = PersonRevision(username: "gus", isBlocked: false, note: "Profile", citations: [old, recent])
+    second.modifiedAt = at(300)
+    var archive = RecordArchive(revisions: [first, second])
+    let latest = try #require(archive.latestNote(for: "gus"))
+    #expect(latest.text == "Pointer" && latest.excerpt == "Second" && latest.title == "Story two")
+    #expect(latest.date == at(300) && latest.others == 2)
+
+    var rewritten = PersonRevision(username: "gus", isBlocked: false, note: "Changed my mind", citations: [old, recent])
+    rewritten.modifiedAt = at(400)
+    archive.revisions.append(rewritten)
+    let note = try #require(archive.latestNote(for: "gus"))
+    #expect(note.text == "Changed my mind" && note.url.isEmpty && note.date == at(400))
+
+    var blockedOnly = PersonRevision(username: "amy", isBlocked: true, note: " ", citations: [])
+    blockedOnly.modifiedAt = at(100)
+    archive.revisions.append(blockedOnly)
+    #expect(archive.latestNote(for: "amy") == nil)
+    #expect(archive.latestNote(for: "nobody") == nil)
+}
+

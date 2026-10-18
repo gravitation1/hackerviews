@@ -184,7 +184,9 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
                 in: nil, in: Self.world, completionHandler: nil)
         }
         recordSubscription = store.$archive.dropFirst().sink { [weak self] archive in
-            guard let self, self.pendingRestoredURL == nil, let url = self.webView.url, url.path == "/user",
+            guard let self, self.pendingRestoredURL == nil else { return }
+            self.webView.callAsyncJavaScript("window.HackerViews?.forgetUserNotes()", arguments: [:], in: nil, in: Self.world, completionHandler: nil)
+            guard let url = self.webView.url, url.path == "/user",
                   let name = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "id" })?.value else { return }
             self.sendProfileRecord(name, archive: archive)
         }
@@ -664,6 +666,15 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
                 guard navigationID == epoch, store.archive.policy == policy else { return }
                 webView.callAsyncJavaScript("window.HackerViews?.linkPreview(id, entry)", arguments: ["id": itemID, "entry": entry], in: nil, in: Self.world, completionHandler: nil)
             }
+        case "userNote":
+            // A hovered username previews the newest note saved about them.
+            guard let name = body["username"] as? String, RecordArchive.validUsername(name) else { return }
+            var note: Any = NSNull()
+            if let latest = store.archive.latestNote(for: name) {
+                note = ["text": latest.text, "url": latest.url, "title": latest.title, "excerpt": latest.excerpt,
+                        "date": latest.date.timeIntervalSince1970, "others": latest.others]
+            }
+            webView.callAsyncJavaScript("window.HackerViews?.userNote(name, note)", arguments: ["name": name, "note": note], in: nil, in: Self.world, completionHandler: nil)
         case "canonical":
             // The reader hands the discussion to HN's own page, such as when
             // HN's HTML offers no comment form the reader can host.
