@@ -1376,7 +1376,7 @@ test('flat comment lists such as newcomments are filtered and styled like thread
   p.resolve({20: 'blocked', 21: 'visible'});
   assert.equal(hidden(p, 20), true, 'a blocked author\'s comment is hidden on a flat list');
   assert.equal(hidden(p, 21), false);
-  assert.ok(p.doc.getElementById('21').querySelector('.qhn-record'), 'flat rows get the ⋯ control');
+  assert.ok(p.doc.getElementById('21').querySelector('.qhn-record'), 'flat rows get the note control');
   p.dom.window.close();
 });
 
@@ -2268,11 +2268,24 @@ test('a comment on HN\'s own pages carries note in its navigation line, as the r
   assert.equal(line(20), 'gus 8 hours ago | parent | context | note [–] | on: Topic');
   assert.equal(line(21), 'gus 8 hours ago | parent | context | note | on: Topic');
   const note = p.doc.getElementById('20').querySelector('.navs .qhn-record-text');
-  assert.equal(p.doc.getElementById('20').querySelectorAll('.qhn-record').length, 1, 'no ⋯ beside the name as well');
+  assert.equal(p.doc.getElementById('20').querySelectorAll('.qhn-record').length, 1, 'and nothing beside the name');
   note.click();
   const record = p.messages.filter(m => m.kind === 'record').at(-1);
   assert.equal(record.username, 'gus');
   assert.equal(record.url, 'https://news.ycombinator.com/item?id=20', 'the note is about this comment');
+  p.dom.window.close();
+});
+
+test('a story in a list carries note in its line before its comments, as the reader\'s story line does', async () => {
+  const story = (id, comments) => `<tr class="athing submission" id="${id}"><td class="title"><span class="titleline"><a href="https://example.com/${id}">Story ${id}</a></span></td></tr><tr><td class="subtext"><span class="subline"><span class="score" id="score_${id}">503 points</span> by <a href="user?id=xb" class="hnuser">xb</a> <span class="age"><a href="item?id=${id}">13 hours ago</a></span> <span id="unv_${id}"></span> | <a href="hide?id=${id}&goto=news">hide</a>${comments ? ` | <a href="item?id=${id}">${comments}</a>` : ''}</span></td></tr><tr class="spacer"><td></td></tr>`;
+  const p = await page(`<table>${story(30, '329&nbsp;comments')}${story(31, 'discuss')}${story(32, '')}</table>`, {blocked: []});
+  const line = id => p.doc.getElementById(String(id)).nextElementSibling.querySelector('.subtext').textContent.replace(/\s+/g, ' ').trim();
+  assert.equal(line(30), '503 points by xb 13 hours ago | hide | note | 329 comments');
+  assert.equal(line(31), '503 points by xb 13 hours ago | hide | note | discuss');
+  assert.equal(line(32), '503 points by xb 13 hours ago | hide | note', 'a job or a story without a comments link ends with it');
+  p.doc.getElementById('30').nextElementSibling.querySelector('.qhn-record').click();
+  const record = p.messages.filter(m => m.kind === 'record').at(-1);
+  assert.equal(record.username, 'xb'); assert.equal(record.url, 'https://news.ycombinator.com/item?id=30');
   p.dom.window.close();
 });
 

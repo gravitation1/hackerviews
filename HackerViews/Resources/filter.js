@@ -221,9 +221,7 @@
     .fatitem td.votelinks:has(.hv-voted) .hv-score { color: var(--qhn-accent); }
     .hv-reader-actions button, .qhn-record-text { display: inline; min-width: 0; min-height: 0; width: auto; height: auto; padding: 0; margin: 0; border: 0; border-radius: 0;
       background: none; font: inherit; color: inherit; line-height: inherit; vertical-align: baseline; cursor: pointer; }
-    .hv-reader-actions button:hover, .qhn-record-text:hover, .hv-reader-actions button.hv-open { color: var(--qhn-accent); text-decoration: underline; }
-    .navs .qhn-record-text { margin: 0; padding: 0; min-width: 0; min-height: 0; border-radius: 0; font: inherit; line-height: inherit; vertical-align: baseline; color: var(--qhn-muted); }
-    .navs .qhn-record-text:hover, .navs .qhn-record-text:focus-visible { background: none; color: var(--qhn-accent); text-decoration: underline; }
+    .hv-reader-actions button:hover, .qhn-record-text:hover, .qhn-record-text:focus-visible, .hv-reader-actions button.hv-open { color: var(--qhn-accent); text-decoration: underline; }
     .hv-visit { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin: 8px 0 2px; font-size: 12px; color: var(--qhn-muted); }
     .hv-visit-new { color: var(--qhn-accent); font-weight: 600; }
     .hv-visit-loading { color: var(--qhn-muted); }
@@ -455,10 +453,6 @@
       color: var(--qhn-text); background: var(--qhn-hover); border: 1px solid var(--qhn-line); border-radius: 5px; }
     .qhn-profile-edit:hover { border-color: var(--qhn-accent); }
     .qhn-profile-edit:focus-visible { outline: 2px solid var(--qhn-accent); outline-offset: 2px; }
-    .qhn-record { margin: 0 2px; border: 0; background: transparent; color: var(--qhn-muted);
-      font: 15px/15px -apple-system, sans-serif; padding: 3px 6px; min-width: 28px; min-height: 26px; box-sizing: border-box;
-      vertical-align: middle; cursor: pointer; border-radius: 4px; }
-    .qhn-record:hover, .qhn-record:focus-visible { background: var(--qhn-hover); color: var(--qhn-accent); }
     #qhn-profile-record button, .qhn-profile-effect button, .qhn-note summary, .reply a {
       min-height: 32px; min-width: 32px; box-sizing: border-box;
     }
@@ -466,14 +460,13 @@
     #qhn-profile-record button:hover, .qhn-profile-effect button:hover, .qhn-note summary:hover {
       background: var(--qhn-hover); color: var(--qhn-accent); border-color: var(--qhn-accent);
     }
-    .qhn-record:focus-visible { outline: 2px solid var(--qhn-accent); outline-offset: 1px; }
-    .qhn-record:active, #qhn-profile-record button:active, .qhn-profile-effect button:active,
+    #qhn-profile-record button:active, .qhn-profile-effect button:active,
     .qhn-note summary:active, .reply a:active {
       background: color-mix(in srgb, var(--qhn-accent) 22%, var(--qhn-bg));
     }
     .qhn-note summary:focus-visible { outline: 2px solid var(--qhn-accent); outline-offset: 2px; }
     @media (pointer: coarse) {
-      .qhn-record:not(.qhn-record-text), #qhn-profile-record button, .qhn-profile-effect button, .qhn-note summary, .reply a {
+      #qhn-profile-record button, .qhn-profile-effect button, .qhn-note summary, .reply a {
         min-width: 44px !important; min-height: 44px !important;
       }
     }
@@ -492,7 +485,6 @@
       .hv-comment-tail { white-space: normal; }
       .hv-comment-nav, .hv-reader-actions, .hv-hn-actions { white-space: nowrap; }
       .qhn-composer { padding: 10px; }
-      .qhn-record { min-height: 32px; min-width: 32px; }
       .votearrow { margin: 6px 4px; }
       textarea { max-width: 92vw; box-sizing: border-box; font-size: 16px; }
     }
@@ -1077,22 +1069,24 @@
         const metadata = link.closest('tr');
         if (metadata?.previousElementSibling?.matches('.athing')) row = metadata.previousElementSibling;
       }
-      // A comment on HN's own pages (a user's comments, new comments) carries
-      // "note" in its navigation line, where the reader's comments have it.
-      const navs = row?.matches('.comtr') && link.closest('.comhead')?.querySelector(':scope .navs');
-      if (navs) {
-        const before = navs.querySelector(':scope > .togg, :scope > .onstory');
-        const parts = [' | ', recordButton(author, row, link, 'note')];
-        if (before) before.before(...parts, ' '); else navs.append(...parts);
-        return;
-      }
-      (link.nextElementSibling?.matches('.qhn-op') ? link.nextElementSibling : link).after(recordButton(author, row, link));
+      // "note" sits where the reader puts it: in a comment's navigation line
+      // before its collapse toggle, and in a story's line before its comments.
+      const note = recordButton(author, row, link);
+      const head = link.closest('.comhead'), subtext = !head && link.closest('.subtext');
+      if (head) {
+        const line = head.querySelector(':scope .navs') || head;
+        const before = line.querySelector(':scope > .togg, :scope > .onstory');
+        if (before) before.before(' | ', note, ' '); else line.append(' | ', note);
+      } else if (subtext) {
+        const comments = [...subtext.querySelectorAll('a[href]')].reverse().find(a => !a.closest('.age') && hnItemID(a.getAttribute('href')));
+        if (comments) comments.before(note, ' | '); else subtext.append(' | ', note);
+      } else (link.nextElementSibling?.matches('.qhn-op') ? link.nextElementSibling : link).after(' | ', note);
     });
   }
-  function recordButton(author, row, link, label = '⋯') {
+  function recordButton(author, row, link) {
     const button = document.createElement('button');
-    button.className = 'qhn-record' + (label === '⋯' ? '' : ' qhn-record-text');
-    button.textContent = label;
+    button.className = 'qhn-record qhn-record-text';
+    button.textContent = 'note';
     button.title = `Flag this user or save a note about this comment`;
     button.setAttribute('aria-label', `Block, highlight, or annotate ${author}`);
     button.addEventListener('click', event => {
@@ -2318,7 +2312,7 @@
       user.dataset.qhnControl='1';
       const ours=document.createElement('span');ours.className='hv-reader-actions';
       const reply=hnLink('reply','/reply?id='+item.id+'&goto='+encodeURIComponent('item?id='+document.body.dataset.hvTopic+'#'+item.id));reply.className='hv-reply';
-      ours.append(' | ',reply);if(item.by)ours.append(' | ',recordButton(item.by,row,user,'note'));
+      ours.append(' | ',reply);if(item.by)ours.append(' | ',recordButton(item.by,row,user));
       headingTail(heading).append(ours,' ');
       const body=document.createElement('div');body.className='comment';body.hidden=!!node.collapsed;
       headingTail(heading).append(collapseToggle(node,collapsed=>{body.hidden=collapsed;}));
@@ -2337,7 +2331,7 @@
         user.dataset.qhnControl='1';
         const hnActions=document.createElement('span');hnActions.className='hv-hn-actions';
         const ours=document.createElement('span');ours.className='hv-reader-actions';
-        if(root){ours.append(' | ',recordButton(item.by,row,user,'note'));if(canComment)ours.append(' | ',commentToggle());}
+        if(root){ours.append(' | ',recordButton(item.by,row,user));if(canComment)ours.append(' | ',commentToggle());}
         const count=document.createElement('span');count.className='hv-comment-count';count.textContent=pluralize(item.descendants ?? 0,'comment');
         md.append('by ',heading,hnActions,ours,' | ',count);
       } else if(item.time)md.append(relativeTime(item.time));
