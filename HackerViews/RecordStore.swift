@@ -2,7 +2,16 @@ import SwiftUI
 
 @MainActor
 final class RecordStore: ObservableObject {
-    @Published private(set) var archive = RecordArchive() { didSet { peopleCache = nil } }
+    @Published private(set) var archive = RecordArchive() {
+        didSet {
+            peopleCache = nil
+            let policy = archive.policy
+            if policy != self.policy { self.policy = policy }
+        }
+    }
+    /// The archive's filter policy, built once per change for every open page
+    /// and filter check; it publishes only when the policy itself changes.
+    @Published private(set) var policy = RecordArchive().policy
     @Published var error: String?
     @Published private(set) var recoveryNotice: String?
     @Published private(set) var syncStatus = "Saved on this device"
@@ -39,6 +48,7 @@ final class RecordStore: ObservableObject {
                 try journal.replay(into: &loaded)
                 try loaded.validate()
                 archive = loaded
+                policy = loaded.policy
                 var cleaned = loaded
                 cleaned.removeLegacyProfilePlaceholders(device: Self.deviceName)
                 if cleaned.revisionCount != loaded.revisionCount { try persist(cleaned) }
@@ -221,7 +231,7 @@ final class RecordStore: ObservableObject {
 
     private func persist(_ value: RecordArchive) throws {
         guard !readFailed else { throw CocoaError(.fileReadCorruptFile) }
-        try value.validate()
+        try value.validate(since: archive)
         try journal.append(value, previous: archive)
         archive = value
     }

@@ -65,16 +65,27 @@ public struct RecordArchive: Codable, Sendable {
         }?.linkRewrites ?? []
     }
 
-    public var preferredUsers: Set<String> { Set(current.filter { $0.isPreferred == true }.map(\.username)) }
-    public var policy: FilterPolicy { FilterPolicy(blocked: blockedUsers, accounts: accountFilters, preferred: preferredUsers, highlights: highlightFilters, rules: rules, linkRewrites: linkRewrites) }
+    public var preferredUsers: Set<String> { Set(latest.filter { $0.isPreferred == true }.map(\.username)) }
+    public var policy: FilterPolicy {
+        let people = latest
+        return FilterPolicy(blocked: Set(people.filter(\.isBlocked).map(\.username)), accounts: accountFilters,
+                            preferred: Set(people.filter { $0.isPreferred == true }.map(\.username)),
+                            highlights: highlightFilters, rules: rules, linkRewrites: linkRewrites)
+    }
     public var revisionCount: Int { revisions.count + (filterRevisions?.count ?? 0) }
 
     public init(revisions: [PersonRevision] = []) { self.revisions = revisions }
 
     public var current: [PersonRevision] {
-        Dictionary(grouping: revisions, by: \.username).values.compactMap { versions in
-            versions.max(by: Self.older)
-        }.sorted { $0.username.localizedStandardCompare($1.username) == .orderedAscending }
+        latest.sorted { $0.username.localizedStandardCompare($1.username) == .orderedAscending }
+    }
+    /// Everyone's latest revision, in no particular order.
+    private var latest: some Collection<PersonRevision> {
+        var newest: [String: PersonRevision] = [:]
+        for revision in revisions where newest[revision.username].map({ Self.older($0, revision) }) ?? true {
+            newest[revision.username] = revision
+        }
+        return newest.values
     }
 
     /// The latest revision for one person, without building the whole list.
@@ -82,7 +93,7 @@ public struct RecordArchive: Codable, Sendable {
         revisions.filter { $0.username == username }.max(by: Self.older)
     }
 
-    public var blockedUsers: Set<String> { Set(current.filter(\.isBlocked).map(\.username)) }
+    public var blockedUsers: Set<String> { Set(latest.filter(\.isBlocked).map(\.username)) }
 
     public func history(for username: String) -> [PersonRevision] {
         revisions.filter { $0.username == username }.sorted { Self.older($1, $0) }
@@ -115,12 +126,18 @@ public struct RecordArchive: Codable, Sendable {
         self = candidate
     }
 
-    public func validate() throws {
+    /// Checks every record, or with `previous`, an archive already checked,
+    /// only the records it does not hold unchanged, so a save costs what it adds.
+    public func validate(since previous: RecordArchive? = nil) throws {
         guard formatVersion == 1 else { throw ArchiveError.unsupportedVersion }
         guard revisionCount <= 100_000 else { throw ArchiveError.tooLarge }
+        let checkedFilters = Dictionary((previous?.filterRevisions ?? []).map { ($0.id, $0) }) { first, _ in first }
+        let checkedPeople = Dictionary((previous?.revisions ?? []).map { ($0.id, $0) }) { first, _ in first }
         var ids = Set<UUID>()
         for r in filterRevisions ?? [] {
-            guard ids.insert(r.id).inserted, r.modifiedAt.timeIntervalSince1970.isFinite,
+            guard ids.insert(r.id).inserted else { throw ArchiveError.invalidRecord }
+            if checkedFilters[r.id] == r { continue }
+            guard r.modifiedAt.timeIntervalSince1970.isFinite,
                   r.filters.isValid, r.highlights?.isValid != false,
                   (r.orderedRules?.count ?? 0) <= 10_000,
                   r.orderedRules?.allSatisfy(\.isValid) != false,
@@ -130,9 +147,10 @@ public struct RecordArchive: Codable, Sendable {
                   Set((r.linkRewrites ?? []).map(\.id)).count == (r.linkRewrites?.count ?? 0) else { throw ArchiveError.invalidRecord }
         }
         for r in revisions {
+            guard ids.insert(r.id).inserted else { throw ArchiveError.invalidRecord }
+            if checkedPeople[r.id] == r { continue }
             guard Self.validUsername(r.username), r.note.utf8.count <= 100_000,
                   r.citations.count <= 200, r.parentIDs.count <= 100_000,
-                  ids.insert(r.id).inserted,
                   r.modifiedAt.timeIntervalSince1970.isFinite,
                   r.createdAt.timeIntervalSince1970.isFinite,
                   r.citations.allSatisfy({ c in
@@ -167,8 +185,10 @@ public struct RecordArchive: Codable, Sendable {
     }
 
     public static func validUsername(_ name: String) -> Bool {
-        !name.isEmpty && name.utf8.count <= 100 &&
-        name.unicodeScalars.allSatisfy { CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-").contains($0) }
+        !name.isEmpty && name.utf8.count <= 100 && name.utf8.allSatisfy { byte in
+            (UInt8(ascii: "a")...UInt8(ascii: "z")).contains(byte) || (UInt8(ascii: "A")...UInt8(ascii: "Z")).contains(byte) ||
+            (UInt8(ascii: "0")...UInt8(ascii: "9")).contains(byte) || byte == UInt8(ascii: "_") || byte == UInt8(ascii: "-")
+        }
     }
 
     public static func validCitationURL(_ value: String) -> Bool {

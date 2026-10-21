@@ -167,8 +167,8 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
         self.retainsPages = retainsPages
         super.init()
         guard !retainsPages else { return }
-        var previous = store.archive.policy
-        subscription = store.$archive.map(\.policy).removeDuplicates().dropFirst().sink { [weak self] policy in
+        var previous = store.policy
+        subscription = store.$policy.dropFirst().sink { [weak self] policy in
             guard let self, self.pendingRestoredURL == nil else { return }
             defer { previous = policy }
             self.installScripts(in: self.webView, policy: policy)
@@ -494,23 +494,28 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
         if #available(iOS 18.4, *) { action.modifierFlags.contains(.alternate) } else { false }
         #endif
     }
+    private static let filterScript = Bundle.main.url(forResource: "filter", withExtension: "js")
+        .flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? ""
+    /// The settings the installed page script starts with; a policy change
+    /// that leaves them alone, such as a new filter order, keeps the script.
+    private var installedSettings: String?
     private func installScripts(in view: WKWebView, policy: FilterPolicy? = nil) {
-        let policy = policy ?? store.archive.policy
+        let policy = policy ?? store.policy
         let rewrites = String(decoding: (try? JSONEncoder().encode(Self.rewriteRules(policy))) ?? Data("[]".utf8), as: UTF8.self)
-        let data = (try? JSONEncoder().encode(Array(policy.blocked))) ?? Data("[]".utf8)
+        let data = (try? JSONEncoder().encode(policy.blocked.sorted())) ?? Data("[]".utf8)
         let names = String(decoding: data, as: UTF8.self)
-        let preferred = String(decoding: (try? JSONEncoder().encode(Array(policy.preferred))) ?? Data("[]".utf8), as: UTF8.self)
-        let scriptURL = Bundle.main.url(forResource: "filter", withExtension: "js")
-        let script = scriptURL.flatMap { try? String(contentsOf: $0, encoding: .utf8) } ?? ""
-        let controller = view.configuration.userContentController
-        controller.removeAllUserScripts()
+        let preferred = String(decoding: (try? JSONEncoder().encode(policy.preferred.sorted())) ?? Data("[]".utf8), as: UTF8.self)
         #if DEBUG
         let diagnostics = "window.__hackerViewsScrollDiagnostics = true; "
         #else
         let diagnostics = ""
         #endif
-        controller.addUserScript(WKUserScript(source: diagnostics + "window.__hackerViewsNetworkPool = true; window.__hackerViewsOrdered = true; window.__hackerViewsOrderedActive = \(policy.rules.contains { $0.isActive }); window.__hackerViewsBlocked = \(names); window.__hackerViewsAccountFiltersActive = \(policy.accounts.isActive); window.__hackerViewsPreferred = \(preferred); window.__hackerViewsHighlightActive = \(policy.highlights.isActive); window.__hackerViewsLinkRewrites = \(rewrites);\n" + script,
-                                              injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Self.world))
+        let settings = diagnostics + "window.__hackerViewsNetworkPool = true; window.__hackerViewsOrdered = true; window.__hackerViewsOrderedActive = \(policy.rules.contains { $0.isActive }); window.__hackerViewsBlocked = \(names); window.__hackerViewsAccountFiltersActive = \(policy.accounts.isActive); window.__hackerViewsPreferred = \(preferred); window.__hackerViewsHighlightActive = \(policy.highlights.isActive); window.__hackerViewsLinkRewrites = \(rewrites);\n"
+        guard settings != installedSettings else { return }
+        installedSettings = settings
+        let controller = view.configuration.userContentController
+        controller.removeAllUserScripts()
+        controller.addUserScript(WKUserScript(source: settings + Self.filterScript, injectionTime: .atDocumentStart, forMainFrameOnly: true, in: Self.world))
     }
 
     private func armTimeout() {
@@ -566,11 +571,11 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
             guard let ids = body["ids"] as? [Int], ids.count <= 20000,
                   ids.allSatisfy({ $0 > 0 }), let token = body["token"] as? Int else { return }
             let epoch = navigationID
-            let policy = store.archive.policy
+            let policy = store.policy
             Task { [weak self] in
                 guard let self else { return }
                 let result = await service.cachedDecisions(ids: ids, rules: policy.rules)
-                guard navigationID == epoch, store.archive.policy == policy else { return }
+                guard navigationID == epoch, store.policy == policy else { return }
                 webView.callAsyncJavaScript("window.HackerViews?.localResult(token, effects, labels, inherited)",
                     arguments: ["token": token, "effects": result.effects, "labels": result.labels, "inherited": result.inherited],
                     in: nil, in: Self.world, completionHandler: nil)
@@ -585,7 +590,7 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
             guard lazyTasks[token] == nil else { return }
             ReaderTrace.event("batch.start", ["tab": id.uuidString, "navigation": navigationID.uuidString, "token": token, "ids": ids])
             let epoch = navigationID
-            let policy = store.archive.policy
+            let policy = store.policy
             let priority = webView.window == nil ? 2 : (body["visible"] as? Bool == true ? 0 : 1)
             lazyTasks[token] = Task { [weak self] in
                 guard let self else { return }
@@ -595,7 +600,7 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
                         group.addTask { await ReaderRequestPool.$priority.withValue(priority) { (itemID, await self.service.checkedContribution(itemID, rules: policy.rules)) } }
                     }
                     for await (itemID, decisions) in group {
-                        guard !Task.isCancelled, navigationID == epoch, store.archive.policy == policy else { group.cancelAll(); return }
+                        guard !Task.isCancelled, navigationID == epoch, store.policy == policy else { group.cancelAll(); return }
                         var entry: [String: Any] = ["id": itemID, "effect": decisions.effects[String(itemID)] ?? "unresolved", "label": decisions.labels[String(itemID)] ?? ""]
                         if let source = decisions.inherited[String(itemID)] { entry["inheritedFrom"] = source }
                         if decisions.effects[String(itemID)] == "unresolved" {
@@ -614,7 +619,7 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
                                 if visit?.id == itemID { visit?.descendants = item.descendants }
                             }
                         } else { entry["effect"] = "unresolved"; entry["reason"] = "This contribution is no longer available from Hacker News." }
-                        guard !Task.isCancelled, navigationID == epoch, store.archive.policy == policy else { group.cancelAll(); return }
+                        guard !Task.isCancelled, navigationID == epoch, store.policy == policy else { group.cancelAll(); return }
                         ReaderTrace.event("comment.deliver", ["tab": self.id.uuidString, "navigation": epoch.uuidString, "token": token, "id": itemID])
                         webView.callAsyncJavaScript("window.HackerViews?.lazyResult(token, entries)", arguments: ["token": token, "entries": [entry]], in: nil, in: Self.world, completionHandler: nil)
                     }
@@ -652,7 +657,7 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
             // shows what the filters would hide.
             guard let itemID = body["id"] as? Int, itemID > 0 else { return }
             let epoch = navigationID
-            let policy = store.archive.policy
+            let policy = store.policy
             Task { [weak self] in
                 guard let self else { return }
                 let decisions = await service.checkedContribution(itemID, rules: policy.rules)
@@ -663,7 +668,7 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
                         entry["item"] = object
                     } else { entry["effect"] = "unresolved"; entry["label"] = "This item is no longer available from Hacker News." }
                 }
-                guard navigationID == epoch, store.archive.policy == policy else { return }
+                guard navigationID == epoch, store.policy == policy else { return }
                 webView.callAsyncJavaScript("window.HackerViews?.linkPreview(id, entry)", arguments: ["id": itemID, "entry": entry], in: nil, in: Self.world, completionHandler: nil)
             }
         case "userNote":
@@ -760,11 +765,11 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
                   URLComponents(url: source, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "id" })?.value == name else { return }
             sendProfileRecord(name, archive: store.archive)
             let epoch = navigationID
-            let policy = store.archive.policy
+            let policy = store.policy
             Task { [weak self] in
                 guard let self else { return }
                 let match = await service.accountMatch(name, rules: policy.rules)
-                guard navigationID == epoch, store.archive.policy == policy else { return }
+                guard navigationID == epoch, store.policy == policy else { return }
                 let result: [String: Any] = ["effect": match.effect, "label": match.label,
                     "ruleName": match.ruleName ?? "", "priority": match.priority ?? 0, "contributionCaveat": match.contributionCaveat]
                 webView.callAsyncJavaScript("window.HackerViews?.resolveProfile(token, result)",
@@ -812,11 +817,11 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
             guard let names = body["names"] as? [String], names.count <= 1000,
                   names.allSatisfy(RecordArchive.validUsername), let token = body["token"] as? Int else { return }
             let epoch = navigationID
-            let policy = store.archive.policy
+            let policy = store.policy
             Task { [weak self] in
                 guard let self else { return }
                 let matches = await service.highlights(names: names, filters: policy.highlights)
-                guard navigationID == epoch, store.archive.policy == policy else { return }
+                guard navigationID == epoch, store.policy == policy else { return }
                 webView.callAsyncJavaScript("window.HackerViews?.resolveHighlights(token, names)",
                     arguments: ["token": token, "names": matches], in: nil, in: Self.world, completionHandler: nil)
             }
@@ -839,13 +844,13 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
                 }
             }
             let epoch = navigationID
-            let policy = store.archive.policy
+            let policy = store.policy
             Task { [weak self] in
                 guard let self else { return }
                 let decisions = await service.decisions(ids: ids, rules: policy.rules, knownItems: knownItems) { [weak self] partial in
                     await self?.showPartial(partial, token: token, epoch: epoch, policy: policy)
                 }
-                guard navigationID == epoch, store.archive.policy == policy else { return }
+                guard navigationID == epoch, store.policy == policy else { return }
                 webView.callAsyncJavaScript("window.HackerViews?.resolve(token, decisions, labels, inherited)",
                                             arguments: ["token": token, "decisions": decisions.effects, "labels": decisions.labels, "inherited": decisions.inherited],
                                             in: nil, in: Self.world, completionHandler: nil)
@@ -866,7 +871,7 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
     }
 
     private func showPartial(_ result: HNService.ItemEffects, token: Int, epoch: UUID, policy: FilterPolicy) {
-        guard navigationID == epoch, store.archive.policy == policy else { return }
+        guard navigationID == epoch, store.policy == policy else { return }
         webView.callAsyncJavaScript("window.HackerViews?.resolvePartial(token, decisions, labels, inherited)",
             arguments: ["token": token, "decisions": result.effects, "labels": result.labels, "inherited": result.inherited],
             in: nil, in: Self.world, completionHandler: nil)

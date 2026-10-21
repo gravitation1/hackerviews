@@ -244,6 +244,43 @@ import Testing
     #expect(RuleListEdits.moving(["1", "3"], in: rules, toEnd: true).map(\.id) == ["0", "2", "4", "1", "3"])
 }
 
+@Test func validationSinceACheckedArchiveStillRejectsBadAdditions() throws {
+    var checked = RecordArchive(revisions: [PersonRevision(username: "alice", isBlocked: false, note: "", citations: [])])
+    var rule = FilterRule(); rule.members = ["alice"]
+    var filters = AccountFilterRevision(filters: AccountFilters()); filters.orderedRules = [rule]
+    checked.filterRevisions = [filters]
+    try checked.validate()
+    var good = checked
+    good.revisions.append(PersonRevision(username: "bob", isBlocked: true, note: "", citations: []))
+    try good.validate(since: checked)
+    var badName = checked
+    badName.revisions.append(PersonRevision(username: "bad name", isBlocked: true, note: "", citations: []))
+    #expect(throws: ArchiveError.self) { try badName.validate(since: checked) }
+    var badMember = checked
+    var invalid = rule; invalid.members = ["no/slash"]
+    var added = AccountFilterRevision(filters: AccountFilters()); added.orderedRules = [invalid]
+    badMember.filterRevisions?.append(added)
+    #expect(throws: ArchiveError.self) { try badMember.validate(since: checked) }
+    var changed = checked
+    changed.revisions[0].username = "not valid!"
+    #expect(throws: ArchiveError.self) { try changed.validate(since: checked) }
+    var duplicate = checked
+    duplicate.revisions.append(checked.revisions[0])
+    #expect(throws: ArchiveError.self) { try duplicate.validate(since: checked) }
+}
+
+@Test func policyTakesEachPersonsLatestRevision() {
+    let now = Date()
+    var older = PersonRevision(username: "alice", isBlocked: true, note: "", citations: []); older.modifiedAt = now
+    var newer = PersonRevision(username: "alice", isBlocked: false, note: "", citations: []); newer.modifiedAt = now.addingTimeInterval(1); newer.isPreferred = true
+    var bob = PersonRevision(username: "bob", isBlocked: true, note: "", citations: []); bob.modifiedAt = now
+    let archive = RecordArchive(revisions: [newer, bob, older])
+    #expect(archive.policy.blocked == ["bob"])
+    #expect(archive.policy.preferred == ["alice"])
+    #expect(archive.current.map(\.username) == ["alice", "bob"])
+    #expect(archive.current.first?.isBlocked == false)
+}
+
 @Test func droppedRulesLandInTheGapWhicheverWayTheyMove() {
     let rules = (0..<5).map { i in var rule = FilterRule(); rule.id = String(i); return rule }
     func moved(_ ids: Set<String>, _ gap: Int) -> [String] { RuleListEdits.moving(ids, in: rules, toGap: gap).map(\.id) }
