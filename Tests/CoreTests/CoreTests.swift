@@ -244,6 +244,20 @@ import Testing
     #expect(RuleListEdits.moving(["1", "3"], in: rules, toEnd: true).map(\.id) == ["0", "2", "4", "1", "3"])
 }
 
+@Test func droppedRulesLandInTheGapWhicheverWayTheyMove() {
+    let rules = (0..<5).map { i in var rule = FilterRule(); rule.id = String(i); return rule }
+    func moved(_ ids: Set<String>, _ gap: Int) -> [String] { RuleListEdits.moving(ids, in: rules, toGap: gap).map(\.id) }
+    #expect(moved(["0"], 3) == ["1", "2", "0", "3", "4"])
+    #expect(moved(["4"], 1) == ["0", "4", "1", "2", "3"])
+    #expect(moved(["1"], 1) == ["0", "1", "2", "3", "4"])
+    #expect(moved(["1"], 2) == ["0", "1", "2", "3", "4"])
+    #expect(moved(["0", "3"], 5) == ["1", "2", "4", "0", "3"])
+    #expect(moved(["1", "3"], 0) == ["1", "3", "0", "2", "4"])
+    #expect(moved(["1", "3"], 3) == ["0", "2", "1", "3", "4"])
+    #expect(moved(["9"], 0) == ["0", "1", "2", "3", "4"])
+    #expect(moved(["2"], 99) == ["0", "1", "3", "4", "2"])
+}
+
 @Test func deletionUndoRestoresPositionsWithoutOverwritingOtherEdits() {
     let rules = (0..<5).map { i in var rule = FilterRule(); rule.id = String(i); return rule }
     let deleted = RuleListEdits.removed(["1", "3"], from: rules)

@@ -34,4 +34,14 @@ public enum RuleListEdits {
         let rest = rules.filter { !ids.contains($0.id) }
         return toEnd ? rest + chosen : chosen + rest
     }
+    /// Move the chosen rules, in their current order, into the gap before
+    /// `gap` (0 is above the first rule, `rules.count` below the last).
+    public static func moving(_ ids: Set<String>, in rules: [FilterRule], toGap gap: Int) -> [FilterRule] {
+        let gap = min(max(gap, 0), rules.count)
+        let chosen = rules.filter { ids.contains($0.id) }
+        guard !chosen.isEmpty else { return rules }
+        let above = rules[..<gap].filter { !ids.contains($0.id) }
+        let below = rules[gap...].filter { !ids.contains($0.id) }
+        return above + chosen + below
+    }
 }

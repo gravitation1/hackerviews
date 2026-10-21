@@ -1,5 +1,4 @@
 import SwiftUI
-import UniformTypeIdentifiers
 #if os(macOS)
 import AppKit
 #else
@@ -24,7 +23,6 @@ struct FiltersView: View {
     @State private var selection = Set<String>()
     @State private var editing: String?
     @State private var mobileSort = "order"
-    @State private var dragging: String?
     @State private var statusFilter = "all"
     @State private var effectFilter = "all"
     @State private var typeFilter = "all"
@@ -172,14 +170,12 @@ struct FiltersView: View {
     }
     #if os(macOS)
     private var table: some View {
-        Table(rows, selection: $selection, sortOrder: $sortOrder) {
+        Table(of: FilterTableRow.self, selection: $selection, sortOrder: $sortOrder) {
             TableColumn("Order", value: \.order) { row in
                 HStack {
                     Image(systemName: "line.3.horizontal").foregroundStyle(canReorder ? Color.secondary : Color.clear)
                     Text("\(row.order)").monospacedDigit()
-                }.contentShape(Rectangle())
-                .onDrag { dragging = canReorder ? row.id : nil; return canReorder ? NSItemProvider(object: row.id as NSString) : NSItemProvider() }
-                .onDrop(of: [UTType.text], isTargeted: nil) { _ in drop(on: row.id) }
+                }
             }.width(84)
             TableColumn("Name", value: \.name) { row in
                 FilterNameField(text: Binding(get: {
@@ -188,7 +184,6 @@ struct FiltersView: View {
                     update([row.id]) { $0.name = name }
                 }), placeholder: "Filter name", active: row.rule.enabled, accent: row.rule.nameAccent?.nsColor,
                     accessibilityName: "Filter name, priority \(row.order)", coalescesEdits: true)
-                .onDrop(of: [UTType.text], isTargeted: nil) { _ in drop(on: row.id) }
             }.width(min: 130, ideal: 190)
             TableColumn("Matches", value: \.matches) { row in Text(row.matches).foregroundStyle(.secondary).lineLimit(2) }.width(min: 160, ideal: 260)
             TableColumn("Effect", value: \.effectText) { row in effectMenu(row.rule) }.width(min: 160, ideal: 180)
@@ -199,6 +194,15 @@ struct FiltersView: View {
                     Button { delete([row.id]) } label: { Image(systemName: "trash") }.help("Delete filter")
                 }.buttonStyle(ControlSurfaceStyle()).foregroundStyle(.secondary)
             }.width(84)
+        } rows: {
+            // Drops land in the gap between rows, where the table draws its
+            // insertion line, so a drop never has to choose before or after.
+            if canReorder {
+                ForEach(rows) { row in TableRow(row).draggable(row.id) }
+                    .dropDestination(for: String.self) { gap, ids in moveDropped(ids, toGap: gap) }
+            } else {
+                ForEach(rows) { row in TableRow(row) }
+            }
         }
         .contextMenu(forSelectionType: String.self) { ids in
             Button("Edit filter") { editing = ids.first }.disabled(ids.count != 1)
@@ -263,12 +267,12 @@ struct FiltersView: View {
         guard let last = deletions.last else { return }
         if store.saveRules(RuleListEdits.restoring(last, into: store.archive.rules)) { deletions.removeLast() }
     }
-    private func drop(on id: String) -> Bool {
-        guard canReorder, let source = dragging, source != id else { return false }
-        var rules = store.archive.rules
-        guard let from = rules.firstIndex(where: { $0.id == source }), let to = rules.firstIndex(where: { $0.id == id }) else { return false }
-        rules.move(fromOffsets: IndexSet(integer: from), toOffset: from < to ? to + 1 : to)
-        dragging = nil; return store.saveRules(rules)
+    private func moveDropped(_ ids: [String], toGap gap: Int) {
+        let rules = store.archive.rules
+        let moving = Set(ids).intersection(rules.map(\.id))
+        guard canReorder, !moving.isEmpty else { return }
+        let moved = RuleListEdits.moving(moving, in: rules, toGap: gap)
+        if moved.map(\.id) != rules.map(\.id) { store.saveRules(moved) }
     }
     private func effectMenu(_ rule: FilterRule) -> some View {
         FilterEffectPicker(rule: Binding(get: { rule }, set: { updated in
