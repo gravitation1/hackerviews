@@ -182,12 +182,16 @@
       --qhn-bg: #faf9f6; --qhn-text: #222522; --qhn-muted: #70766f;
       --qhn-line: #e3e5df; --qhn-accent: #aa4b19; --qhn-hover: #eeeae2;
       --qhn-panel: #f1f2ed; --qhn-button-text: #fff;
+      /* New since the last visit has its own hue, so it never reads as the
+         accent that marks the account's own votes beside it. */
+      --qhn-new: #2860c4;
     }
     @media (prefers-color-scheme: dark) {
       :root {
         --qhn-bg: #202526; --qhn-text: #e4e7e4; --qhn-muted: #9ba39d;
         --qhn-line: #363d3d; --qhn-accent: #eea06c; --qhn-hover: #343b3b;
         --qhn-panel: #272d2d; --qhn-button-text: #202526;
+        --qhn-new: #7fb0f5;
       }
     }
     .qhn-loading { display: flex; align-items: center; gap: 10px; min-height: 44px;
@@ -223,16 +227,16 @@
       background: none; font: inherit; color: inherit; line-height: inherit; vertical-align: baseline; cursor: pointer; }
     .hv-reader-actions button:hover, .qhn-record-text:hover, .qhn-record-text:focus-visible, .hv-reader-actions button.hv-open { color: var(--qhn-accent); text-decoration: underline; }
     .hv-visit { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin: 8px 0 2px; font-size: 12px; color: var(--qhn-muted); }
-    .hv-visit-new { color: var(--qhn-accent); font-weight: 600; }
+    .hv-visit-new { color: var(--qhn-new); font-weight: 600; }
     .hv-visit-loading { color: var(--qhn-muted); }
     .hv-visit button { font: inherit; font-size: 12px; min-height: 28px; padding: 3px 10px; cursor: pointer;
       color: var(--qhn-text); background: transparent; border: 1px solid var(--qhn-line); border-radius: 6px; }
     .hv-visit button:hover { border-color: var(--qhn-accent); color: var(--qhn-accent); }
-    .hv-new-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--qhn-accent); margin-right: 6px; vertical-align: middle; box-sizing: border-box; }
-    .hv-new-read .hv-new-dot { background: transparent; border: 1.5px solid var(--qhn-accent); opacity: .7; }
+    .hv-new-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--qhn-new); margin-right: 6px; vertical-align: middle; box-sizing: border-box; }
+    .hv-new-read .hv-new-dot { background: transparent; border: 1.5px solid var(--qhn-new); opacity: .7; }
     .hv-flash { animation: hv-flash 1.2s ease-out; }
-    @keyframes hv-flash { from { background: color-mix(in srgb, var(--qhn-accent) 22%, transparent); } to { background: transparent; } }
-    .hv-new-count { color: var(--qhn-accent); font-weight: 600; }
+    @keyframes hv-flash { from { background: color-mix(in srgb, var(--qhn-new) 22%, transparent); } to { background: transparent; } }
+    .hv-new-count { color: var(--qhn-new); font-weight: 600; }
     .hv-own .hv-collapse { position: relative; font: inherit; color: var(--qhn-muted); background: transparent; border: 0; min-height: 0; padding: 0 3px; }
     .hv-collapse::before { content: ''; position: absolute; inset: -7px -3px; border-radius: 4px; }
     .hv-own .hv-collapse:hover, .hv-own .hv-collapse:focus-visible { color: var(--qhn-text); background: var(--qhn-hover); outline: 1px solid var(--qhn-line); }
