@@ -182,16 +182,12 @@
       --qhn-bg: #faf9f6; --qhn-text: #222522; --qhn-muted: #70766f;
       --qhn-line: #e3e5df; --qhn-accent: #aa4b19; --qhn-hover: #eeeae2;
       --qhn-panel: #f1f2ed; --qhn-button-text: #fff;
-      /* New since the last visit has its own hue, so it never reads as the
-         accent that marks the account's own votes beside it. */
-      --qhn-new: #2860c4;
     }
     @media (prefers-color-scheme: dark) {
       :root {
         --qhn-bg: #202526; --qhn-text: #e4e7e4; --qhn-muted: #9ba39d;
         --qhn-line: #363d3d; --qhn-accent: #eea06c; --qhn-hover: #343b3b;
         --qhn-panel: #272d2d; --qhn-button-text: #202526;
-        --qhn-new: #7fb0f5;
       }
     }
     .qhn-loading { display: flex; align-items: center; gap: 10px; min-height: 44px;
@@ -227,16 +223,14 @@
       background: none; font: inherit; color: inherit; line-height: inherit; vertical-align: baseline; cursor: pointer; }
     .hv-reader-actions button:hover, .qhn-record-text:hover, .qhn-record-text:focus-visible, .hv-reader-actions button.hv-open { color: var(--qhn-accent); text-decoration: underline; }
     .hv-visit { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin: 8px 0 2px; font-size: 12px; color: var(--qhn-muted); }
-    .hv-visit-new { color: var(--qhn-new); font-weight: 600; }
+    .hv-visit-new { color: var(--qhn-text); font-weight: 600; }
     .hv-visit-loading { color: var(--qhn-muted); }
     .hv-visit button { font: inherit; font-size: 12px; min-height: 28px; padding: 3px 10px; cursor: pointer;
       color: var(--qhn-text); background: transparent; border: 1px solid var(--qhn-line); border-radius: 6px; }
     .hv-visit button:hover { border-color: var(--qhn-accent); color: var(--qhn-accent); }
-    .hv-new-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--qhn-new); margin-right: 6px; vertical-align: middle; box-sizing: border-box; }
-    .hv-new-read .hv-new-dot { background: transparent; border: 1.5px solid var(--qhn-new); opacity: .7; }
     .hv-flash { animation: hv-flash 1.2s ease-out; }
-    @keyframes hv-flash { from { background: color-mix(in srgb, var(--qhn-new) 22%, transparent); } to { background: transparent; } }
-    .hv-new-count { color: var(--qhn-new); font-weight: 600; }
+    @keyframes hv-flash { from { background: color-mix(in srgb, var(--qhn-text) 14%, transparent); } to { background: transparent; } }
+    .hv-new-count { color: var(--qhn-text); font-weight: 600; }
     .hv-own .hv-collapse { position: relative; font: inherit; color: var(--qhn-muted); background: transparent; border: 0; min-height: 0; padding: 0 3px; }
     .hv-collapse::before { content: ''; position: absolute; inset: -7px -3px; border-radius: 4px; }
     .hv-own .hv-collapse:hover, .hv-own .hv-collapse:focus-visible { color: var(--qhn-text); background: var(--qhn-hover); outline: 1px solid var(--qhn-line); }
@@ -367,6 +361,12 @@
        marker only when there is something to mark. */
     .comtr td.default { border-left: 0; background: transparent; padding: 0 0 0 6px; }
     .comtr td.default > div:first-child { margin: 0 0 2px !important; }
+    /* New and unread is a texture, not a colour: colour already means the
+       account's own votes and filter highlights. The comment under a moving
+       pointer takes the hover tint, which also replaces the texture at once
+       as the pointer reads it. */
+    .comtr.hv-new td.default { background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--qhn-text) 7%, transparent) 0 1px, transparent 1px 7px); }
+    .comtr.hv-pointer td.default { background: var(--qhn-hover); }
     .comtr td.default > br { display: none; }
     .comhead a.hnuser { color: var(--qhn-text); font-size: 12px; font-weight: 600; }
     .reply a, .reply a:any-link { display: inline-block; font: inherit; font-size: 12px; padding: 2px 0; margin-top: 2px;
@@ -1699,8 +1699,9 @@
   }
   // What changed since the reader's last visit, and where they left off.
   let visitLineHost = null, visitLineText = '';
-  // New and not yet read. Jumping on from a new comment reads it; the marks
-  // never change under a reader who is only scrolling.
+  // New and not yet read. Jumping on from a new comment reads it, as does
+  // moving the pointer onto it; the marks never change under a reader who is
+  // only scrolling.
   function newComments() { return [...lazyNodes.values()].filter(n => n.isNew && !n.readNew); }
   function newBelow(node) { return [...lazyNodes.values()].filter(n => n.isNew && !n.readNew && n.ancestors.has(node.id)).length; }
   let currentNew = null;
@@ -2314,7 +2315,7 @@
       arrows.append(lazyVoteControl(item,'up'),lazyVoteControl(item,'down'));heading.prepend(arrows);
       const cell=document.createElement('td');cell.className='default';
       const head=document.createElement('div');head.append(heading);
-      if(fresh){row.classList.add('hv-new');const dot=document.createElement('span');dot.className='hv-new-dot';dot.title='New since your last visit';dot.setAttribute('aria-label','New since your last visit');heading.prepend(dot);}
+      if(fresh)row.classList.add('hv-new');
       lazyNavigation(node,item,heading);
       // HN's line, one separator: navigation, then HN's own actions when its
       // HTML arrives, then ours (reply, note), then the toggle.
@@ -2381,11 +2382,27 @@
   let resultFramePending = false;
   let scrollingUntil = 0, settleTimer = null;
   function scrollingNow() { return performance.now() < scrollingUntil; }
+  // Only a pointer that moves marks a comment. Scrolling slides comments under
+  // a still pointer, and WebKit reports that as pointer events with no
+  // movement, so those and anything while the page scrolls are ignored.
+  let pointerRow = null;
+  function pointAt(row) {
+    if(row===pointerRow)return;
+    pointerRow?.classList.remove('hv-pointer');pointerRow=row;row?.classList.add('hv-pointer');
+    if(row?.classList.contains('hv-new')){markRead(row);renderVisitLine();refreshNewNavigation();}
+  }
+  document.addEventListener('mousemove',event=>{
+    if((!event.movementX && !event.movementY) || scrollingNow())return;
+    pointAt(event.target.closest?.('tr.comtr') || null);
+  },{passive:true});
+  document.documentElement.addEventListener('mouseleave',()=>pointAt(null));
   function noteReadingScroll() {
     scrollingUntil=performance.now()+200;
     clearTimeout(settleTimer);
     settleTimer=setTimeout(()=>{scheduleResults();lazyPump();},210);
   }
+  window.addEventListener('wheel',()=>pointAt(null),{passive:true});
+  window.addEventListener('scroll',()=>pointAt(null),{passive:true});
   window.addEventListener('wheel',noteReadingScroll,{passive:true});
   window.addEventListener('touchmove',noteReadingScroll,{passive:true});
   // Momentum continues emitting scroll events after fingers leave the trackpad.

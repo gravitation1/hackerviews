@@ -1014,7 +1014,7 @@ test('a comment still inside its author’s delay is withheld, as HN withholds i
   await new Promise(r => setTimeout(r, 5));
   assert.equal(p.doc.getElementById('3')?.querySelector('.commtext')?.textContent, 'Now visible', 'and shows it once HN releases it');
   assert.match(p.doc.querySelector('.hv-visit-text').textContent, /^2 new comments/, 'counted as new when it appears');
-  assert.ok(p.doc.getElementById('3').querySelector('.hv-new-dot'), 'with the new mark');
+  assert.ok(p.doc.getElementById('3').classList.contains('hv-new'), 'with the new mark');
   assert.ok([...p.doc.getElementById('2').querySelectorAll('.hv-comment-nav a')].some(a => a.textContent === 'next'), 'and its sibling now has a next link');
   p.dom.window.close();
 });
@@ -1665,6 +1665,45 @@ test('the story line reads like HN’s with the score in the gutter, and a vote 
   p.dom.window.close();
 });
 
+test('moving the pointer onto a new comment reads it at once and tints it; scrolling under a still pointer marks nothing', async () => {
+  const viewedAt = 1700000000;
+  const p = await lazyPage(undefined, {visit: {viewedAt, leftAt: viewedAt + 600, descendants: 0}});
+  const api = p.dom.window.HackerViews;
+  let request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  api.lazyResult(request.token, [{id: 1, effect: 'visible', item: {id: 1, type: 'story', by: 'op', title: 'Topic', descendants: 3, score: 12, kids: [2, 3, 4]}}]);
+  await new Promise(r => setTimeout(r, 5));
+  request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  api.lazyResult(request.token, [
+    {id: 2, effect: 'visible', item: {id: 2, type: 'comment', by: 'old', parent: 1, time: viewedAt - 100, text: 'Seen before'}},
+    {id: 3, effect: 'visible', item: {id: 3, type: 'comment', by: 'a', parent: 1, time: viewedAt + 100, text: 'New one'}},
+    {id: 4, effect: 'visible', item: {id: 4, type: 'comment', by: 'b', parent: 1, time: viewedAt + 200, text: 'New two'}}]);
+  await new Promise(r => setTimeout(r, 5));
+  const row = id => p.doc.getElementById(String(id));
+  const text = () => p.doc.querySelector('.hv-visit-text').textContent;
+  const move = (id, dx) => {
+    const event = new p.dom.window.MouseEvent('mousemove', {bubbles: true});
+    Object.defineProperties(event, {movementX: {value: dx}, movementY: {value: 0}});
+    row(id).querySelector('.commtext').dispatchEvent(event);
+  };
+  assert.equal(text(), '2 new comments since your last visit');
+  move(3, 0);
+  assert.ok(row(3).classList.contains('hv-new') && !row(3).classList.contains('hv-pointer'), 'a pointer event without movement, as scrolling produces, marks nothing');
+  p.dom.window.dispatchEvent(new p.dom.window.Event('scroll'));
+  move(3, 4);
+  assert.ok(row(3).classList.contains('hv-new'), 'nor does movement while the page scrolls');
+  await new Promise(r => setTimeout(r, 220));
+  move(3, 4);
+  assert.ok(!row(3).classList.contains('hv-new') && row(3).classList.contains('hv-new-read'), 'a moving pointer reads a new comment at once');
+  assert.ok(row(3).classList.contains('hv-pointer'), 'and tints it');
+  assert.equal(text(), '1 new comment since your last visit', 'the count is what is left to read');
+  move(2, 4);
+  assert.ok(row(2).classList.contains('hv-pointer') && !row(3).classList.contains('hv-pointer'), 'a comment that was never new takes the tint too, and only one is tinted');
+  p.dom.window.dispatchEvent(new p.dom.window.Event('wheel'));
+  assert.equal(p.doc.querySelector('.hv-pointer'), null, 'scrolling clears the tint, since the comment moves out from under the pointer');
+  assert.ok(row(4).classList.contains('hv-new'), 'the comment never pointed at stays new');
+  p.dom.window.close();
+});
+
 test('a revisited discussion counts new comments as they load, marks them, reads them as you jump on, and steps through them', async () => {
   const viewedAt = 1700000000;
   const p = await lazyPage(undefined, {visit: {viewedAt, leftAt: viewedAt + 600, descendants: 3, anchor: {id: 2, top: 10, y: 400, ancestors: [1]}}});
@@ -1690,7 +1729,7 @@ test('a revisited discussion counts new comments as they load, marks them, reads
   await new Promise(r => setTimeout(r, 5));
   assert.equal(row(2).classList.contains('hv-new'), false, 'a comment from before the last view is not new');
   assert.ok(row(3).classList.contains('hv-new'));
-  assert.ok(row(3).querySelector('.comhead .hv-new-dot'), 'a new comment carries one dot before its author');
+  assert.equal(row(3).querySelector('.comhead').firstElementChild.className, 'hv-votes', 'a new comment is marked by its row, with nothing added before its author');
   assert.equal(scrolled.at(-1), '3', 'the waiting jump lands on the first new comment to arrive');
   assert.equal(text(), '1 new comment since your last visit');
   assert.ok(line().querySelector('.hv-visit-loading'), 'the count says it is still loading while replies remain');
