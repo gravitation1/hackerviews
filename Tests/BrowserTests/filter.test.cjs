@@ -1665,42 +1665,48 @@ test('the story line reads like HN’s with the score in the gutter, and a vote 
   p.dom.window.close();
 });
 
-test('moving the pointer onto a new comment reads it at once and tints it; scrolling under a still pointer marks nothing', async () => {
+test('the comment under the pointer is tinted and read, whether the pointer moves onto it or the page scrolls it there', async () => {
   const viewedAt = 1700000000;
   const p = await lazyPage(undefined, {visit: {viewedAt, leftAt: viewedAt + 600, descendants: 0}});
   const api = p.dom.window.HackerViews;
   let request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
-  api.lazyResult(request.token, [{id: 1, effect: 'visible', item: {id: 1, type: 'story', by: 'op', title: 'Topic', descendants: 3, score: 12, kids: [2, 3, 4]}}]);
+  api.lazyResult(request.token, [{id: 1, effect: 'visible', item: {id: 1, type: 'story', by: 'op', title: 'Topic', descendants: 4, score: 12, kids: [2, 3, 4, 5]}}]);
   await new Promise(r => setTimeout(r, 5));
   request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
   api.lazyResult(request.token, [
     {id: 2, effect: 'visible', item: {id: 2, type: 'comment', by: 'old', parent: 1, time: viewedAt - 100, text: 'Seen before'}},
     {id: 3, effect: 'visible', item: {id: 3, type: 'comment', by: 'a', parent: 1, time: viewedAt + 100, text: 'New one'}},
-    {id: 4, effect: 'visible', item: {id: 4, type: 'comment', by: 'b', parent: 1, time: viewedAt + 200, text: 'New two'}}]);
+    {id: 4, effect: 'visible', item: {id: 4, type: 'comment', by: 'b', parent: 1, time: viewedAt + 200, text: 'New two'}},
+    {id: 5, effect: 'visible', item: {id: 5, type: 'comment', by: 'c', parent: 1, time: viewedAt + 300, text: 'New three'}}]);
   await new Promise(r => setTimeout(r, 5));
   const row = id => p.doc.getElementById(String(id));
   const text = () => p.doc.querySelector('.hv-visit-text').textContent;
   const move = (id, dx) => {
-    const event = new p.dom.window.MouseEvent('mousemove', {bubbles: true});
+    const event = new p.dom.window.MouseEvent('mousemove', {bubbles: true, clientX: 40, clientY: 300});
     Object.defineProperties(event, {movementX: {value: dx}, movementY: {value: 0}});
     row(id).querySelector('.commtext').dispatchEvent(event);
   };
-  assert.equal(text(), '2 new comments since your last visit');
-  move(3, 0);
-  assert.ok(row(3).classList.contains('hv-new') && !row(3).classList.contains('hv-pointer'), 'a pointer event without movement, as scrolling produces, marks nothing');
-  p.dom.window.dispatchEvent(new p.dom.window.Event('scroll'));
-  move(3, 4);
-  assert.ok(row(3).classList.contains('hv-new'), 'nor does movement while the page scrolls');
-  await new Promise(r => setTimeout(r, 220));
+  let underPointer = null;
+  p.doc.elementFromPoint = (x, y) => (x === 40 && y === 300 && underPointer ? row(underPointer).querySelector('.commtext') : null);
+  const scrollTo = id => { underPointer = id; p.dom.window.dispatchEvent(new p.dom.window.Event('scroll')); };
+  assert.equal(text(), '3 new comments since your last visit');
   move(3, 4);
   assert.ok(!row(3).classList.contains('hv-new') && row(3).classList.contains('hv-new-read'), 'a moving pointer reads a new comment at once');
   assert.ok(row(3).classList.contains('hv-pointer'), 'and tints it');
-  assert.equal(text(), '1 new comment since your last visit', 'the count is what is left to read');
+  assert.equal(text(), '2 new comments since your last visit', 'the count is what is left to read');
   move(2, 4);
   assert.ok(row(2).classList.contains('hv-pointer') && !row(3).classList.contains('hv-pointer'), 'a comment that was never new takes the tint too, and only one is tinted');
-  p.dom.window.dispatchEvent(new p.dom.window.Event('wheel'));
-  assert.equal(p.doc.querySelector('.hv-pointer'), null, 'scrolling clears the tint, since the comment moves out from under the pointer');
-  assert.ok(row(4).classList.contains('hv-new'), 'the comment never pointed at stays new');
+  scrollTo(4);
+  assert.ok(row(4).classList.contains('hv-pointer') && !row(2).classList.contains('hv-pointer'), 'scrolling moves the tint to the comment now under the still pointer');
+  assert.ok(row(4).classList.contains('hv-new-read'), 'and reads it');
+  assert.equal(text(), '1 new comment since your last visit');
+  move(5, 0);
+  assert.ok(row(5).classList.contains('hv-pointer') && row(5).classList.contains('hv-new-read'), 'so does WebKit’s pointer event without movement as the page settles');
+  scrollTo(null);
+  assert.equal(p.doc.querySelector('.hv-pointer'), null, 'scrolling to where no comment is under the pointer clears the tint');
+  p.doc.documentElement.dispatchEvent(new p.dom.window.MouseEvent('mouseleave'));
+  underPointer = 2; p.dom.window.dispatchEvent(new p.dom.window.Event('scroll'));
+  assert.equal(p.doc.querySelector('.hv-pointer'), null, 'nor does a pointer outside the page tint what scrolls by');
   p.dom.window.close();
 });
 

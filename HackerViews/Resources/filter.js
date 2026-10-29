@@ -1700,8 +1700,8 @@
   // What changed since the reader's last visit, and where they left off.
   let visitLineHost = null, visitLineText = '';
   // New and not yet read. Jumping on from a new comment reads it, as does
-  // moving the pointer onto it; the marks never change under a reader who is
-  // only scrolling.
+  // the pointer resting on it, whether the pointer moves onto it or the page
+  // scrolls it under the pointer.
   function newComments() { return [...lazyNodes.values()].filter(n => n.isNew && !n.readNew); }
   function newBelow(node) { return [...lazyNodes.values()].filter(n => n.isNew && !n.readNew && n.ancestors.has(node.id)).length; }
   let currentNew = null;
@@ -2382,27 +2382,30 @@
   let resultFramePending = false;
   let scrollingUntil = 0, settleTimer = null;
   function scrollingNow() { return performance.now() < scrollingUntil; }
-  // Only a pointer that moves marks a comment. Scrolling slides comments under
-  // a still pointer, and WebKit reports that as pointer events with no
-  // movement, so those and anything while the page scrolls are ignored.
-  let pointerRow = null;
+  // The comment under the pointer takes the hover tint and is read. WebKit
+  // holds back its own pointer events while the page scrolls, so each scroll
+  // hit-tests the last pointer position to keep the tint on the comment that
+  // is under it in that frame.
+  let pointerRow = null, pointerAt = null;
   function pointAt(row) {
     if(row===pointerRow)return;
     pointerRow?.classList.remove('hv-pointer');pointerRow=row;row?.classList.add('hv-pointer');
     if(row?.classList.contains('hv-new')){markRead(row);renderVisitLine();refreshNewNavigation();}
   }
   document.addEventListener('mousemove',event=>{
-    if((!event.movementX && !event.movementY) || scrollingNow())return;
+    pointerAt={x:event.clientX,y:event.clientY};
     pointAt(event.target.closest?.('tr.comtr') || null);
   },{passive:true});
-  document.documentElement.addEventListener('mouseleave',()=>pointAt(null));
+  document.documentElement.addEventListener('mouseleave',()=>{pointerAt=null;pointAt(null);});
+  window.addEventListener('scroll',()=>{
+    if(!pointerAt || typeof document.elementFromPoint!=='function')return;
+    pointAt(document.elementFromPoint(pointerAt.x,pointerAt.y)?.closest('tr.comtr') || null);
+  },{passive:true});
   function noteReadingScroll() {
     scrollingUntil=performance.now()+200;
     clearTimeout(settleTimer);
     settleTimer=setTimeout(()=>{scheduleResults();lazyPump();},210);
   }
-  window.addEventListener('wheel',()=>pointAt(null),{passive:true});
-  window.addEventListener('scroll',()=>pointAt(null),{passive:true});
   window.addEventListener('wheel',noteReadingScroll,{passive:true});
   window.addEventListener('touchmove',noteReadingScroll,{passive:true});
   // Momentum continues emitting scroll events after fingers leave the trackpad.
