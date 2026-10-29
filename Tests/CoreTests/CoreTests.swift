@@ -593,3 +593,30 @@ import Testing
     #expect(archive.latestNote(for: "nobody") == nil)
 }
 
+
+@Test func aDraggedTabOpensTheGapItPassesAndSettlesWhereItsTabWillRest() {
+    // Widths 100, 60 and 140, six points apart.
+    let frames = [CGRect(x: 0, y: 0, width: 100, height: 30), CGRect(x: 106, y: 0, width: 60, height: 30), CGRect(x: 172, y: 0, width: 140, height: 30)]
+    var drag = TabStripDrag(frames: frames, from: 0, spacing: 6)
+    drag.translation = 30
+    #expect(drag.target == 0 && drag.offset(at: 1) == 0, "short of the next tab's middle, nothing moves aside")
+    drag.translation = 40
+    #expect(drag.target == 1 && drag.offset(at: 1) == -106 && drag.offset(at: 2) == 0, "past it, that tab slides into the dragged one's place")
+    drag.drop()
+    #expect(drag.draggedOffset == 66 && drag.target == 1, "let go, it settles where it rests once moved: B 0–60, A 66–166")
+    drag = TabStripDrag(frames: frames, from: 0, spacing: 6)
+    drag.translation = 1000
+    #expect(drag.draggedOffset == 212 && drag.target == 2, "held within the strip, and past the last tab")
+    #expect(drag.offset(at: 1) == -106 && drag.offset(at: 2) == -106)
+    drag = TabStripDrag(frames: frames, from: 2, spacing: 6)
+    drag.translation = -1000
+    #expect(drag.draggedOffset == -172 && drag.target == 0, "a wide tab reaches the front past a narrower one")
+    #expect(drag.offset(at: 0) == 146 && drag.offset(at: 1) == 146)
+    drag.drop()
+    #expect(drag.draggedOffset == -172)
+    drag = TabStripDrag(frames: frames, from: 1, spacing: 6)
+    drag.translation = -20
+    #expect(drag.target == 1 && drag.offset(at: 0) == 0, "a small move goes nowhere")
+    drag.drop()
+    #expect(drag.draggedOffset == 0, "and settles back home")
+}

@@ -23,14 +23,7 @@ struct BrowserView: View {
     var body: some View {
         VStack(spacing: 0) {
             if workspace.tabs.count > 1 {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
-                        ForEach(workspace.tabs) { tab in
-                            TabChip(tab: tab, selected: workspace.selectedID == tab.id,
-                                    select: { workspace.selectedID = tab.id }, close: { workspace.close(tab) })
-                        }
-                    }.padding(8)
-                }
+                TabStrip(workspace: workspace)
                 Divider()
             }
             if let tab = workspace.selected { RetainedBrowserPage(tab: tab) }
@@ -87,6 +80,93 @@ struct BrowserView: View {
 private struct RetainedBrowserPage: View {
     @ObservedObject var tab: BrowserTab
     var body: some View { BrowserPage(tab: tab.displayedPage).id(tab.displayedPage.id) }
+}
+
+struct TabStrip: View {
+    @ObservedObject var workspace: BrowserWorkspace
+    private static let spacing: CGFloat = 6
+    #if os(macOS)
+    nonisolated private static let space = "TabStrip"
+    /// Each tab's frame at rest, read only while no drag is under way.
+    @State private var frames: [UUID: CGRect] = [:]
+    @State private var drag: TabStripDrag?
+    @State private var draggedID: UUID?
+    @GestureState private var pressed = false
+    #endif
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: Self.spacing) {
+                ForEach(Array(workspace.tabs.enumerated()), id: \.element.id) { index, tab in
+                    chip(tab, at: index)
+                }
+            }
+            .padding(8)
+            #if os(macOS)
+            .coordinateSpace(name: Self.space)
+            #endif
+        }
+        #if os(macOS)
+        // A drag the system cancels never ends; let it settle all the same.
+        .onChange(of: pressed) { _, pressed in
+            if !pressed, let id = draggedID, let tab = workspace.tabs.first(where: { $0.id == id }) { dragEnded(tab) }
+        }
+        // A tab opened or closed mid-drag invalidates the resting frames.
+        .onChange(of: workspace.tabs.map(\.id)) { _, _ in drag = nil; draggedID = nil }
+        #endif
+    }
+
+    @ViewBuilder private func chip(_ tab: BrowserTab, at index: Int) -> some View {
+        let chip = TabChip(tab: tab, selected: workspace.selectedID == tab.id,
+                           select: { workspace.selectedID = tab.id }, close: { workspace.close(tab) })
+        #if os(macOS)
+        let dragged = draggedID == tab.id
+        // The dragged tab follows the pointer with no animation until it is let
+        // go; the tabs it passes slide aside, and it settles, animated.
+        let following = dragged && drag?.dropped == nil
+        chip
+            .offset(x: drag?.offset(at: index) ?? 0)
+            .transaction { if following { $0.animation = nil } }
+            .zIndex(dragged ? 1 : 0)
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .named(Self.space)) } action: { frame in
+                if drag == nil { frames[tab.id] = frame }
+            }
+            .highPriorityGesture(DragGesture(minimumDistance: 4, coordinateSpace: .named(Self.space))
+                .updating($pressed) { _, pressed, _ in pressed = true }
+                .onChanged { value in dragChanged(tab, translation: value.translation.width) }
+                .onEnded { _ in dragEnded(tab) })
+        #else
+        chip
+        #endif
+    }
+
+    #if os(macOS)
+    private func dragChanged(_ tab: BrowserTab, translation: CGFloat) {
+        if drag == nil {
+            let resting = workspace.tabs.compactMap { frames[$0.id] }
+            guard resting.count == workspace.tabs.count, let from = workspace.tabs.firstIndex(where: { $0.id == tab.id }) else { return }
+            drag = TabStripDrag(frames: resting, from: from, spacing: Self.spacing)
+            draggedID = tab.id
+        }
+        guard draggedID == tab.id, drag?.dropped == nil else { return }
+        withAnimation(.snappy(duration: 0.18)) { drag?.translation = translation }
+    }
+
+    private func dragEnded(_ tab: BrowserTab) {
+        guard draggedID == tab.id, drag?.dropped == nil else { return }
+        withAnimation(.snappy(duration: 0.18)) { drag?.drop() } completion: {
+            // The tabs already sit where the new order lays them out, so the
+            // order changes and the offsets clear in one unanimated update.
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
+                if let target = drag?.target { workspace.move(tab, to: target) }
+                drag = nil
+                draggedID = nil
+            }
+        }
+    }
+    #endif
 }
 
 private struct TabChip: View {

@@ -102,6 +102,14 @@ final class BrowserWorkspace: ObservableObject {
         close(selected)
         return true
     }
+    /// Moves a tab to `index` in the strip; the selection stays with its tab.
+    func move(_ tab: BrowserTab, to index: Int) {
+        guard let from = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
+        let to = min(max(index, 0), tabs.count - 1)
+        guard from != to else { return }
+        tabs.insert(tabs.remove(at: from), at: to)
+        saveSession()
+    }
     /// Saves what every open discussion has been read to, without ending the visits.
     func recordVisits() { tabs.forEach { $0.recordVisit(ending: false) } }
     func close(_ tab: BrowserTab) {
