@@ -260,8 +260,13 @@
        when there are replies, the author's colour when highlighted, dashed when
        revealed or moderated. Every comment has one, so no gutter is empty; a parent's collapses the
        branch; [-] stays for keys. */
-    .hv-votes { display: inline-flex; align-items: center; gap: 3px; width: 33px; height: 14px; margin-right: 2px; vertical-align: 1px; }
-    .hv-votes .hv-vote { display: inline-block; width: 15px; height: 14px; border-radius: 3px; }
+    /* Each arrow's click area reaches 3px past its 18px hover box, so the two
+       areas meet in the 6px gap without overlapping, and the wrapper's right
+       margin keeps the down area clear of the author link. The boxes overflow
+       the 14px wrapper evenly, so the line height does not change. */
+    .hv-votes { display: inline-flex; align-items: center; gap: 6px; width: 42px; height: 14px; margin-right: 5px; vertical-align: 1px; }
+    .hv-votes .hv-vote { position: relative; display: inline-block; width: 18px; height: 18px; border-radius: 3px; }
+    .hv-votes .hv-vote::before { content: ''; position: absolute; inset: -3px; }
     .hv-votes .votearrow { border-left-width: 4px; border-right-width: 4px; border-bottom-width: 7px; }
     .hv-own { --hv-column: var(--qhn-line); }
     .comtr.qhn-preferred { --hv-column: var(--qhn-highlight, #27a99a); }
