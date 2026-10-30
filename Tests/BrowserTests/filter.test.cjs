@@ -264,6 +264,49 @@ test('progressive results reveal verified rows while unchecked rows stay hidden'
   p.dom.window.close();
 });
 
+// HN's page for one comment: the comment is the fatitem row, its replies follow.
+const commentPage = (author, replies) => `<table class="fatitem"><tr class="athing" id="1"><td class="ind"></td><td class="default"><span class="comhead"><a class="hnuser" href="user?id=${author}">${author}</a></span><div class="commtext">The comment</div></td></tr></table><table class="comment-tree">${replies}</table>`;
+
+test('a reply checked before the comment whose page it is on never holds that page', async () => {
+  const p = await page(commentPage('carol', row(2, 'bob')), {blocked: [], url: 'https://news.ycombinator.com/item?id=1#1'});
+  p.dom.window.HackerViews.setOrdered(true);
+  const request = p.messages.filter(m => m.kind === 'ancestors').at(-1);
+  assert.deepEqual([...request.ids], [1, 2]);
+  p.dom.window.HackerViews.resolvePartial(request.token, {'2': 'unresolved'});
+  assert.equal(p.messages.some(m => m.kind === 'held'), false, 'the comment above stands unchecked, not unresolved');
+  assert.equal(p.doc.documentElement.hasAttribute('data-qhn-pending'), true, 'and the page waits for it');
+  p.dom.window.HackerViews.resolvePartial(request.token, {'1': 'fade:75'});
+  assert.equal(p.messages.some(m => m.kind === 'held'), false);
+  assert.equal(p.doc.documentElement.hasAttribute('data-qhn-pending'), false, 'its own result shows the page');
+  assert.equal(hidden(p, 2), true, 'while the reply that failed its check stays hidden');
+  p.resolve({'1': 'fade:75', '2': 'unresolved'});
+  assert.equal(p.messages.some(m => m.kind === 'held'), false);
+  p.dom.window.close();
+});
+
+test('the account’s own contribution shows on HN’s page while the API does not carry it yet', async () => {
+  const p = await page(hnHeader(signedIn) + commentPage('carol', row(2, 'alice') + row(3, 'bob')), {blocked: [], url: 'https://news.ycombinator.com/item?id=1#1'});
+  p.dom.window.HackerViews.setOrdered(true);
+  const request = p.messages.filter(m => m.kind === 'ancestors').at(-1);
+  p.dom.window.HackerViews.resolvePartial(request.token, {'2': 'unresolved', '3': 'unresolved'});
+  p.dom.window.HackerViews.resolvePartial(request.token, {'1': 'visible'});
+  assert.equal(hidden(p, 2), false, 'the reply the account just posted shows');
+  assert.equal(hidden(p, 3), true, 'someone else’s unchecked reply does not');
+  p.resolve({'1': 'visible', '2': 'unresolved', '3': 'unresolved'});
+  assert.equal(hidden(p, 2), false);
+  assert.equal(p.messages.at(-1).unresolved, 1, 'and only the other counts as unchecked');
+  p.dom.window.close();
+});
+
+test('the account’s own comment opened on its own page is not held while the API catches up', async () => {
+  const p = await page(hnHeader(signedIn) + commentPage('alice', ''), {blocked: [], url: 'https://news.ycombinator.com/item?id=1'});
+  p.dom.window.HackerViews.setOrdered(true);
+  p.resolve({'1': 'unresolved'});
+  assert.equal(p.messages.some(m => m.kind === 'held'), false);
+  assert.equal(p.messages.at(-1).kind, 'ready');
+  p.dom.window.close();
+});
+
 test('progressive blocked roots never reveal the thread', async () => {
   const p = await page(`<table>${story(10,'alice')}${row(1,'bob')}</table>`, {blocked: [], url:'https://news.ycombinator.com/item?id=10'});
   p.dom.window.HackerViews.setOrdered(true);

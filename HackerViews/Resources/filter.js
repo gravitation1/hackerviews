@@ -2670,6 +2670,9 @@
     }
     if (partial && filterAnchor) return;
     const {tree, pageID} = pending;
+    // The results that have arrived, before any placeholder below stands in
+    // for one still on its way.
+    const checked = decisions;
     if (partial && ordered) {
       // Reveal a checked prefix so late results cannot insert rows above content
       // the reader has already started reading.
@@ -2680,6 +2683,17 @@
         if (!id) continue;
         if (!decisions[id]) gap = true;
         if (gap) decisions[id] = 'unresolved';
+      }
+    }
+    // The account's own contribution is on HN's page before the API carries
+    // it, so its check can fail for a while after it is posted; there is
+    // nothing in it to protect the account from.
+    readSignedInUser(document);
+    if (signedInUser) for (const row of [...tree.stories, ...tree.rows]) {
+      const id = idOf(row), author = authorOf(row.matches('tr.comtr') || row.querySelector('.commtext') ? row : row.nextElementSibling);
+      if (id && checked[id] === 'unresolved' && author === signedInUser) {
+        if (decisions === checked) decisions = {...decisions};
+        decisions[id] = 'visible';
       }
     }
     // Revealing the destination also lifts the replies hidden only because of
@@ -2722,10 +2736,10 @@
     paintOP();
     const unresolvedCount = Object.values(decisions).filter(value => value === 'unresolved').length;
     const hiddenContributions = [...tree.stories, ...tree.rows].filter(row => row.classList.contains('qhn-filtered')).length;
-    if (partial && pageID && !decisions[pageID]) return;
+    if (partial && pageID && !checked[pageID]) return;
     checking = partial;
     if (!partial) pending = null;
-    if (blockPage || (pageID && decisions[pageID] === 'unresolved')) {
+    if (blockPage || (pageID && decisions[pageID] === 'unresolved' && checked[pageID] === 'unresolved')) {
       // Never reveal unchecked content as a network-error fallback.
       post({kind: 'held', reason: blockPage ? 'blocked' : 'unresolved', label: labels[pageID] || ''});
       return;
