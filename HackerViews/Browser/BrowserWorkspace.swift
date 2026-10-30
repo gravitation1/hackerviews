@@ -94,6 +94,19 @@ final class BrowserWorkspace: ObservableObject {
         if select || selectedID == nil { selectedID = tab.id }
         saveSession()
     }
+    /// Opens a copy of `tab` beside it and selects it: the same page, history
+    /// and reading position, loaded as a restored tab loads.
+    func duplicate(_ tab: BrowserTab) {
+        guard let index = tabs.firstIndex(where: { $0.id == tab.id }), let url = tab.url, BrowserTab.isHN(url) else { return }
+        let copy = makeTab()
+        copy.title = tab.title
+        copy.scrollY = tab.scrollY
+        copy.restoreScrollY = tab.scrollY
+        copy.restoreHistory(tab.savedHistory, index: tab.historyIndex)
+        tabs.insert(copy, at: index + 1)
+        copy.prepareRestoredPage(url)
+        selectedID = copy.id
+    }
     /// The close command leaves the last tab intact so closing the window keeps
     /// its reading session available for restoration.
     @discardableResult

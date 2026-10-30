@@ -140,6 +140,19 @@ actor Fetches {
         precondition(!restored.tabs[1].canGoForward)
         precondition(restored.tabs[1].history.count == 3)
         precondition(!restored.tabs[1].revealedDestination, "Temporary reveals must not survive relaunch")
+        restored.tabs[1].scrollY = 300
+        restored.duplicate(restored.tabs[1])
+        let copy = restored.tabs[2], source = restored.tabs[1]
+        precondition(restored.selectedID == copy.id, "A duplicate is selected")
+        precondition(copy.url == source.url && copy.title == source.title && copy.scrollY == 300, "A duplicate shows the same page at the same place")
+        precondition(copy.savedHistory.map(\.url) == source.savedHistory.map(\.url) && copy.historyIndex == source.historyIndex && copy.canGoBack,
+                     "A duplicate carries its tab's back and forward history")
+        restored.close(copy)
+        restored.duplicate(restored.tabs[0])
+        precondition(restored.tabs.count == 3 && restored.tabs[1].url == restored.tabs[0].url && restored.selectedID == restored.tabs[1].id,
+                     "A duplicate opens beside its tab")
+        restored.close(restored.tabs[1])
+        print("PASS a duplicated tab opens beside it, selected, with its page, history and position")
         restored.close(restored.tabs[1])
         let afterClose = BrowserWorkspace(store: store, defaults: defaults)
         afterClose.start()

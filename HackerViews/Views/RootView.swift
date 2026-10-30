@@ -87,6 +87,8 @@ struct RootView: View {
     private var sectionPicker: some View {
         SectionPicker(selection: sections) {
             workspace.selected?.scrollToTop()
+        } duplicateTab: {
+            if let tab = workspace.selected { workspace.duplicate(tab) }
         }
         .frame(width: 250)
     }
@@ -152,16 +154,19 @@ struct RootView: View {
 private struct SectionPicker: View {
     let selection: SectionSelection
     var readAgain: () -> Void
+    var duplicateTab: () -> Void
     var body: some View {
-        ReaderSectionControl(selection: selection.current, select: { selection.current = $0 }, readAgain: readAgain)
+        ReaderSectionControl(selection: selection.current, select: { selection.current = $0 }, readAgain: readAgain, duplicateTab: duplicateTab)
     }
 }
 
 // Target/action also fires when the selected segment is clicked again.
+// Command-clicking Read duplicates the reader's current tab.
 private struct ReaderSectionControl: NSViewRepresentable {
     var selection: String
     var select: (String) -> Void
     var readAgain: () -> Void
+    var duplicateTab: () -> Void
     private static let sections = SectionSelection.sections
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -170,6 +175,7 @@ private struct ReaderSectionControl: NSViewRepresentable {
                                             target: context.coordinator, action: #selector(Coordinator.select(_:)))
         control.segmentDistribution = .fillEqually
         control.setAccessibilityLabel("Section")
+        control.setToolTip("Read\n⌘-click to duplicate the current tab", forSegment: 0)
         return control
     }
     func updateNSView(_ control: NSSegmentedControl, context: Context) {
@@ -195,7 +201,10 @@ private struct ReaderSectionControl: NSViewRepresentable {
         @objc func select(_ sender: NSSegmentedControl) {
             guard ReaderSectionControl.sections.indices.contains(sender.selectedSegment) else { return }
             let next = ReaderSectionControl.sections[sender.selectedSegment]
-            if next == "read" && parent.selection == "read" { parent.readAgain() }
+            if next == "read", NSApp.currentEvent?.modifierFlags.contains(.command) == true {
+                if parent.selection != "read" { parent.select(next) }
+                parent.duplicateTab()
+            } else if next == "read" && parent.selection == "read" { parent.readAgain() }
             else {
                 #if DEBUG
                 InteractionTiming.begin("section.switch", ["from": parent.selection, "to": next], input: NSApp.currentEvent, view: sender.window?.contentView)
