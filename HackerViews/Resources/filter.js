@@ -1711,6 +1711,19 @@
     node.readNew = true; row.classList.remove('hv-new'); row.classList.add('hv-new-read');
     for (const id of node.ancestors) lazyNodes.get(id)?.updateToggle?.();
   }
+  // The signed-in account is known only once HN's HTML arrives, which can be
+  // after its own comments were drawn as new.
+  function forgetOwnNew() {
+    if (!signedInUser) return;
+    let changed = false;
+    for (const node of lazyNodes.values()) {
+      if (!node.isNew || node.entry?.item?.by !== signedInUser) continue;
+      node.isNew = false; changed = true;
+      document.getElementById(String(node.id))?.classList.remove('hv-new', 'hv-new-read');
+      for (const id of node.ancestors) lazyNodes.get(id)?.updateToggle?.();
+    }
+    if (changed) { renderVisitLine(); refreshNewNavigation(); }
+  }
   function visitLine() {
     const line = document.createElement('div'); line.className = 'hv-visit'; line.hidden = !visitBaseline;
     visitLineHost = line; visitLineText = ''; renderVisitLine(); return line;
@@ -2019,7 +2032,7 @@
       // discussion (a rate-limit or error page served with 200): a failed
       // fetch, not a final answer.
       if(!doc.querySelector('.pagetop, tr.athing'))throw new Error('page');
-      readSignedInUser(doc);paintOP();
+      readSignedInUser(doc);paintOP();forgetOwnNew();
       if(document.getElementById('hv-header')) {
         const parsed=readHeader(doc,target);
         if(parsed){if(parsed.links.length)headerModel.links=parsed.links;headerModel.identity=parsed.identity;headerModel.blackBar=parsed.blackBar;renderHeader();}
@@ -2304,8 +2317,10 @@
     const canonical=canonicalItems.get(item.id);
     const shownFromHN=!!canonical?.text && (item.dead===true || placeholderText(item.text));
     if(shownFromHN) { const mark=document.createElement('span');mark.className='hv-dead-mark';mark.append(' ',canonical.marker || (item.dead?'[dead]':'[flagged]'));heading.append(mark); }
-    // A comment posted after the reader's last view of this discussion.
-    const fresh=!!(visitBaseline && item.type==='comment' && Number.isFinite(item.time) && item.time>visitBaseline.viewedAt && !filteredEffect(entry.effect) && !item.deleted);
+    // A comment posted after the reader's last view of this discussion, by
+    // someone else: the account saw its own comments as it wrote them.
+    const fresh=!!(visitBaseline && item.type==='comment' && Number.isFinite(item.time) && item.time>visitBaseline.viewedAt && !filteredEffect(entry.effect) && !item.deleted
+      && !(signedInUser && item.by===signedInUser));
     node.isNew=fresh;
 
     if(item.type==='comment') {

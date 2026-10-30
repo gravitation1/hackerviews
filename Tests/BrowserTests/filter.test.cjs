@@ -1779,6 +1779,35 @@ test('a revisited discussion counts new comments as they load, marks them, reads
   p.dom.window.close();
 });
 
+test('the account’s own comments are never new, whether HN names the account before or after they are drawn', async () => {
+  const viewedAt = 1700000000;
+  const p = await lazyPage(undefined, {visit: {viewedAt, leftAt: viewedAt + 600, descendants: 0}});
+  const api = p.dom.window.HackerViews;
+  p.dom.window.IntersectionObserver = class {constructor(callback){this.callback=callback;}observe(target){this.callback([{target,isIntersecting:true}]);}unobserve(){}};
+  let release; const html = new Promise(resolve => { release = resolve; });
+  p.dom.window.fetch = async () => ({ok: true, text: async () => html});
+  let request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  api.lazyResult(request.token, [{id: 1, effect: 'visible', item: {id: 1, type: 'story', by: 'op', title: 'Topic', descendants: 3, score: 12, kids: [2, 3, 4]}}]);
+  await new Promise(r => setTimeout(r, 5));
+  request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  api.lazyResult(request.token, [
+    {id: 2, effect: 'visible', item: {id: 2, type: 'comment', by: 'alice', parent: 1, time: viewedAt + 100, text: 'Mine', kids: []}},
+    {id: 3, effect: 'visible', item: {id: 3, type: 'comment', by: 'bob', parent: 1, time: viewedAt + 200, text: 'Theirs'}}]);
+  await new Promise(r => setTimeout(r, 5));
+  const row = id => p.doc.getElementById(String(id));
+  const text = () => p.doc.querySelector('.hv-visit-text').textContent;
+  assert.ok(row(2).classList.contains('hv-new'), 'before HN names the account, nothing tells its comments apart');
+  release(hnHeader(signedIn));
+  await new Promise(r => setTimeout(r, 20));
+  assert.ok(!row(2).classList.contains('hv-new') && !row(2).classList.contains('hv-new-read'), 'once it does, its own comment is not new');
+  assert.ok(row(3).classList.contains('hv-new'), 'while someone else’s still is');
+  api.lazyResult(request.token, [{id: 4, effect: 'visible', item: {id: 4, type: 'comment', by: 'alice', parent: 1, time: viewedAt + 300, text: 'Mine again'}}]);
+  await new Promise(r => setTimeout(r, 5));
+  assert.ok(!row(4).classList.contains('hv-new'), 'and one drawn after HN named the account is never marked');
+  assert.equal(text(), '1 new comment since your last visit', 'the count leaves out the account’s own');
+  p.dom.window.close();
+});
+
 test('after a refresh the line measures from the load it replaced and offers no jump back', async () => {
   const viewedAt = 1700000000;
   const p = await lazyPage(undefined, {visit: {viewedAt, leftAt: viewedAt + 60, descendants: 5, reload: true, anchor: {id: 2, top: 10, y: 400, ancestors: [1]}}});
