@@ -58,6 +58,9 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
     /// A discussion the reader is about to open from a temporarily revealed
     /// contribution. The topic shell opens it revealed instead of asking again.
     private var pendingReveal: (id: Int, at: Date)?
+    /// A discussion the reader is about to open from a feed row's count of new
+    /// comments. The topic shell opens it at the first new comment.
+    private var pendingNewJump: (id: Int, at: Date)?
     /// The discussion this page is viewing. Written to the visit store when the
     /// reader leaves; the previous record is the baseline the shell marks
     /// new comments against, and it survives a reload of the same discussion.
@@ -86,16 +89,16 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
                                   collapsed: collapsed.map { Array($0.prefix(5000)) }))
         if ending { self.visit = nil }
     }
-    /// Takes the pending reveal for `id` from this tab and its history owner.
-    /// A reveal older than a few seconds belonged to a navigation that never
+    /// Takes the pending intent for `id` from this tab and its history owner.
+    /// An intent older than a few seconds belonged to a navigation that never
     /// happened in this tab, such as a link opened in a new tab.
-    private func consumePendingReveal(for id: Int) -> Bool {
+    private func consumeIntent(_ intent: ReferenceWritableKeyPath<BrowserTab, (id: Int, at: Date)?>, for id: Int) -> Bool {
         var matched = false
         for tab in [self, historyOwner].compactMap({ $0 }) {
-            guard let pending = tab.pendingReveal else { continue }
+            guard let pending = tab[keyPath: intent] else { continue }
             let fresh = Date().timeIntervalSince(pending.at) < 10
             // An intent for another discussion stays for the navigation it belongs to.
-            if pending.id == id || !fresh { tab.pendingReveal = nil }
+            if pending.id == id || !fresh { tab[keyPath: intent] = nil }
             if pending.id == id && fresh { matched = true }
         }
         return matched
@@ -220,7 +223,7 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
         pendingFormSubmission = false
         recordNavigation(url)
         if Self.topicID(url) != nil { loadTopic(url) }
-        else { lazyURL = nil; pendingReveal = nil; webView.load(URLRequest(url: url)) }
+        else { lazyURL = nil; pendingReveal = nil; pendingNewJump = nil; webView.load(URLRequest(url: url)) }
     }
     static func topicID(_ url: URL) -> Int? {
         guard isHN(url), url.path == "/item",
@@ -261,11 +264,12 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
         refreshAnchor = nil
         navigationSnapshot = nil
         state = .loading
-        let reveal = consumePendingReveal(for: id) ? " data-hv-reveal=\"1\"" : ""
+        let reveal = consumeIntent(\.pendingReveal, for: id) ? " data-hv-reveal=\"1\"" : ""
+        let jump = consumeIntent(\.pendingNewJump, for: id) ? " data-hv-jump-new=\"1\"" : ""
         webView.loadHTMLString("""
         <!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>Hacker News</title>
         <link rel="stylesheet" href="https://news.ycombinator.com/news.css"></head>
-        <body data-hv-topic="\(id)" data-hv-scroll="\(y)" data-hv-anchor="\(anchorData)" data-hv-visit="\(visitData)"\(reveal)><main id="hv-topic">
+        <body data-hv-topic="\(id)" data-hv-scroll="\(y)" data-hv-anchor="\(anchorData)" data-hv-visit="\(visitData)"\(reveal)\(jump)><main id="hv-topic">
         <header id="hv-header" class="hv-header"></header>
         <div id="hv-topic-root"></div></main></body></html>
         """, baseURL: target)
@@ -397,6 +401,7 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
             }
             retainedPages[index] = page
             page.pendingReveal = pendingReveal; pendingReveal = nil
+            page.pendingNewJump = pendingNewJump; pendingNewJump = nil
             page.load(entry.url)
             if page.history.indices.contains(page.historyIndex) { page.history[page.historyIndex].collapsed = entry.collapsed }
         }
@@ -643,6 +648,16 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
             if current.lazyURL.flatMap(Self.topicID) == id, current.state == .ready {
                 current.webView.callAsyncJavaScript("window.HackerViews?.revealDestination()", arguments: [:], in: nil, in: Self.world, completionHandler: nil)
             }
+        case "newJumpIntent":
+            // Following a feed row's count of new comments opens the discussion
+            // at the first of them, carried the same way as a reveal.
+            guard let id = body["id"] as? Int, id > 0 else { return }
+            let owner = historyOwner ?? self
+            owner.pendingNewJump = (id, Date())
+            let current = owner.activePage ?? owner
+            if current.lazyURL.flatMap(Self.topicID) == id, current.state == .ready, current.consumeIntent(\.pendingNewJump, for: id) {
+                current.webView.callAsyncJavaScript("window.HackerViews?.jumpToFirstNew()", arguments: [:], in: nil, in: Self.world, completionHandler: nil)
+            }
         case "visitCount":
             // HN's HTML carries the live comment count; the API item may be a minute stale.
             guard let id = body["id"] as? Int, let count = body["count"] as? Int, count >= 0, visit?.id == id else { return }
@@ -706,8 +721,11 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
         case "ready":
             destinationHidden = body["destinationHidden"] as? Bool ?? false
             timeout?.cancel()
-            if let topic = lazyURL.flatMap(Self.topicID), consumePendingReveal(for: topic) {
+            if let topic = lazyURL.flatMap(Self.topicID), consumeIntent(\.pendingReveal, for: topic) {
                 webView.callAsyncJavaScript("window.HackerViews?.revealDestination()", arguments: [:], in: nil, in: Self.world, completionHandler: nil)
+            }
+            if let topic = lazyURL.flatMap(Self.topicID), consumeIntent(\.pendingNewJump, for: topic) {
+                webView.callAsyncJavaScript("window.HackerViews?.jumpToFirstNew()", arguments: [:], in: nil, in: Self.world, completionHandler: nil)
             }
             if let y = restoreScrollY {
                 if body["complete"] as? Bool == true {

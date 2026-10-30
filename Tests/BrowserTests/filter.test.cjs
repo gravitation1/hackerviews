@@ -512,12 +512,13 @@ test('a discussion over 1000 comments requests every item and renders progressiv
   p.dom.window.close();
 });
 
-async function lazyPage(anchor, {reveal = false, visit = null} = {}) {
+async function lazyPage(anchor, {reveal = false, visit = null, jumpNew = false} = {}) {
   const p=await page('<main id="hv-topic"><header id="hv-header" class="hv-header"></header><div id="hv-topic-root"></div></main>',{blocked:[],url:'https://news.ycombinator.com/item?id=1'});
   p.dom.window.Element.prototype.getClientRects=function(){return this.closest('[hidden]')?[]:[{}];};
   p.dom.window.Element.prototype.getBoundingClientRect=function(){return {top:0,bottom:100};};
   p.doc.body.dataset.hvTopic='1';
   if(reveal)p.doc.body.dataset.hvReveal='1';
+  if(jumpNew)p.doc.body.dataset.hvJumpNew='1';
   if(visit)p.doc.body.dataset.hvVisit=Buffer.from(JSON.stringify(visit)).toString('base64');
   if(anchor) {p.doc.body.dataset.hvAnchor=Buffer.from(JSON.stringify(anchor)).toString('base64');p.doc.body.dataset.hvScroll=String(anchor.y);}
   p.dom.window.HackerViews.retry();
@@ -1932,6 +1933,44 @@ test('after a refresh the line measures from the load it replaced and offers no 
   p.dom.window.close();
 });
 
+test('a discussion opened from a feed row’s new count goes to the first new comment once it loads', async () => {
+  const viewedAt = 1700000000;
+  const p = await lazyPage(undefined, {jumpNew: true, visit: {viewedAt, leftAt: viewedAt + 600, descendants: 2}});
+  const api = p.dom.window.HackerViews;
+  const scrolled = []; p.dom.window.Element.prototype.scrollIntoView = function () { scrolled.push(this.id); };
+  let request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  api.lazyResult(request.token, [{id: 1, effect: 'visible', item: {id: 1, type: 'story', by: 'op', title: 'Topic', descendants: 4, kids: [2, 3, 4]}}]);
+  await new Promise(r => setTimeout(r, 5));
+  assert.deepEqual(scrolled, [], 'nothing to go to before the comments load');
+  request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  api.lazyResult(request.token, [
+    {id: 2, effect: 'visible', item: {id: 2, type: 'comment', by: 'old', parent: 1, time: viewedAt - 100, text: 'Seen before'}},
+    {id: 3, effect: 'visible', item: {id: 3, type: 'comment', by: 'a', parent: 1, time: viewedAt + 100, text: 'New one'}},
+    {id: 4, effect: 'visible', item: {id: 4, type: 'comment', by: 'b', parent: 1, time: viewedAt + 200, text: 'New two'}}]);
+  await new Promise(r => setTimeout(r, 5));
+  assert.deepEqual(scrolled, ['3'], 'the first new comment, once');
+  p.dom.window.close();
+});
+
+test('a discussion asked to go to its first new comment after it loaded goes there', async () => {
+  const viewedAt = 1700000000;
+  const p = await lazyPage(undefined, {visit: {viewedAt, leftAt: viewedAt + 600, descendants: 1}});
+  const api = p.dom.window.HackerViews;
+  const scrolled = []; p.dom.window.Element.prototype.scrollIntoView = function () { scrolled.push(this.id); };
+  let request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  api.lazyResult(request.token, [{id: 1, effect: 'visible', item: {id: 1, type: 'story', by: 'op', title: 'Topic', descendants: 2, kids: [2, 3]}}]);
+  await new Promise(r => setTimeout(r, 5));
+  request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  api.lazyResult(request.token, [
+    {id: 2, effect: 'visible', item: {id: 2, type: 'comment', by: 'old', parent: 1, time: viewedAt - 100, text: 'Seen before'}},
+    {id: 3, effect: 'visible', item: {id: 3, type: 'comment', by: 'a', parent: 1, time: viewedAt + 100, text: 'New one'}}]);
+  await new Promise(r => setTimeout(r, 5));
+  assert.deepEqual(scrolled, [], 'a plain open stays at the top');
+  api.jumpToFirstNew();
+  assert.deepEqual(scrolled, ['3']);
+  p.dom.window.close();
+});
+
 test('a revisited discussion with nothing new says so, quietly', async () => {
   const viewedAt = 1700000000;
   const p = await lazyPage(undefined, {visit: {viewedAt, leftAt: viewedAt + 60, descendants: 5}});
@@ -1955,6 +1994,13 @@ test('feed rows the reader has opened before show how many comments arrived sinc
   assert.ok([101, 102, 103].every(id => asked.ids.includes(id)), 'the page asks which stories were visited');
   p.dom.window.HackerViews.visitResults({'101': {descendants: 131, viewedAt: 1700000000}, '102': {descendants: 40, viewedAt: 1700000000}});
   assert.equal(p.doc.getElementById('101').nextElementSibling.querySelector('.hv-new-count').textContent, ' · +12 new');
+  const line = p.doc.getElementById('101').nextElementSibling, jump = line.querySelector('.hv-new-count a');
+  assert.equal(jump.getAttribute('href'), 'item?id=101', 'the count links to the discussion');
+  p.doc.addEventListener('click', event => event.preventDefault());
+  jump.click();
+  assert.deepEqual(p.messages.filter(m => m.kind === 'newJumpIntent').map(m => m.id), [101], 'and asks for it to open at the first new comment');
+  line.querySelector('a[href="item?id=101"]').click();
+  assert.equal(p.messages.filter(m => m.kind === 'newJumpIntent').length, 1, 'the comment count itself opens the discussion as usual');
   assert.equal(p.doc.getElementById('102').nextElementSibling.querySelector('.hv-new-count'), null, 'nothing when the count has not grown');
   assert.equal(p.doc.getElementById('103').nextElementSibling.querySelector('.hv-new-count'), null, 'nothing for a story never opened');
   assert.ok(p.doc.getElementById('101').hasAttribute('data-hv-visited') && p.doc.getElementById('102').hasAttribute('data-hv-visited'), 'opened stories are marked as viewed, with or without new comments');

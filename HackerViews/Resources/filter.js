@@ -46,6 +46,11 @@
   }
   document.addEventListener('click', carryReveal, true);
   document.addEventListener('auxclick', carryReveal, true);
+  // A feed row's count of new comments opens its discussion at the first new one.
+  document.addEventListener('click', event => {
+    const id = Number(event.target.closest?.('.hv-new-count a[data-hv-topic]')?.dataset.hvTopic);
+    if (Number.isSafeInteger(id) && id > 0) post({kind: 'newJumpIntent', id});
+  }, true);
   let editedRow = null;
   let filterAnchor = null;
   function captureFilterAnchor() {
@@ -230,7 +235,7 @@
     .hv-visit button:hover { border-color: var(--qhn-accent); color: var(--qhn-accent); }
     .hv-flash { animation: hv-flash 1.2s ease-out; }
     @keyframes hv-flash { from { background: color-mix(in srgb, var(--qhn-text) 14%, transparent); } to { background: transparent; } }
-    .hv-new-count { color: var(--qhn-text); font-weight: 600; }
+    .hv-new-count, .hv-new-count a:link, .hv-new-count a:visited { color: var(--qhn-text); font-weight: 600; }
     .hv-own .hv-collapse { position: relative; font: inherit; color: var(--qhn-muted); background: transparent; border: 0; min-height: 0; padding: 0 3px; }
     .hv-collapse::before { content: ''; position: absolute; inset: -7px -3px; border-radius: 4px; }
     .hv-own .hv-collapse:hover, .hv-own .hv-collapse:focus-visible { color: var(--qhn-text); background: var(--qhn-hover); outline: 1px solid var(--qhn-line); }
@@ -2665,6 +2670,13 @@
     renderHeader();
     lazyGroup(document.getElementById('hv-topic-root'),[Number(document.body.dataset.hvTopic)],0,new Set());
     lazyAnnounce();lazyPump();void loadVoteActions();
+    if(document.body.dataset.hvJumpNew)jumpToFirstNew();
+  }
+  // Opened from a feed row's count of new comments: go to the first new
+  // comment, waiting for one to load.
+  function jumpToFirstNew() {
+    if(!lazyThread || !visitBaseline)return;
+    window.scrollTo(0,0);lazyRestoreAnchor=null;lazyRestoreY=0;jumpToNextNew(null);
   }
 
   function process() {
@@ -2731,8 +2743,13 @@
       const fresh = Number(/\d+/.exec(link.textContent)[0]) - record.descendants;
       let badge = subtext.querySelector('.hv-new-count');
       if (fresh <= 0) { badge?.remove(); continue; }
-      if (!badge) { badge = document.createElement('span'); badge.className = 'hv-new-count'; link.after(badge); }
-      badge.textContent = ' · +' + fresh + ' new'; badge.title = pluralize(fresh, 'comment') + ' since your last visit';
+      if (!badge) {
+        badge = document.createElement('span'); badge.className = 'hv-new-count';
+        const jump = document.createElement('a'); jump.href = link.getAttribute('href'); jump.dataset.hvTopic = key;
+        badge.append(' · ', jump); link.after(badge);
+      }
+      const jump = badge.querySelector('a');
+      jump.textContent = '+' + fresh + ' new'; jump.title = pluralize(fresh, 'comment') + ' since your last visit\nOpens at the first new comment';
     }
   }
   function finish(token, decisions, blockPage = false, labels = {}, partial = false, inherited = {}) {
@@ -2878,7 +2895,7 @@
     visitResults(results) { paintVisits(results); },
     linkPreview, userNote, forgetUserNotes,
     setLinkRewrites(rules) { linkRewrites = (rules || []).filter(rule => rule && rule.from && rule.to); annotateLinks(document); },
-    refreshVisits,
+    refreshVisits, jumpToFirstNew,
     retry() { process(); },
     // The account has posted from a later page and come back: HN's page now
     // has the comment, which the API may not carry yet.
