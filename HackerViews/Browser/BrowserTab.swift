@@ -917,6 +917,7 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
             if pendingFormSubmission, Self.topicID(target) != nil {
                 pendingFormSubmission = false
                 lazyURL = nil
+                expireReplies(at: target)
                 return true
             }
             pendingFormSubmission = true
@@ -924,12 +925,20 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
         case .other:
             let keep = pendingFormSubmission && Self.topicID(target) != nil
             pendingFormSubmission = false
-            if keep { lazyURL = nil }
+            if keep { lazyURL = nil; expireReplies(at: target) }
             return keep
         default:
             pendingFormSubmission = false
             return false
         }
+    }
+
+    /// A post comes back to the discussion it was made in, at the comment it
+    /// replied to: the replies those two carry have changed.
+    private func expireReplies(at target: URL) {
+        let ids = [Self.topicID(target), target.fragment.flatMap { Int($0) }].compactMap { $0 }
+        let service = service
+        Task { await service.expire(ids) }
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,

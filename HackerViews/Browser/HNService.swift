@@ -202,6 +202,13 @@ actor HNService {
 
     // Only author, type and parent are reused beyond the content TTL. Rules
     // inspecting text still need the normal mutable-content refresh.
+    /// Items whose replies have just changed, such as by the account's own
+    /// post: the next read fetches them again. Their ancestry stays known.
+    func expire(_ ids: [Int]) {
+        loadCachesIfNeeded()
+        for id in ids { cache[id]?.fetched = .distantPast }
+    }
+
     func ancestorItem(_ id: Int, rules: [FilterRule]) async throws -> HNItem? {
         loadCachesIfNeeded()
         if !rules.contains(where: { $0.isActive && $0.content != nil }),

@@ -2,6 +2,11 @@ import SwiftUI
 import AppKit
 import WebKit
 
+actor Fetches {
+    var counts: [Int: Int] = [:]
+    func add(_ id: Int) { counts[id, default: 0] += 1 }
+}
+
 @main struct SessionSmoke {
     @MainActor static func main() {
         let external = URL(string: "https://example.com/?q=a%20b&literal=%24(test)")!
@@ -59,6 +64,26 @@ import WebKit
         print("PASS submission state consumed by redirects, clicks, reload/back, completion and failure")
         print("PASS edit/delete submission redirects preserve fresh canonical content")
         print("PASS reply submission redirects preserve canonical content only for that navigation")
+        let fetches = Fetches()
+        let replies = HNService(directory: directory.appendingPathComponent("replies"), itemLoader: { id in
+            await fetches.add(id)
+            return HNItem(id: id, by: "author", parent: id == 123 ? nil : 123, type: id == 123 ? "story" : "comment", kids: [])
+        })
+        let posting = BrowserTab(store: store, service: replies, persistentSession: false)
+        var expired = false
+        Task { @MainActor in
+            for id in [123, 456, 789] { _ = try! await replies.item(id) }
+            _ = posting.preservesCanonicalNavigation(to: commentURL, type: .formSubmitted, isMainFrame: true)
+            precondition(posting.preservesCanonicalNavigation(to: topicURL, type: .other, isMainFrame: true))
+            try? await Task.sleep(for: .milliseconds(50))
+            for id in [123, 456, 789] { _ = try! await replies.item(id) }
+            let counts = await fetches.counts
+            precondition(counts[123] == 2 && counts[456] == 2, "the discussion and the comment a post lands on are fetched again, got \(counts)")
+            precondition(counts[789] == 1, "other items keep their cached copies, got \(counts)")
+            expired = true
+        }
+        while !expired { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
+        print("PASS a post's landing discussion and comment are fetched fresh, so the reader shows the reply")
         let first = BrowserWorkspace(store: store, defaults: defaults)
         first.start()
         let home = first.tabs[0]
