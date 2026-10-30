@@ -1791,18 +1791,25 @@
   // The first unread comment below the top of the viewport, in thread order,
   // including comments inside collapsed branches, which sit where their
   // collapsed ancestor sits on screen; the first unread one when none is below.
+  function rowTop(row) {
+    if (row.getClientRects().length) return row.getBoundingClientRect().top;
+    let host = row.closest('.hv-node');
+    while (host && !host.getClientRects().length) host = host.parentElement?.closest('.hv-node');
+    return host ? host.getBoundingClientRect().top : Infinity;
+  }
   function nextNewRow() {
-    const rowTop = row => {
-      if (row.getClientRects().length) return row.getBoundingClientRect().top;
-      let host = row.closest('.hv-node');
-      while (host && !host.getClientRects().length) host = host.parentElement?.closest('.hv-node');
-      return host ? host.getBoundingClientRect().top : Infinity;
-    };
     const rows = [...document.querySelectorAll('tr.comtr.hv-new')];
     return rows.find(row => rowTop(row) > 60) || rows[0];
   }
   function jumpToNextNew(button) {
-    const target = nextNewRow();
+    let target = nextNewRow();
+    // On the new comment the last jump left at the top, with no other below:
+    // moving on reads it, as it reads any new comment, even when nothing
+    // new is left to move on to.
+    if (target && target === currentNew && rowTop(target) <= 60) {
+      markRead(target); target = nextNewRow();
+      if (!target) { renderVisitLine(); refreshNewNavigation(); }
+    }
     if (target) { goToRow(target); return; }
     if (threadComplete()) return;
     // Nothing new is loaded yet: keep loading and jump when one arrives.
