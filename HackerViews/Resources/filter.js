@@ -1887,6 +1887,78 @@
     const text=own.querySelector('.commtext');
     if(text && data.fade)text.style.opacity=String(data.fade);
   }
+  // The account's own comments as HN's page shows them. The API carries a
+  // comment only some seconds after it is posted, and the parent's reply list
+  // lags with it, so until then the reader draws the account's comment from
+  // HN's page, in HN's place for it, and asks the API again until it answers.
+  const ownComments = new Map(), ownTimers = new Map();
+  const ownRecheck = () => Number(window.__hackerViewsOwnRecheck) || 15000;
+  function rememberOwnComments(doc) {
+    if (!signedInUser) return;
+    const topic = Number(document.body.dataset.hvTopic);
+    const rows = [...doc.querySelectorAll('tr.athing.comtr[id]')].map(row => ({row, id: Number(row.id),
+      indent: Number(row.querySelector('td.ind')?.getAttribute('indent')) || 0}));
+    const parents = [];
+    rows.forEach((entry, index) => {
+      let above = index - 1;
+      while (above >= 0 && rows[above].indent >= entry.indent) above--;
+      parents.push(above >= 0 ? rows[above].id : topic);
+    });
+    rows.forEach(({row, id}, index) => {
+      const text = canonicalItems.get(id)?.text;
+      if (!Number.isSafeInteger(id) || id <= 0 || row.querySelector('.hnuser')?.textContent.trim() !== signedInUser || !text) return;
+      const age = row.querySelector('.age')?.getAttribute('title') || '';
+      const time = Number(age.split(' ')[1]) || Math.floor(Date.parse(age.split(' ')[0] + 'Z') / 1000) || Math.floor(Date.now() / 1000);
+      const parent = parents[index];
+      const after = rows.filter((_, other) => other > index && parents[other] === parent).map(other => other.id);
+      ownComments.set(id, {after, entry: {id, effect: 'visible', label: '', provisional: true,
+        item: {id, type: 'comment', by: signedInUser, parent, time, text, kids: []}}});
+    });
+    for (const parent of new Set([...ownComments.values()].map(own => own.entry.item.parent))) placeOwnComments(parent);
+  }
+  // Adds under a drawn parent each of the account's comments its API reply
+  // list does not name yet, before the next of its siblings on HN's page.
+  function placeOwnComments(parentID) {
+    const parent = lazyNodes.get(parentID);
+    if (!parent?.entry?.item || parent.entry.effect === 'unresolved' || !lazyShown(parent)) return;
+    for (const [id, own] of ownComments) {
+      if (own.entry.item.parent !== parentID || lazyNodes.has(id)) continue;
+      if (parent.children?.ids.includes(id) || [...lazyGroups.values()].some(group => group.ids.includes(id))) continue;
+      let group = parent.children;
+      if (!group) {
+        const host = document.createElement('div'); host.className = 'hv-children'; parent.host.append(host);
+        const comment = parent.entry.item.type === 'comment';
+        if (comment && parent.depth * 28 < 280) host.append(branchRail(parent));
+        group = parent.children = lazyGroup(host, [], comment ? parent.depth + 1 : 0, new Set([...parent.ancestors, parent.id]));
+        lazySchedule(group, 0);
+        host.hidden = !!parent.collapsed;
+      }
+      const next = own.after.find(other => group.ids.includes(other));
+      const index = next !== undefined ? group.ids.indexOf(next) : group.ids.length;
+      group.ids.splice(index, 0, id);
+      // Siblings still to load around it: it loads in turn with them, and the
+      // API's empty answer draws it from HN's page then.
+      if (group.sentinel.isConnected && index >= group.offset) continue;
+      group.offset++;
+      const host = document.createElement('div'); host.className = 'hv-node';
+      const nextHost = next !== undefined ? lazyNodes.get(next)?.host : null;
+      if (nextHost) nextHost.before(host); else if (group.sentinel.isConnected) group.sentinel.before(host); else group.host.append(host);
+      const node = {id, host, group, depth: group.depth, ancestors: group.ancestors, collapsed: lazyCollapsed.has(id)};
+      lazyNodes.set(id, node);
+      lazyRender(node, own.entry);
+    }
+  }
+  // Asks the API again for a comment drawn from HN's page; its answer, once
+  // it has one, replaces what HN's page gave.
+  function scheduleOwnRecheck(node) {
+    if (ownTimers.has(node.id)) return;
+    ownTimers.set(node.id, setTimeout(() => {
+      ownTimers.delete(node.id);
+      if (!node.host.isConnected || !node.entry?.provisional || Date.now() / 1000 - node.entry.item.time > 600) return;
+      if (localPaused) { scheduleOwnRecheck(node); return; }
+      lazyRefreshQueue = [...(lazyRefreshQueue || []), node]; lazyPump();
+    }, ownRecheck()));
+  }
   function rememberCanonicalItems(doc,target) {
     const allowed=new Set(['edit','delete','flag','unflag','vouch','unvouch','hide','unhide','favorite','unfavorite','past']);
     for(const row of doc.querySelectorAll('tr.athing[id]')) {
@@ -2037,7 +2109,7 @@
         const parsed=readHeader(doc,target);
         if(parsed){if(parsed.links.length)headerModel.links=parsed.links;headerModel.identity=parsed.identity;headerModel.blackBar=parsed.blackBar;renderHeader();}
       }
-      rememberCanonicalItems(doc,target);rememberCommentForm(doc,target);
+      rememberCanonicalItems(doc,target);rememberOwnComments(doc);rememberCommentForm(doc,target);
       let rows=0,withActions=0;
       for(const row of doc.querySelectorAll('tr.athing[id]')) {
         const id=Number(row.id);if(!Number.isSafeInteger(id))continue;
@@ -2220,6 +2292,8 @@
     trace('comment.dom',{id:node.id,ms:performance.now()-started});
   }
   function lazyRenderContent(node, entry) {
+    if ((!entry.item || entry.effect === 'unresolved') && ownComments.has(node.id)) entry = ownComments.get(node.id).entry;
+    if (entry.provisional) scheduleOwnRecheck(node);
     node.entry=entry;
     // Whatever this sibling turns out to be, its neighbours' prev and next
     // are re-pointed now, before any branch below decides what to draw.
@@ -2399,6 +2473,7 @@
     if(root && revealedID===node.id && filteredEffect(entry.effect)) { const notice=document.createElement('div');notice.className='qhn-loading';
       notice.append('Temporarily revealed · Hidden by '+(entry.label || 'your filters')+' · '); const hide=document.createElement('button');hide.textContent='Hide again';hide.onclick=()=>setRootRevealed(false);notice.append(hide);own.prepend(notice); }
     addControls();paintOP();applyCanonicalMetadata(node);annotateLinks(own);
+    if (ownComments.size) placeOwnComments(node.id);
   }
   const queuedResults = new Map();
   let resultFramePending = false;
@@ -2804,7 +2879,13 @@
     linkPreview, userNote, forgetUserNotes,
     setLinkRewrites(rules) { linkRewrites = (rules || []).filter(rule => rule && rule.from && rule.to); annotateLinks(document); },
     refreshVisits,
-    retry() { process(); }
+    retry() { process(); },
+    // The account has posted from a later page and come back: HN's page now
+    // has the comment, which the API may not carry yet.
+    refreshOwnComments() {
+      if (!lazyThread) return;
+      votePages.clear(); votePage = location.href; void loadVoteActions();
+    }
   };
   const observer = new MutationObserver(mutations => {
     install();

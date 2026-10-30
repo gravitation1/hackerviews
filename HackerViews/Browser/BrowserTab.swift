@@ -28,6 +28,9 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
     private let retainsPages: Bool
     private weak var historyOwner: BrowserTab?
     private var retainedPages: [Int: BrowserTab] = [:]
+    /// Discussions the account has posted in since their kept reader pages
+    /// were drawn; such a page reads HN's again when it comes back.
+    private var postedTopics = Set<Int>()
     private var pageSubscription: AnyCancellable?
     private var reactivationPosition: (Double, [String: Any]?)?
     private var restoringRetainedViewport = false
@@ -376,6 +379,9 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
         if !reload, let retained = retainedPages[index] {
             page = retained
             page.reactivationPosition = (entry.scrollY, entry.restorationAnchor)
+            if let topic = page.lazyURL.flatMap(Self.topicID), postedTopics.remove(topic) != nil {
+                page.webView.callAsyncJavaScript("window.HackerViews?.refreshOwnComments()", arguments: [:], in: nil, in: Self.world, completionHandler: nil)
+            }
         } else {
             page = BrowserTab(store: store, service: service, persistentSession: persistentSession)
             page.title = title
@@ -934,9 +940,11 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
     }
 
     /// A post comes back to the discussion it was made in, at the comment it
-    /// replied to: the replies those two carry have changed.
+    /// replied to: the replies those two carry have changed, and a kept reader
+    /// page of that discussion reads HN's page again when it comes back.
     private func expireReplies(at target: URL) {
         let ids = [Self.topicID(target), target.fragment.flatMap { Int($0) }].compactMap { $0 }
+        if let topic = Self.topicID(target) { (historyOwner ?? self).postedTopics.insert(topic) }
         let service = service
         Task { await service.expire(ids) }
     }

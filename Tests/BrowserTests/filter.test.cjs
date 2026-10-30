@@ -1851,6 +1851,75 @@ test('the account’s own comments are never new, whether HN names the account b
   p.dom.window.close();
 });
 
+test('the account’s comment the API does not carry yet is drawn from HN’s page, in HN’s place, until the API answers', async () => {
+  const p = await lazyPage();
+  const api = p.dom.window.HackerViews;
+  p.dom.window.__hackerViewsOwnRecheck = 20;
+  p.dom.window.IntersectionObserver = class {constructor(callback){this.callback=callback;}observe(target){this.callback([{target,isIntersecting:true}]);}unobserve(){}};
+  // HN's page: bob's comment 2, alice's new reply 5 under it, then carol's 3.
+  const hnPage = hnHeader(signedIn) + `<table>${row(2, 'bob')}${row(5, 'alice', 1)}${row(3, 'carol')}</table>`;
+  let fetches = 0;
+  p.dom.window.fetch = async () => { fetches++; return {ok: true, text: async () => hnPage}; };
+  let request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  api.lazyResult(request.token, [{id: 1, effect: 'visible', item: {id: 1, type: 'story', by: 'op', title: 'Topic', descendants: 3, score: 1, kids: [2, 3]}}]);
+  await new Promise(r => setTimeout(r, 10));
+  request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  // The API's copy of 2 predates the reply.
+  api.lazyResult(request.token, [
+    {id: 2, effect: 'visible', item: {id: 2, type: 'comment', by: 'bob', parent: 1, time: 1700000000, text: 'Parent', kids: []}},
+    {id: 3, effect: 'visible', item: {id: 3, type: 'comment', by: 'carol', parent: 1, time: 1700000000, text: 'Sibling', kids: []}}]);
+  await new Promise(r => setTimeout(r, 10));
+  const row5 = p.doc.getElementById('5');
+  assert.ok(row5, 'the reply is drawn although the API does not list it');
+  assert.equal(row5.querySelector('.commtext').textContent, 'Comment 5', 'with HN’s text');
+  assert.ok(p.doc.getElementById('2').closest('.hv-node').contains(row5), 'under the comment it replies to');
+  assert.ok(!row5.classList.contains('hv-new'), 'and, being the account’s own, not new');
+  // The API names the reply now but still has nothing for it.
+  await new Promise(r => setTimeout(r, 40));
+  request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  assert.deepEqual([...request.ids], [5], 'the API is asked again for the reply');
+  api.lazyResult(request.token, [{id: 5, effect: 'unresolved', reason: 'This contribution is no longer available from Hacker News.'}]);
+  await new Promise(r => setTimeout(r, 10));
+  assert.equal(p.doc.getElementById('5').querySelector('.commtext').textContent, 'Comment 5', 'a failed check keeps HN’s copy, not an error');
+  await new Promise(r => setTimeout(r, 40));
+  request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  api.lazyResult(request.token, [{id: 5, effect: 'visible', item: {id: 5, type: 'comment', by: 'alice', parent: 2, time: 1700000100, text: 'From the API', kids: []}}]);
+  await new Promise(r => setTimeout(r, 10));
+  assert.equal(p.doc.getElementById('5').querySelector('.commtext').textContent, 'From the API', 'the API’s answer replaces it');
+  const asked = p.messages.filter(m => m.kind === 'lazyItems').length;
+  await new Promise(r => setTimeout(r, 60));
+  assert.equal(p.messages.filter(m => m.kind === 'lazyItems').length, asked, 'and the API is not asked again');
+  assert.equal(p.doc.querySelectorAll('[id="5"]').length, 1);
+  const before = fetches;
+  api.refreshOwnComments();
+  await new Promise(r => setTimeout(r, 10));
+  assert.equal(fetches, before + 1, 'coming back after a post reads HN’s page again');
+  p.dom.window.close();
+});
+
+test('the account’s comment from HN’s page takes HN’s place among its siblings and in their navigation', async () => {
+  const p = await lazyPage();
+  const api = p.dom.window.HackerViews;
+  p.dom.window.IntersectionObserver = class {constructor(callback){this.callback=callback;}observe(target){this.callback([{target,isIntersecting:true}]);}unobserve(){}};
+  p.dom.window.fetch = async () => ({ok: true, text: async () => hnHeader(signedIn) + `<table>${row(2, 'bob')}${row(5, 'alice')}${row(3, 'carol')}</table>`});
+  let request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  api.lazyResult(request.token, [{id: 1, effect: 'visible', item: {id: 1, type: 'story', by: 'op', title: 'Topic', descendants: 2, score: 1, kids: [2, 3]}}]);
+  await new Promise(r => setTimeout(r, 10));
+  request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  assert.deepEqual([...request.ids], [2, 5, 3], 'HN’s page arrived first, so the reply loads in turn with its siblings');
+  api.lazyResult(request.token, [
+    {id: 2, effect: 'visible', item: {id: 2, type: 'comment', by: 'bob', parent: 1, time: 1700000000, text: 'First', kids: []}},
+    {id: 5, effect: 'unresolved', reason: 'This contribution is no longer available from Hacker News.'},
+    {id: 3, effect: 'visible', item: {id: 3, type: 'comment', by: 'carol', parent: 1, time: 1700000000, text: 'Last', kids: []}}]);
+  await new Promise(r => setTimeout(r, 10));
+  const order = [...p.doc.querySelectorAll('tr.comtr')].map(r => r.id);
+  assert.deepEqual(order, ['2', '5', '3'], 'between the siblings HN puts it between');
+  const next = id => [...p.doc.getElementById(id).querySelectorAll('.hv-comment-nav a')].find(a => a.textContent === 'next');
+  assert.ok(next('2'), 'the sibling before it points on');
+  assert.ok(next('5'), 'and it points on to the sibling after it');
+  p.dom.window.close();
+});
+
 test('after a refresh the line measures from the load it replaced and offers no jump back', async () => {
   const viewedAt = 1700000000;
   const p = await lazyPage(undefined, {visit: {viewedAt, leftAt: viewedAt + 60, descendants: 5, reload: true, anchor: {id: 2, top: 10, y: 400, ancestors: [1]}}});
