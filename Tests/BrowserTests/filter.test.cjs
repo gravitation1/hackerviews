@@ -1971,6 +1971,34 @@ test('a discussion asked to go to its first new comment after it loaded goes the
   p.dom.window.close();
 });
 
+test('a new comment already read stays read when a filter change draws it again', async () => {
+  const viewedAt = 1700000000;
+  const p = await lazyPage(undefined, {visit: {viewedAt, leftAt: viewedAt + 600, descendants: 0}});
+  const api = p.dom.window.HackerViews;
+  let request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  api.lazyResult(request.token, [{id: 1, effect: 'visible', item: {id: 1, type: 'story', by: 'op', title: 'Topic', descendants: 2, kids: [2, 3]}}]);
+  await new Promise(r => setTimeout(r, 5));
+  request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  api.lazyResult(request.token, [
+    {id: 2, effect: 'visible', item: {id: 2, type: 'comment', by: 'a', parent: 1, time: viewedAt + 100, text: 'Read before the note'}},
+    {id: 3, effect: 'visible', item: {id: 3, type: 'comment', by: 'b', parent: 1, time: viewedAt + 200, text: 'Still unread'}}]);
+  await new Promise(r => setTimeout(r, 5));
+  const row = id => p.doc.getElementById(String(id));
+  row(2).querySelector('.commtext').dispatchEvent(new p.dom.window.MouseEvent('mousemove', {bubbles: true}));
+  assert.ok(row(2).classList.contains('hv-new-read'));
+  api.setOrdered(true, true);
+  const check = p.messages.filter(m => m.kind === 'localRecheck').at(-1);
+  api.localResult(check.token, {1: 'visible', 2: 'fade:50', 3: 'fade:50'}, {2: 'Noted', 3: 'Noted'});
+  await new Promise(r => setTimeout(r, 5));
+  assert.ok(row(2).classList.contains('qhn-faded') || row(2).querySelector('.commtext').style.opacity, 'the note fades the comment');
+  assert.ok(!row(2).classList.contains('hv-new') && row(2).classList.contains('hv-new-read'), 'a comment read before the fade stays read');
+  assert.ok(row(3).classList.contains('hv-new'), 'one never read stays new');
+  assert.equal(p.doc.querySelector('.hv-visit-text').textContent, '1 new comment since your last visit');
+  row(3).querySelector('.commtext').dispatchEvent(new p.dom.window.MouseEvent('mousemove', {bubbles: true}));
+  assert.ok(row(3).classList.contains('hv-new-read'), 'and reads as usual once faded');
+  p.dom.window.close();
+});
+
 test('a revisited discussion with nothing new says so, quietly', async () => {
   const viewedAt = 1700000000;
   const p = await lazyPage(undefined, {visit: {viewedAt, leftAt: viewedAt + 60, descendants: 5}});

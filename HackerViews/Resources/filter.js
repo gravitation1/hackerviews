@@ -2416,7 +2416,9 @@
       arrows.append(lazyVoteControl(item,'up'),lazyVoteControl(item,'down'));heading.prepend(arrows);
       const cell=document.createElement('td');cell.className='default';
       const head=document.createElement('div');head.append(heading);
-      if(fresh)row.classList.add('hv-new');
+      // A comment drawn again, such as when a filter's effect changes, keeps
+      // having been read.
+      if(fresh)row.classList.add(node.readNew?'hv-new-read':'hv-new');
       lazyNavigation(node,item,heading);
       // HN's line, one separator: navigation, then HN's own actions when its
       // HTML arrives, then ours (reply, note), then the toggle.
