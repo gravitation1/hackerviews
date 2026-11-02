@@ -273,9 +273,15 @@
     .comtr td.hv-gutter::before { content: ''; position: absolute; left: 5px; top: 0; bottom: 0; width: 2px; box-sizing: border-box; background: var(--hv-column); }
     .comtr.qhn-revealed td.hv-gutter::before { background: transparent; border-left: 2px dashed var(--qhn-accent); }
     .comtr.hv-tombstone td.hv-gutter::before { background: transparent; border-left: 2px dashed var(--qhn-line); }
+    /* The tinted comment's path: the gutter line of each comment on it, unless
+       that line already marks something, and each rail down to the next
+       comment on the path, turning into that comment's gutter line. */
+    .comtr.hv-path:where(:not(.qhn-preferred, .qhn-revealed, .hv-tombstone)) td.hv-gutter::before { background: var(--qhn-muted); }
+    .hv-rail.hv-path::after { content: ''; position: absolute; left: 5px; top: 0; box-sizing: border-box; pointer-events: none;
+      width: var(--hv-path-reach, 0); height: var(--hv-path-end, 0); border-left: 2px solid var(--qhn-muted); border-bottom: 2px solid var(--qhn-muted); }
     .hv-rail-head { position: absolute; left: 0; top: 0; bottom: 0; width: 12px; z-index: 1; margin: 0; padding: 0; border: 0; min-height: 0; appearance: none; -webkit-appearance: none; background: transparent; cursor: pointer; }
     .hv-children { position: relative; }
-    .hv-rail { position: absolute; top: -16px; bottom: 12px; width: 12px; z-index: 1; margin: 0; padding: 0; border: 0; min-height: 0; appearance: none; -webkit-appearance: none;
+    .hv-rail { position: absolute; top: -16px; bottom: 12px; width: 12px; z-index: 1; margin: 0; padding: 0; border: 0; min-height: 0; overflow: visible; appearance: none; -webkit-appearance: none;
       cursor: pointer; background: linear-gradient(to right, transparent 5px, var(--qhn-line) 5px, var(--qhn-line) 7px, transparent 7px); }
     .hv-rail:hover, .hv-rail:focus-visible, .hv-node:has(> .hv-own .hv-rail-head:hover) > .hv-children > .hv-rail { outline: 0; background: linear-gradient(to right, transparent 5px, var(--qhn-accent) 5px, var(--qhn-accent) 7px, transparent 7px); }
     .hv-node:has(> .hv-children > .hv-rail:hover) > .hv-own td.hv-gutter::before, .hv-own td.hv-gutter:has(> .hv-rail-head:hover)::before { background: var(--qhn-accent); border: 0; }
@@ -284,7 +290,7 @@
        tick from the gutter line toward it. */
     a.hnuser.hv-traced, a.hv-chain-name.hv-traced { text-decoration: underline; }
     .comtr.hv-traced td.hv-gutter::after { content: ''; position: absolute; left: 5px; top: 7px; width: 8px; height: 2px; background: var(--qhn-text); }
-    /* The authors above the comment at the top of the viewport. Jumps land
+    /* The tinted comment's path above the viewport. Jumps land
        below the bar rather than under it. */
     .hv-chain { position: fixed; top: 0; left: 0; right: 0; z-index: 1000; box-sizing: border-box; height: 26px; padding: 0 16px;
       display: flex; align-items: center; gap: 6px; overflow: hidden; white-space: nowrap;
@@ -292,6 +298,7 @@
       background: var(--qhn-bg); border-bottom: 1px solid var(--qhn-line); }
     .hv-chain a.hv-chain-name, .hv-chain a.hv-chain-name:visited { flex: none; color: var(--qhn-text); font-weight: 600; text-decoration: none; }
     .hv-chain a.hv-chain-name:hover, .hv-chain a.hv-chain-name:focus-visible, .hv-chain a.hv-chain-name.hv-traced { text-decoration: underline; }
+    .hv-chain a.hv-chain-current { padding: 0 5px; border-radius: 4px; background: var(--qhn-hover); }
     .hv-chain-sep, .hv-chain-gap { flex: none; }
     body[data-hv-topic] .hv-node, body[data-hv-topic] tr.comtr { scroll-margin-top: 30px; }
     .hv-reader-actions a, .hv-reader-actions .qhn-record-text { color: var(--qhn-muted); text-decoration: none; }
@@ -2375,7 +2382,7 @@
       if(node.children)node.children.host.hidden=node.collapsed;
       onToggle?.(node.collapsed);update();
       if(node.collapsed)showCollapsed(node);
-      post({kind:'collapsedState',ids:[...lazyCollapsed]});lazyPump();scheduleChain();
+      post({kind:'collapsedState',ids:[...lazyCollapsed]});lazyPump();scheduleChain(true);
     };
     return toggle;
   }
@@ -2383,7 +2390,7 @@
     const started=performance.now();
     lazyRenderContent(node,entry);
     trace('comment.dom',{id:node.id,ms:performance.now()-started});
-    scheduleChain();
+    scheduleChain(true);
   }
   function lazyRenderContent(node, entry) {
     if ((!entry.item || entry.effect === 'unresolved') && ownComments.has(node.id)) entry = ownComments.get(node.id).entry;
@@ -2577,51 +2584,79 @@
   function scrollingNow() { return performance.now() < scrollingUntil; }
   // The comment under the pointer takes the hover tint and is read. A rail
   // stands for the comment whose replies it runs beside, so the pointer on it
-  // points at that comment. WebKit holds back its own pointer events while the
-  // page scrolls, so each scroll hit-tests the last pointer position to keep
-  // the tint on the comment that is under it in that frame.
+  // points at that comment. Between comments, and over the context bar, the
+  // comment last pointed at keeps the tint, so crossing a margin or reaching
+  // for the bar does not drop it. WebKit holds back its own pointer events
+  // while the page scrolls, so each scroll hit-tests the last pointer
+  // position to keep the tint on the comment that is under it in that frame.
   let pointerRow = null, pointerAt = null;
   function rowUnder(element) {
     if(element?.matches?.('.hv-rail'))return element.closest('.hv-node')?.querySelector(':scope > .hv-own tr.comtr') || null;
     return element?.closest?.('tr.comtr') || null;
   }
+  // A comment, null for none, or undefined to keep the one pointed at.
+  function pointerTarget(element) {
+    if(element?.closest?.('.hv-chain'))return undefined;
+    const row=rowUnder(element);
+    if(row || !pointerRow || !element?.closest?.('.hv-children'))return row;
+    return undefined;
+  }
   function pointAt(row) {
-    if(row===pointerRow)return;
+    if(row===undefined || row===pointerRow)return;
     pointerRow?.classList.remove('hv-pointer');pointerRow=row;row?.classList.add('hv-pointer');
     if(row?.classList.contains('hv-new')){markRead(row);renderVisitLine();refreshNewNavigation();}
+    scheduleChain();
   }
   document.addEventListener('mousemove',event=>{
     pointerAt={x:event.clientX,y:event.clientY};
-    pointAt(rowUnder(event.target));
+    pointAt(pointerTarget(event.target));
   },{passive:true});
   document.documentElement.addEventListener('mouseleave',()=>{pointerAt=null;pointAt(null);});
   window.addEventListener('scroll',()=>{
     if(!pointerAt || typeof document.elementFromPoint!=='function')return;
-    pointAt(rowUnder(document.elementFromPoint(pointerAt.x,pointerAt.y)));
+    pointAt(pointerTarget(document.elementFromPoint(pointerAt.x,pointerAt.y)));
   },{passive:true});
-  // Thread context: once the comments a reply answers have scrolled away, a
-  // bar along the top names their authors, root first, down to the comment
-  // at the top of the viewport, which is named too while its own header is
-  // under the bar. Each name previews its comment and goes to it.
+  // The tinted comment's path to the root of its thread: on the page, each
+  // rail on the path is lit down to the next comment on it, with an elbow
+  // into that comment's gutter line; along the top, a bar names the comments
+  // on the path whose headers have scrolled above it, root first, and the
+  // tinted comment itself, in its tint, once its own header has. Each name
+  // previews its comment and goes to it. With no comment tinted, the bar
+  // follows the comment at the top of the viewport and nothing is lit.
   const chainHeight = 26, chainProbe = 30;
-  let chainBar = null, chainSignature = null, chainFramePending = false;
-  function scheduleChain() {
-    if(!lazyThread || chainFramePending)return;
+  let chainBar = null, chainSignature = null, chainFramePending = false, chainLayoutDirty = true, pathKey = null, pathMarks = [];
+  function scheduleChain(layout = false) {
+    if(!lazyThread)return;
+    if(layout)chainLayoutDirty=true;
+    if(chainFramePending)return;
     if(typeof requestAnimationFrame!=='function'){updateChain();return;}
     chainFramePending=true;
     requestAnimationFrame(()=>{chainFramePending=false;updateChain();});
   }
-  function chainPath() {
+  const chainShown=n=>n?.entry?.item?.type==='comment' && (!filteredEffect(n.entry.effect) || lazyShown(n));
+  const chainHeader=n=>n.host.querySelector(':scope > .hv-own tr.comtr .comhead');
+  function chainCurrent() {
+    const pointed=pointerRow && lazyNodes.get(Number(pointerRow.id));
+    if(pointed)return {node:pointed,pointed:true};
     const root=document.getElementById('hv-topic-root');
-    if(!root || typeof document.elementFromPoint!=='function')return [];
+    if(!root || typeof document.elementFromPoint!=='function')return {node:null,pointed:false};
     const host=document.elementFromPoint(root.getBoundingClientRect().right-2,chainProbe)?.closest?.('.hv-node');
-    const node=host && nodeOfHost.get(host);
-    if(!node)return [];
-    const shown=n=>n?.entry?.item?.type==='comment' && (!filteredEffect(n.entry.effect) || lazyShown(n));
-    const path=[...node.ancestors].map(id=>lazyNodes.get(id)).filter(shown);
-    const head=node.host.querySelector(':scope > .hv-own tr.comtr .comhead');
-    if(shown(node) && head && head.getBoundingClientRect().top<chainHeight)path.push(node);
-    return path;
+    return {node:(host && nodeOfHost.get(host)) || null,pointed:false};
+  }
+  function markPath(path) {
+    for(const element of pathMarks){element.classList.remove('hv-path');element.style.removeProperty('--hv-path-end');element.style.removeProperty('--hv-path-reach');}
+    pathMarks=[];
+    path.forEach((node,i)=>{
+      const row=node.host.querySelector(':scope > .hv-own tr.comtr');
+      if(row){row.classList.add('hv-path');pathMarks.push(row);}
+      const next=path[i+1], rail=node.rail;
+      const head=next && chainHeader(next), gutter=next?.host.querySelector(':scope > .hv-own td.hv-gutter');
+      if(!rail?.isConnected || !head || !gutter)return;
+      const box=rail.getBoundingClientRect();
+      rail.style.setProperty('--hv-path-end',Math.max(0,head.getBoundingClientRect().top+9-box.top)+'px');
+      rail.style.setProperty('--hv-path-reach',Math.max(0,gutter.getBoundingClientRect().left-box.left)+'px');
+      rail.classList.add('hv-path');pathMarks.push(rail);
+    });
   }
   function chainLink(node) {
     const a=hnLink(node.entry.item.by || '[deleted]','/item?id='+node.id);a.className='hv-chain-name';a.dataset.hvPreview=node.id;
@@ -2634,15 +2669,23 @@
     return a;
   }
   function updateChain() {
-    const path=chainPath(), signature=path.map(n=>n.id).join(',');
+    const {node,pointed}=chainCurrent();
+    const path=node?[...[...node.ancestors].map(id=>lazyNodes.get(id)),node].filter(chainShown):[];
+    const key=pointed?String(node.id):'';
+    if(key!==pathKey || chainLayoutDirty){pathKey=key;markPath(pointed?path:[]);}
+    chainLayoutDirty=false;
+    const above=path.filter(n=>{const head=chainHeader(n);return !!head && head.getBoundingClientRect().top<chainHeight;});
+    const current=pointed && above.at(-1)===node;
+    const signature=above.map(n=>n.id).join(',')+(current?'*':'');
     if(signature===chainSignature)return;
     chainSignature=signature;
     if(!chainBar) {
       chainBar=document.createElement('nav');chainBar.className='hv-chain';chainBar.setAttribute('aria-label','Comments above');
       document.body.append(chainBar);
     }
-    chainBar.hidden=!path.length;
-    const links=path.map(chainLink);
+    chainBar.hidden=!above.length;
+    const links=above.map(chainLink);
+    if(current)links.at(-1).classList.add('hv-chain-current');
     const fill=list=>chainBar.replaceChildren(...list.flatMap((item,i)=>i?[Object.assign(document.createElement('span'),{className:'hv-chain-sep',textContent:'›'}),item]:[item]));
     fill(links);
     // A chain wider than the bar keeps its root and the comments nearest the
@@ -2656,8 +2699,8 @@
     }
     if(tracedName)for(const a of chainBar.querySelectorAll('a.hv-chain-name'))if(a.textContent.trim()===tracedName){a.classList.add('hv-traced');traced.push(a);}
   }
-  window.addEventListener('scroll',scheduleChain,{passive:true});
-  window.addEventListener('resize',()=>{chainSignature=null;scheduleChain();});
+  window.addEventListener('scroll',()=>scheduleChain(),{passive:true});
+  window.addEventListener('resize',()=>{chainSignature=null;scheduleChain(true);});
   function noteReadingScroll() {
     scrollingUntil=performance.now()+200;
     clearTimeout(settleTimer);

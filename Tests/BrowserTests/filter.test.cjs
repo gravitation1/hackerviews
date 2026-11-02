@@ -1852,29 +1852,48 @@ test('a name under the pointer marks every comment by that person, and leaving i
   p.dom.window.close();
 });
 
-test('a bar names the authors of the comments above the one at the top of the viewport, and goes to them', async () => {
+test('a bar names the comments above on the tinted comment’s path, the page lights the rest, and with nothing tinted it follows the top comment', async () => {
   const p = await deepThread();
   const row = id => p.doc.getElementById(String(id));
   const bar = () => p.doc.querySelector('.hv-chain');
-  const names = () => [...bar().querySelectorAll('a.hv-chain-name')].map(a => a.textContent);
-  let underProbe = null, headerTop = 0;
+  const names = () => [...bar().querySelectorAll('a.hv-chain-name')].map(a => a.textContent + (a.classList.contains('hv-chain-current') ? '*' : ''));
+  const tops = {2: -200, 3: -80, 4: 100, 5: 300};
+  let underProbe = null;
   p.doc.elementFromPoint = () => underProbe;
   const rect = p.dom.window.Element.prototype.getBoundingClientRect;
-  p.dom.window.Element.prototype.getBoundingClientRect = function () { return this.matches('.comhead') ? {top: headerTop, bottom: headerTop + 14} : rect.call(this); };
+  p.dom.window.Element.prototype.getBoundingClientRect = function () {
+    if (!this.matches('.comhead')) return rect.call(this);
+    const top = tops[this.closest('tr.comtr').id]; return {top, bottom: top + 14, left: 0};
+  };
   const scroll = target => { underProbe = target; p.dom.window.dispatchEvent(new p.dom.window.Event('scroll')); };
-  headerTop = 100;
+  const relayout = () => p.dom.window.dispatchEvent(new p.dom.window.Event('resize'));
+  const move = target => target.dispatchEvent(new p.dom.window.MouseEvent('mousemove', {bubbles: true}));
   scroll(row(4).querySelector('.commtext'));
-  assert.deepEqual(names(), ['alice', 'bob'], 'the replies above, root first; the comment whose header is in view is not repeated');
-  assert.equal(bar().hidden, false);
-  headerTop = -40; p.dom.window.dispatchEvent(new p.dom.window.Event('resize'));
-  assert.deepEqual(names(), ['alice', 'bob', 'alice'], 'a comment whose header is under the bar is named too');
-  assert.deepEqual([...bar().querySelectorAll('a')].map(a => a.dataset.hvPreview), ['2', '3', '4'], 'each name previews its comment');
+  assert.deepEqual(names(), ['alice', 'bob'], 'with nothing tinted, the comments above the top one, root first');
+  assert.equal(p.doc.querySelector('.hv-path'), null, 'and nothing on the page is lit');
+  tops[4] = -10; relayout();
+  assert.deepEqual(names(), ['alice', 'bob', 'alice'], 'the top comment is named once its header is under the bar');
+  tops[4] = 100; relayout();
+  move(row(3).querySelector('.commtext'));
+  assert.deepEqual(names(), ['alice', 'bob*'], 'the tinted comment’s path, ending in that comment, in its tint, once its header is above');
+  assert.deepEqual([...p.doc.querySelectorAll('tr.hv-path')].map(r => r.id), ['2', '3'], 'its path is lit on the page');
+  const rail2 = row(3).closest('.hv-children').querySelector(':scope > .hv-rail');
+  assert.ok(rail2.classList.contains('hv-path') && rail2.style.getPropertyValue('--hv-path-end'), 'with each rail down to the next comment on it');
+  move(bar());
+  move(row(3).closest('.hv-children'));
+  assert.ok(row(3).classList.contains('hv-pointer'), 'reaching for the bar, or crossing a margin, keeps the tint');
+  move(row(4).querySelector('.commtext'));
+  assert.deepEqual(names(), ['alice', 'bob'], 'a tinted comment in view ends the bar at its last ancestor above');
+  assert.deepEqual([...p.doc.querySelectorAll('tr.hv-path')].map(r => r.id), ['2', '3', '4']);
   let scrolled = null;
   row(2).scrollIntoView = () => { scrolled = 2; };
   bar().querySelector('a').click();
   assert.equal(scrolled, 2, 'a name goes to its comment');
+  assert.deepEqual([...bar().querySelectorAll('a')].map(a => a.dataset.hvPreview), ['2', '3'], 'and previews it');
   bar().querySelector('a').dispatchEvent(new p.dom.window.MouseEvent('mouseover', {bubbles: true}));
   assert.deepEqual([...p.doc.querySelectorAll('tr.hv-traced')].map(r => r.id), ['2', '4', '5'], 'and marks that person’s comments like the name itself');
+  move(p.doc.querySelector('.fatitem .titleline'));
+  assert.equal(p.doc.querySelector('.hv-path'), null, 'leaving the comments clears the lit path');
   scroll(p.doc.querySelector('.fatitem .titleline'));
   assert.equal(bar().hidden, true, 'nothing above the story: no bar');
   p.dom.window.close();
