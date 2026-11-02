@@ -1822,6 +1822,64 @@ test('the pointer on a branch rail tints and reads the comment the rail belongs 
   p.dom.window.close();
 });
 
+async function deepThread() {
+  const p = await lazyPage();
+  const api = p.dom.window.HackerViews;
+  const answer = entries => { const request = p.messages.filter(m => m.kind === 'lazyItems').at(-1); api.lazyResult(request.token, entries); };
+  answer([{id: 1, effect: 'visible', item: {id: 1, type: 'story', by: 'op', title: 'Topic', descendants: 4, score: 1, kids: [2, 5]}}]);
+  await new Promise(r => setTimeout(r, 5));
+  answer([{id: 2, effect: 'visible', item: {id: 2, type: 'comment', by: 'alice', parent: 1, text: 'One', kids: [3]}},
+    {id: 5, effect: 'visible', item: {id: 5, type: 'comment', by: 'alice', parent: 1, text: 'Elsewhere'}}]);
+  await new Promise(r => setTimeout(r, 5));
+  answer([{id: 3, effect: 'visible', item: {id: 3, type: 'comment', by: 'bob', parent: 2, text: 'Two', kids: [4]}}]);
+  await new Promise(r => setTimeout(r, 5));
+  answer([{id: 4, effect: 'visible', item: {id: 4, type: 'comment', by: 'alice', parent: 3, text: 'Three'}}]);
+  await new Promise(r => setTimeout(r, 5));
+  return p;
+}
+
+test('a name under the pointer marks every comment by that person, and leaving it clears them', async () => {
+  const p = await deepThread();
+  const row = id => p.doc.getElementById(String(id));
+  const over = element => element.dispatchEvent(new p.dom.window.MouseEvent('mouseover', {bubbles: true}));
+  over(row(4).querySelector('.hnuser'));
+  assert.deepEqual([...p.doc.querySelectorAll('tr.hv-traced')].map(r => r.id), ['2', '4', '5'], 'each comment by alice is marked, wherever it sits');
+  assert.ok([...p.doc.querySelectorAll('.comhead a.hnuser')].every(a => a.classList.contains('hv-traced') === (a.textContent === 'alice')), 'and only her names are underlined');
+  over(row(3).querySelector('.hnuser'));
+  assert.deepEqual([...p.doc.querySelectorAll('tr.hv-traced')].map(r => r.id), ['3'], 'moving to another name follows that person instead');
+  over(row(3).querySelector('.commtext'));
+  assert.equal(p.doc.querySelector('.hv-traced'), null, 'leaving the name clears the marks');
+  p.dom.window.close();
+});
+
+test('a bar names the authors of the comments above the one at the top of the viewport, and goes to them', async () => {
+  const p = await deepThread();
+  const row = id => p.doc.getElementById(String(id));
+  const bar = () => p.doc.querySelector('.hv-chain');
+  const names = () => [...bar().querySelectorAll('a.hv-chain-name')].map(a => a.textContent);
+  let underProbe = null, headerTop = 0;
+  p.doc.elementFromPoint = () => underProbe;
+  const rect = p.dom.window.Element.prototype.getBoundingClientRect;
+  p.dom.window.Element.prototype.getBoundingClientRect = function () { return this.matches('.comhead') ? {top: headerTop, bottom: headerTop + 14} : rect.call(this); };
+  const scroll = target => { underProbe = target; p.dom.window.dispatchEvent(new p.dom.window.Event('scroll')); };
+  headerTop = 100;
+  scroll(row(4).querySelector('.commtext'));
+  assert.deepEqual(names(), ['alice', 'bob'], 'the replies above, root first; the comment whose header is in view is not repeated');
+  assert.equal(bar().hidden, false);
+  headerTop = -40; p.dom.window.dispatchEvent(new p.dom.window.Event('resize'));
+  assert.deepEqual(names(), ['alice', 'bob', 'alice'], 'a comment whose header is under the bar is named too');
+  assert.deepEqual([...bar().querySelectorAll('a')].map(a => a.dataset.hvPreview), ['2', '3', '4'], 'each name previews its comment');
+  let scrolled = null;
+  row(2).scrollIntoView = () => { scrolled = 2; };
+  bar().querySelector('a').click();
+  assert.equal(scrolled, 2, 'a name goes to its comment');
+  bar().querySelector('a').dispatchEvent(new p.dom.window.MouseEvent('mouseover', {bubbles: true}));
+  assert.deepEqual([...p.doc.querySelectorAll('tr.hv-traced')].map(r => r.id), ['2', '4', '5'], 'and marks that person’s comments like the name itself');
+  scroll(p.doc.querySelector('.fatitem .titleline'));
+  assert.equal(bar().hidden, true, 'nothing above the story: no bar');
+  p.dom.window.close();
+});
+
 test('a revisited discussion counts new comments as they load, marks them, reads them as you jump on, and steps through them', async () => {
   const viewedAt = 1700000000;
   const p = await lazyPage(undefined, {visit: {viewedAt, leftAt: viewedAt + 600, descendants: 3, anchor: {id: 2, top: 10, y: 400, ancestors: [1]}}});

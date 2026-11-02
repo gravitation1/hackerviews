@@ -280,6 +280,20 @@
     .hv-rail:hover, .hv-rail:focus-visible, .hv-node:has(> .hv-own .hv-rail-head:hover) > .hv-children > .hv-rail { outline: 0; background: linear-gradient(to right, transparent 5px, var(--qhn-accent) 5px, var(--qhn-accent) 7px, transparent 7px); }
     .hv-node:has(> .hv-children > .hv-rail:hover) > .hv-own td.hv-gutter::before, .hv-own td.hv-gutter:has(> .hv-rail-head:hover)::before { background: var(--qhn-accent); border: 0; }
     .hv-node:has(> .hv-children > .hv-rail:hover) > .hv-own .comhead .hnuser, .hv-node:has(> .hv-own .hv-rail-head:hover) > .hv-own .comhead .hnuser { text-decoration: underline; }
+    /* Every comment by the name under the pointer: the name underlined, and a
+       tick from the gutter line toward it. */
+    a.hnuser.hv-traced, a.hv-chain-name.hv-traced { text-decoration: underline; }
+    .comtr.hv-traced td.hv-gutter::after { content: ''; position: absolute; left: 5px; top: 7px; width: 8px; height: 2px; background: var(--qhn-text); }
+    /* The authors above the comment at the top of the viewport. Jumps land
+       below the bar rather than under it. */
+    .hv-chain { position: fixed; top: 0; left: 0; right: 0; z-index: 1000; box-sizing: border-box; height: 26px; padding: 0 16px;
+      display: flex; align-items: center; gap: 6px; overflow: hidden; white-space: nowrap;
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif; font-size: 12px; color: var(--qhn-muted);
+      background: var(--qhn-bg); border-bottom: 1px solid var(--qhn-line); }
+    .hv-chain a.hv-chain-name, .hv-chain a.hv-chain-name:visited { flex: none; color: var(--qhn-text); font-weight: 600; text-decoration: none; }
+    .hv-chain a.hv-chain-name:hover, .hv-chain a.hv-chain-name:focus-visible, .hv-chain a.hv-chain-name.hv-traced { text-decoration: underline; }
+    .hv-chain-sep, .hv-chain-gap { flex: none; }
+    body[data-hv-topic] .hv-node, body[data-hv-topic] tr.comtr { scroll-margin-top: 30px; }
     .hv-reader-actions a, .hv-reader-actions .qhn-record-text { color: var(--qhn-muted); text-decoration: none; }
     .hv-reader-actions a:hover, .hv-reader-actions .qhn-record-text:hover { color: var(--qhn-accent); text-decoration: underline; }
     [hidden] { display: none !important; }
@@ -1045,6 +1059,33 @@
     const name = previewLink && noteAuthor(previewLink);
     if (name) requestUserNote(name);
   }
+  // A name under the pointer or in focus underlines the same name everywhere
+  // on the page, and each comment by that person carries a tick on its
+  // gutter line, so one voice can be followed through a deep thread. The
+  // names in the thread context bar do the same.
+  let tracedName = '', traced = [];
+  function tracedAuthor(node) {
+    const link = node?.closest?.('a.hnuser, a.hv-chain-name');
+    if (!link || link.closest('.pagetop, .hv-header')) return '';
+    const name = link.textContent.trim();
+    return /^[A-Za-z0-9_-]{1,100}$/.test(name) ? name : '';
+  }
+  function traceAuthor(name) {
+    if (name === tracedName) return;
+    for (const element of traced) element.classList.remove('hv-traced');
+    traced = []; tracedName = name;
+    if (!name) return;
+    for (const link of document.querySelectorAll('a.hnuser, a.hv-chain-name')) {
+      if (link.textContent.trim() !== name || link.closest('.pagetop, .hv-header')) continue;
+      link.classList.add('hv-traced'); traced.push(link);
+      const row = link.closest('tr.comtr');
+      if (row) { row.classList.add('hv-traced'); traced.push(row); }
+    }
+  }
+  document.addEventListener('mouseover', event => traceAuthor(tracedAuthor(event.target)));
+  document.addEventListener('focusin', event => traceAuthor(tracedAuthor(event.target)));
+  document.addEventListener('focusout', event => { if (!tracedAuthor(event.relatedTarget)) traceAuthor(''); });
+  document.documentElement.addEventListener('mouseleave', () => traceAuthor(''));
   function addControls() {
     renderHeader();
     if (!lazyThread) annotateLinks(document);
@@ -1424,6 +1465,7 @@
   let visitBaseline = null;
   const pluralize = (n, noun) => n + ' ' + noun + (n === 1 ? '' : 's');
   const lazyNodes = new Map();
+  const nodeOfHost = new WeakMap();
   const lazyCollapsed = new Set();
   const lazyGroups = new Map();
   let lazyObserver;
@@ -1575,7 +1617,7 @@
       if(lazyNodes.has(id))return lazyNodes.get(id);
       const host=document.createElement('div');host.className='hv-node';group.sentinel.before(host);
       const own=document.createElement('div');own.className='hv-own';host.append(own);lazyStatus(own,'Loading comments…');
-      const node={id,host,group,depth:group.depth,ancestors:group.ancestors,collapsed:lazyCollapsed.has(id)};lazyNodes.set(id,node);return node;
+      const node={id,host,group,depth:group.depth,ancestors:group.ancestors,collapsed:lazyCollapsed.has(id)};lazyNodes.set(id,node);nodeOfHost.set(host,node);return node;
     });
     if(group.offset===group.ids.length) {lazyObserver?.unobserve(group.sentinel);group.sentinel.remove();lazyGroups.delete(group.sentinel);}
     lazyRequestNodes(nodes);
@@ -1949,7 +1991,7 @@
       const nextHost = next !== undefined ? lazyNodes.get(next)?.host : null;
       if (nextHost) nextHost.before(host); else if (group.sentinel.isConnected) group.sentinel.before(host); else group.host.append(host);
       const node = {id, host, group, depth: group.depth, ancestors: group.ancestors, collapsed: lazyCollapsed.has(id)};
-      lazyNodes.set(id, node);
+      lazyNodes.set(id, node); nodeOfHost.set(host, node);
       lazyRender(node, own.entry);
     }
   }
@@ -2333,7 +2375,7 @@
       if(node.children)node.children.host.hidden=node.collapsed;
       onToggle?.(node.collapsed);update();
       if(node.collapsed)showCollapsed(node);
-      post({kind:'collapsedState',ids:[...lazyCollapsed]});lazyPump();
+      post({kind:'collapsedState',ids:[...lazyCollapsed]});lazyPump();scheduleChain();
     };
     return toggle;
   }
@@ -2341,6 +2383,7 @@
     const started=performance.now();
     lazyRenderContent(node,entry);
     trace('comment.dom',{id:node.id,ms:performance.now()-started});
+    scheduleChain();
   }
   function lazyRenderContent(node, entry) {
     if ((!entry.item || entry.effect === 'unresolved') && ownComments.has(node.id)) entry = ownComments.get(node.id).entry;
@@ -2556,6 +2599,65 @@
     if(!pointerAt || typeof document.elementFromPoint!=='function')return;
     pointAt(rowUnder(document.elementFromPoint(pointerAt.x,pointerAt.y)));
   },{passive:true});
+  // Thread context: once the comments a reply answers have scrolled away, a
+  // bar along the top names their authors, root first, down to the comment
+  // at the top of the viewport, which is named too while its own header is
+  // under the bar. Each name previews its comment and goes to it.
+  const chainHeight = 26, chainProbe = 30;
+  let chainBar = null, chainSignature = null, chainFramePending = false;
+  function scheduleChain() {
+    if(!lazyThread || chainFramePending)return;
+    if(typeof requestAnimationFrame!=='function'){updateChain();return;}
+    chainFramePending=true;
+    requestAnimationFrame(()=>{chainFramePending=false;updateChain();});
+  }
+  function chainPath() {
+    const root=document.getElementById('hv-topic-root');
+    if(!root || typeof document.elementFromPoint!=='function')return [];
+    const host=document.elementFromPoint(root.getBoundingClientRect().right-2,chainProbe)?.closest?.('.hv-node');
+    const node=host && nodeOfHost.get(host);
+    if(!node)return [];
+    const shown=n=>n?.entry?.item?.type==='comment' && (!filteredEffect(n.entry.effect) || lazyShown(n));
+    const path=[...node.ancestors].map(id=>lazyNodes.get(id)).filter(shown);
+    const head=node.host.querySelector(':scope > .hv-own tr.comtr .comhead');
+    if(shown(node) && head && head.getBoundingClientRect().top<chainHeight)path.push(node);
+    return path;
+  }
+  function chainLink(node) {
+    const a=hnLink(node.entry.item.by || '[deleted]','/item?id='+node.id);a.className='hv-chain-name';a.dataset.hvPreview=node.id;
+    a.onclick=event=>{
+      if(event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)return;
+      event.preventDefault();
+      node.host.style.contentVisibility='visible';
+      (node.host.querySelector(':scope > .hv-own tr.comtr') || node.host).scrollIntoView({block:'start'});
+    };
+    return a;
+  }
+  function updateChain() {
+    const path=chainPath(), signature=path.map(n=>n.id).join(',');
+    if(signature===chainSignature)return;
+    chainSignature=signature;
+    if(!chainBar) {
+      chainBar=document.createElement('nav');chainBar.className='hv-chain';chainBar.setAttribute('aria-label','Comments above');
+      document.body.append(chainBar);
+    }
+    chainBar.hidden=!path.length;
+    const links=path.map(chainLink);
+    const fill=list=>chainBar.replaceChildren(...list.flatMap((item,i)=>i?[Object.assign(document.createElement('span'),{className:'hv-chain-sep',textContent:'›'}),item]:[item]));
+    fill(links);
+    // A chain wider than the bar keeps its root and the comments nearest the
+    // reader, with an ellipsis for those between.
+    let cut=1;
+    while(chainBar.scrollWidth>chainBar.clientWidth && links.length-cut>2) {
+      cut++;
+      const gap=document.createElement('span');gap.className='hv-chain-gap';gap.textContent='…';
+      gap.title=links.slice(1,cut).map(a=>a.textContent).join(' › ');
+      fill([links[0],gap,...links.slice(cut)]);
+    }
+    if(tracedName)for(const a of chainBar.querySelectorAll('a.hv-chain-name'))if(a.textContent.trim()===tracedName){a.classList.add('hv-traced');traced.push(a);}
+  }
+  window.addEventListener('scroll',scheduleChain,{passive:true});
+  window.addEventListener('resize',()=>{chainSignature=null;scheduleChain();});
   function noteReadingScroll() {
     scrollingUntil=performance.now()+200;
     clearTimeout(settleTimer);
