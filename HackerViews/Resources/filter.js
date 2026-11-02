@@ -374,6 +374,9 @@
     .comtr.hv-pointer td.default { background: var(--qhn-hover); }
     .comtr td.default > br { display: none; }
     .comhead a.hnuser { color: var(--qhn-text); font-size: 12px; font-weight: 600; }
+    /* The author takes the accent under the pointer, as it does while its
+       rail is hovered; the underline still marks it as a link. */
+    .comhead a.hnuser:hover, .comhead a.hnuser:focus-visible { color: var(--qhn-accent) !important; }
     .reply a, .reply a:any-link { display: inline-block; font: inherit; font-size: 12px; padding: 2px 0; margin-top: 2px;
       background: transparent; border: 0; text-decoration: none; color: var(--qhn-muted); }
     .reply a:hover { color: var(--qhn-accent); text-decoration: underline; }
