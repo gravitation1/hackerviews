@@ -1899,6 +1899,29 @@ test('a bar names the comments above on the tinted comment’s path, the page li
   p.dom.window.close();
 });
 
+test('a name in the context bar carries the filter mark its comment’s header shows', async () => {
+  const p = await lazyPage();
+  const api = p.dom.window.HackerViews;
+  const answer = entries => { const request = p.messages.filter(m => m.kind === 'lazyItems').at(-1); api.lazyResult(request.token, entries); };
+  answer([{id: 1, effect: 'visible', item: {id: 1, type: 'story', by: 'op', title: 'Topic', descendants: 3, score: 1, kids: [2]}}]);
+  await new Promise(r => setTimeout(r, 5));
+  answer([{id: 2, effect: 'highlight:#8a5cf6', label: 'The Ancients', item: {id: 2, type: 'comment', by: 'drp', parent: 1, text: 'One', kids: [3]}}]);
+  await new Promise(r => setTimeout(r, 5));
+  answer([{id: 3, effect: 'fade:50', label: 'Quiet', item: {id: 3, type: 'comment', by: 'hush', parent: 2, text: 'Two', kids: [4]}}]);
+  await new Promise(r => setTimeout(r, 5));
+  answer([{id: 4, effect: 'visible', item: {id: 4, type: 'comment', by: 'plain', parent: 3, text: 'Three'}}]);
+  await new Promise(r => setTimeout(r, 5));
+  p.doc.elementFromPoint = () => p.doc.getElementById('4').querySelector('.commtext');
+  p.dom.window.dispatchEvent(new p.dom.window.Event('resize'));
+  const [first, second, third] = p.doc.querySelectorAll('.hv-chain a.hv-chain-name');
+  assert.ok(first.classList.contains('hv-chain-preferred') && first.getAttribute('data-qhn-filter-label') === 'The Ancients', 'a highlighted author keeps the highlight and its label');
+  assert.equal(first.style.getPropertyValue('--qhn-highlight'), '#8a5cf6', 'in the filter’s colour');
+  assert.equal(first.title, 'Matching filter: The Ancients');
+  assert.ok(second.classList.contains('hv-chain-faded') && second.getAttribute('data-qhn-filter-label') === 'Quiet', 'a faded author keeps the fade mark');
+  assert.ok(!third.classList.contains('hv-chain-preferred') && !third.classList.contains('hv-chain-faded') && !third.hasAttribute('data-qhn-filter-label'), 'an unmarked author stays plain');
+  p.dom.window.close();
+});
+
 test('a revisited discussion counts new comments as they load, marks them, reads them as you jump on, and steps through them', async () => {
   const viewedAt = 1700000000;
   const p = await lazyPage(undefined, {visit: {viewedAt, leftAt: viewedAt + 600, descendants: 3, anchor: {id: 2, top: 10, y: 400, ancestors: [1]}}});

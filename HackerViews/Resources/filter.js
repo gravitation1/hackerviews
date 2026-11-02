@@ -452,10 +452,11 @@
     .qhn-preferred:not(.comtr) { background: color-mix(in srgb, var(--qhn-highlight, #27a99a) 12%, var(--qhn-bg)) !important; }
     .qhn-preferred:not(.comtr) > td { background: transparent !important; }
 
-    .qhn-preferred-author { color: var(--qhn-highlight, #27a99a) !important; font-weight: 600; }
-    .qhn-faded-author[data-qhn-filter-label]::after { content: ' ◐ ' attr(data-qhn-filter-label); font-size: 10px; font-weight: 600; color: var(--qhn-muted); }
-    .qhn-preferred-author::after { content: ' ★'; font-size: 10px; font-weight: 600; }
-    .qhn-preferred-author[data-qhn-filter-label]::after { content: ' ★ ' attr(data-qhn-filter-label); }
+    /* A filter's mark on a name, in a comment's header and in the context bar alike. */
+    .qhn-preferred-author, .hv-chain a.hv-chain-preferred { color: var(--qhn-highlight, #27a99a) !important; font-weight: 600; }
+    .qhn-faded-author[data-qhn-filter-label]::after, .hv-chain-faded[data-qhn-filter-label]::after { content: ' ◐ ' attr(data-qhn-filter-label); font-size: 10px; font-weight: 600; color: var(--qhn-muted); }
+    .qhn-preferred-author::after, .hv-chain-preferred::after { content: ' ★'; font-size: 10px; font-weight: 600; }
+    .qhn-preferred-author[data-qhn-filter-label]::after, .hv-chain-preferred[data-qhn-filter-label]::after { content: ' ★ ' attr(data-qhn-filter-label); }
     .qhn-op-badge { display: inline-block; margin-left: 5px; padding: 1px 4px;
       font-size: 10px; line-height: 1.3; font-weight: 700; border: 1px solid currentColor;
       border-radius: 4px; color: var(--qhn-text); vertical-align: baseline; }
@@ -2658,8 +2659,21 @@
       rail.classList.add('hv-path');pathMarks.push(rail);
     });
   }
+  // The filter's mark on a comment's author, as its header shows it.
+  function chainMark(node) {
+    const row=node.host.querySelector(':scope > .hv-own tr.comtr'), user=row?.querySelector('.comhead a.hnuser');
+    const kind=user?.classList.contains('qhn-preferred-author')?'preferred':user?.classList.contains('qhn-faded-author')?'faded':'';
+    return {kind,label:kind && user.getAttribute('data-qhn-filter-label') || '',color:kind==='preferred' && row.style.getPropertyValue('--qhn-highlight') || '',title:kind && user.title || ''};
+  }
   function chainLink(node) {
     const a=hnLink(node.entry.item.by || '[deleted]','/item?id='+node.id);a.className='hv-chain-name';a.dataset.hvPreview=node.id;
+    const mark=chainMark(node);
+    if(mark.kind) {
+      a.classList.add('hv-chain-'+mark.kind);
+      if(mark.label)a.setAttribute('data-qhn-filter-label',mark.label);
+      if(mark.color)a.style.setProperty('--qhn-highlight',mark.color);
+      if(mark.title)a.title=mark.title;
+    }
     a.onclick=event=>{
       if(event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)return;
       event.preventDefault();
@@ -2676,7 +2690,7 @@
     chainLayoutDirty=false;
     const above=path.filter(n=>{const head=chainHeader(n);return !!head && head.getBoundingClientRect().top<chainHeight;});
     const current=pointed && above.at(-1)===node;
-    const signature=above.map(n=>n.id).join(',')+(current?'*':'');
+    const signature=above.map(n=>{const mark=chainMark(n);return [n.id,mark.kind,mark.label,mark.color].join(':');}).join(',')+(current?'*':'');
     if(signature===chainSignature)return;
     chainSignature=signature;
     if(!chainBar) {
