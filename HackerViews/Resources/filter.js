@@ -279,7 +279,7 @@
       cursor: pointer; background: linear-gradient(to right, transparent 5px, var(--qhn-line) 5px, var(--qhn-line) 7px, transparent 7px); }
     .hv-rail:hover, .hv-rail:focus-visible, .hv-node:has(> .hv-own .hv-rail-head:hover) > .hv-children > .hv-rail { outline: 0; background: linear-gradient(to right, transparent 5px, var(--qhn-accent) 5px, var(--qhn-accent) 7px, transparent 7px); }
     .hv-node:has(> .hv-children > .hv-rail:hover) > .hv-own td.hv-gutter::before, .hv-own td.hv-gutter:has(> .hv-rail-head:hover)::before { background: var(--qhn-accent); border: 0; }
-    .hv-node:has(> .hv-children > .hv-rail:hover) > .hv-own .comhead .hnuser, .hv-node:has(> .hv-own .hv-rail-head:hover) > .hv-own .comhead .hnuser { color: var(--qhn-accent) !important; }
+    .hv-node:has(> .hv-children > .hv-rail:hover) > .hv-own .comhead .hnuser, .hv-node:has(> .hv-own .hv-rail-head:hover) > .hv-own .comhead .hnuser { text-decoration: underline; }
     .hv-reader-actions a, .hv-reader-actions .qhn-record-text { color: var(--qhn-muted); text-decoration: none; }
     .hv-reader-actions a:hover, .hv-reader-actions .qhn-record-text:hover { color: var(--qhn-accent); text-decoration: underline; }
     [hidden] { display: none !important; }
@@ -374,9 +374,6 @@
     .comtr.hv-pointer td.default { background: var(--qhn-hover); }
     .comtr td.default > br { display: none; }
     .comhead a.hnuser { color: var(--qhn-text); font-size: 12px; font-weight: 600; }
-    /* The author takes the accent under the pointer, as it does while its
-       rail is hovered; the underline still marks it as a link. */
-    .comhead a.hnuser:hover, .comhead a.hnuser:focus-visible { color: var(--qhn-accent) !important; }
     .reply a, .reply a:any-link { display: inline-block; font: inherit; font-size: 12px; padding: 2px 0; margin-top: 2px;
       background: transparent; border: 0; text-decoration: none; color: var(--qhn-muted); }
     .reply a:hover { color: var(--qhn-accent); text-decoration: underline; }
@@ -2535,11 +2532,16 @@
   let resultFramePending = false;
   let scrollingUntil = 0, settleTimer = null;
   function scrollingNow() { return performance.now() < scrollingUntil; }
-  // The comment under the pointer takes the hover tint and is read. WebKit
-  // holds back its own pointer events while the page scrolls, so each scroll
-  // hit-tests the last pointer position to keep the tint on the comment that
-  // is under it in that frame.
+  // The comment under the pointer takes the hover tint and is read. A rail
+  // stands for the comment whose replies it runs beside, so the pointer on it
+  // points at that comment. WebKit holds back its own pointer events while the
+  // page scrolls, so each scroll hit-tests the last pointer position to keep
+  // the tint on the comment that is under it in that frame.
   let pointerRow = null, pointerAt = null;
+  function rowUnder(element) {
+    if(element?.matches?.('.hv-rail'))return element.closest('.hv-node')?.querySelector(':scope > .hv-own tr.comtr') || null;
+    return element?.closest?.('tr.comtr') || null;
+  }
   function pointAt(row) {
     if(row===pointerRow)return;
     pointerRow?.classList.remove('hv-pointer');pointerRow=row;row?.classList.add('hv-pointer');
@@ -2547,12 +2549,12 @@
   }
   document.addEventListener('mousemove',event=>{
     pointerAt={x:event.clientX,y:event.clientY};
-    pointAt(event.target.closest?.('tr.comtr') || null);
+    pointAt(rowUnder(event.target));
   },{passive:true});
   document.documentElement.addEventListener('mouseleave',()=>{pointerAt=null;pointAt(null);});
   window.addEventListener('scroll',()=>{
     if(!pointerAt || typeof document.elementFromPoint!=='function')return;
-    pointAt(document.elementFromPoint(pointerAt.x,pointerAt.y)?.closest('tr.comtr') || null);
+    pointAt(rowUnder(document.elementFromPoint(pointerAt.x,pointerAt.y)));
   },{passive:true});
   function noteReadingScroll() {
     scrollingUntil=performance.now()+200;

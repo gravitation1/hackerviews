@@ -1794,6 +1794,34 @@ test('the comment under the pointer is tinted and read, whether the pointer move
   p.dom.window.close();
 });
 
+test('the pointer on a branch rail tints and reads the comment the rail belongs to', async () => {
+  const viewedAt = 1700000000;
+  const p = await lazyPage(undefined, {visit: {viewedAt, leftAt: viewedAt + 600, descendants: 0}});
+  const api = p.dom.window.HackerViews;
+  let request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  api.lazyResult(request.token, [{id: 1, effect: 'visible', item: {id: 1, type: 'story', by: 'op', title: 'Topic', descendants: 2, score: 12, kids: [2]}}]);
+  await new Promise(r => setTimeout(r, 5));
+  request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  api.lazyResult(request.token, [{id: 2, effect: 'visible', item: {id: 2, type: 'comment', by: 'a', parent: 1, time: viewedAt + 100, text: 'Parent', kids: [3]}}]);
+  await new Promise(r => setTimeout(r, 5));
+  request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  api.lazyResult(request.token, [{id: 3, effect: 'visible', item: {id: 3, type: 'comment', by: 'b', parent: 2, time: viewedAt + 200, text: 'Reply'}}]);
+  await new Promise(r => setTimeout(r, 5));
+  const row = id => p.doc.getElementById(String(id));
+  const rail = row(3).closest('.hv-children').querySelector(':scope > .hv-rail');
+  assert.ok(rail && rail.closest('.hv-node').contains(row(2)), 'the reply sits beside its parent’s rail');
+  rail.dispatchEvent(new p.dom.window.MouseEvent('mousemove', {bubbles: true}));
+  assert.ok(row(2).classList.contains('hv-pointer') && !row(3).classList.contains('hv-pointer'), 'the rail tints the comment it belongs to, not the reply beside it');
+  assert.ok(row(2).classList.contains('hv-new-read'), 'and reads it, as the pointer on the comment would');
+  p.doc.elementFromPoint = () => row(3).querySelector('.commtext');
+  p.dom.window.dispatchEvent(new p.dom.window.Event('scroll'));
+  assert.ok(row(3).classList.contains('hv-pointer'), 'scrolling a reply under the pointer moves the tint to it');
+  p.doc.elementFromPoint = () => rail;
+  p.dom.window.dispatchEvent(new p.dom.window.Event('scroll'));
+  assert.ok(row(2).classList.contains('hv-pointer') && !row(3).classList.contains('hv-pointer'), 'and scrolling the rail under it moves the tint back');
+  p.dom.window.close();
+});
+
 test('a revisited discussion counts new comments as they load, marks them, reads them as you jump on, and steps through them', async () => {
   const viewedAt = 1700000000;
   const p = await lazyPage(undefined, {visit: {viewedAt, leftAt: viewedAt + 600, descendants: 3, anchor: {id: 2, top: 10, y: 400, ancestors: [1]}}});
