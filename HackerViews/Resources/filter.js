@@ -2018,13 +2018,15 @@
       // other dimmed and ready to switch the vote. Nothing moves.
       const unknown=actions?.voted==='unknown';
       const cast=actions?.voted===direction || unknown, eligible=!!actions?.[direction], dead=!cast && !eligible;
+      const locked=' · Hacker News no longer lets this vote change';
       button.hidden=false;
       button.classList.toggle('hv-voted',cast);
       button.classList.toggle('hv-ineligible',dead);
       button.setAttribute('aria-pressed',String(cast));
       const verb=direction==='up'?'Upvote':'Downvote', state=direction==='up'?'Upvoted':'Downvoted';
-      const label=cast ? (!actions.undo ? state : actions.undoFailed ? 'Undo failed. Click to retry'
-          : unknown ? 'Voted on Hacker News, which doesn’t say which way. Click to undo' : state+'. Click to undo')
+      const label=cast ? (unknown ? 'Voted on Hacker News, which no longer says which way'+locked
+          : actions.locked ? state+locked : !actions.undo ? state : actions.undoFailed ? 'Undo failed. Click to retry' : state+'. Click to undo')
+        : actions?.locked ? (actions.voted==='up'?'Upvoted':'Downvoted')+locked
         : dead ? (actions ? 'Can’t '+verb.toLowerCase()+' this' : verb)
         : actions?.voted ? 'Switch to '+verb.toLowerCase() : (button.dataset.hvRetry ? 'Retry vote' : verb);
       button.title=label;button.setAttribute('aria-label',label);
@@ -2063,14 +2065,34 @@
       const other=actions.voted==='up'?'down':'up';
       if(!actions[other] && (other==='up' || downvotesAllowed())) { const derived=new URL(actions.undo);derived.searchParams.set('how',other);actions[other]=derived.href; }
     }
-    // HN can leave the unvote link out, keeping only the hidden arrows. The
-    // vote stands, which way unknown, and the arrows' token undoes it.
+    // Once a vote can no longer be undone, HN drops the unvote link and keeps
+    // only both arrows, hidden: the vote stands, locked, and only a direction
+    // seen while HN still named it says which way.
     if(!actions.voted && !actions.up && !actions.down) {
       const arrows=[...row.querySelectorAll('.votelinks a[href]')].filter(a=>a.closest('tr.athing')===row);
-      const links=arrows.map(a=>new URL(a.getAttribute('href'),target)).filter(url=>url.origin===location.origin && url.pathname==='/vote' && url.searchParams.get('id')===String(id) && url.searchParams.get('auth'));
-      if(links.length && arrows.every(a=>a.classList.contains('nosee'))) { const undo=new URL(links[0]);undo.searchParams.set('how','un');actions.voted='unknown';actions.undo=undo.href; }
+      const ours=arrows.map(a=>new URL(a.getAttribute('href'),target)).some(url=>url.origin===location.origin && url.pathname==='/vote' && url.searchParams.get('id')===String(id) && url.searchParams.get('auth'));
+      if(ours && arrows.every(a=>a.classList.contains('nosee'))) { actions.voted=rememberedVote(id) || 'unknown'; actions.locked=true; }
     }
+    if(actions.undo)rememberVote(id,actions.voted);
+    else if(actions.up || actions.down)rememberVote(id,null);
     return actions;
+  }
+  // The direction of each vote the reader has seen named, kept with HN's site
+  // data so a vote HN has locked still shows which way it went.
+  const voteMemoryKey='hackerViews.votes';
+  let voteMemory=null;
+  function votesRemembered() {
+    if(voteMemory)return voteMemory;
+    try { const saved=JSON.parse(localStorage.getItem(voteMemoryKey)||'{}');voteMemory=saved && typeof saved==='object'?saved:{}; } catch(_) { voteMemory={}; }
+    return voteMemory;
+  }
+  function rememberedVote(id) { const direction=votesRemembered()[id];return ['up','down'].includes(direction)?direction:null; }
+  function rememberVote(id,direction) {
+    const votes=votesRemembered();
+    if((votes[id]||null)===direction)return;
+    delete votes[id];if(direction)votes[id]=direction;
+    const ids=Object.keys(votes);for(const old of ids.slice(0,Math.max(0,ids.length-5000)))delete votes[old];
+    try { localStorage.setItem(voteMemoryKey,JSON.stringify(votes)); } catch(_) {}
   }
   // The vote links of a row, described without their auth tokens.
   function voteMarkup(doc,row) {
@@ -2094,7 +2116,7 @@
       const response=await pooledFetch(url.href,{credentials:'same-origin',cache:'no-store'});
       if(!response.ok)throw new Error();
       cleared=true;
-      voteActions.set(id,{});updateVoteControls(id);
+      voteActions.set(id,{});rememberVote(id,null);updateVoteControls(id);
       // Ask HN which actions are now eligible rather than assuming.
       const target=new URL('/item?id='+id,location.origin).href;
       const page=await pooledFetch(target,{credentials:'same-origin',cache:'no-store'});
@@ -2187,7 +2209,8 @@
   }
   async function lazyVote(item, button, direction) {
     const current=voteActions.get(item.id);
-    if(current?.voted===direction || current?.voted==='unknown')return undoVote(item.id);
+    if(current?.locked)return;
+    if(current?.voted===direction)return undoVote(item.id);
     // The other arrow while a vote stands: undo, then cast the other way.
     if(current?.voted)return undoVote(item.id,{item,button,direction});
     return castVote(item,button,direction);
@@ -2202,7 +2225,7 @@
       url.searchParams.set('how','un');
       delete button.dataset.hvRetry;
       const other=direction==='up'?'down':'up', kept=voteActions.get(item.id)||{};
-      voteActions.set(item.id,{[other]:kept[other],voted:direction,undo:url.href});updateVoteControls(item.id);
+      voteActions.set(item.id,{[other]:kept[other],voted:direction,undo:url.href});rememberVote(item.id,direction);updateVoteControls(item.id);
     } catch (_) {button.dataset.hvRetry='1';}
     finally {pendingVotes.delete(item.id);updateVoteControls(item.id);}
   }

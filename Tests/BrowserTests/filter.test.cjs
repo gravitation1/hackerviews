@@ -1220,31 +1220,43 @@ test('hidden authenticated vote links are unavailable even without an undo link'
   p.dom.window.close();
 });
 
-test('a vote HN shows only by hiding both arrows stands, which way unknown, and the arrows’ token undoes it', async () => {
-  const p = await lazyPage(); const w = p.dom.window; const requests = []; let voted = true, refuse = true;
-  w.IntersectionObserver = class {constructor(callback) {this.callback = callback;} observe(target) {this.callback([{target, isIntersecting: true}]);} unobserve() {}};
-  w.fetch = async url => {
-    const u = new URL(url);
-    if (u.pathname === '/vote') { requests.push(u.searchParams.get('how') + ':' + u.searchParams.get('auth')); if (!refuse) voted = false; return {ok: true}; }
-    return {ok: true, text: async () => `<table><tr class="athing comtr" id="1"><td class="votelinks">
-      <a id="up_1" class="clicky${voted ? ' nosee' : ''}" href="vote?id=1&how=up&auth=token1&goto=item%3Fid%3D1">up</a><a id="down_1" class="clicky${voted ? ' nosee' : ''}" href="vote?id=1&how=down&auth=token1&goto=item%3Fid%3D1">down</a>
-      </td><td><span class="comhead">author <span id="unv_1"></span></span></td></tr></table>`};
-  };
-  const request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
-  w.HackerViews.lazyResult(request.token, [{id: 1, effect: 'visible', item: {id: 1, type: 'comment', by: 'author', text: 'Comment'}}]);
-  await new Promise(r => setTimeout(r, 20));
-  const [up, down] = p.doc.querySelectorAll('.hv-vote');
-  assert.ok([up, down].every(b => b.classList.contains('hv-voted') && !b.disabled), 'both arrows show the vote and can undo it');
-  assert.equal(up.getAttribute('aria-label'), 'Voted on Hacker News, which doesn’t say which way. Click to undo');
-  down.click(); await new Promise(r => setTimeout(r, 20));
-  assert.deepEqual(requests, ['un:token1'], 'either arrow undoes with the hidden arrows’ token');
-  assert.equal(up.getAttribute('aria-label'), 'Undo failed. Click to retry', 'a vote HN still shows afterwards was not undone');
-  refuse = false;
-  up.click(); await new Promise(r => setTimeout(r, 20));
-  assert.deepEqual(requests, ['un:token1', 'un:token1']);
-  assert.ok([up, down].every(b => !b.classList.contains('hv-voted') && !b.disabled), 'once undone, both arrows are offered');
-  up.click(); await new Promise(r => setTimeout(r, 20));
-  assert.equal(requests.at(-1), 'up:token1', 'and a new vote can be cast');
+test('a vote HN has locked shows as cast and cannot change; its direction is the one last seen named', async () => {
+  // HN's markup: while a vote can change, an unvote or undown link; once it
+  // cannot, only both arrows, hidden, and an empty unv_ span.
+  const markup = state => `<table><tr class="athing comtr" id="1"><td class="votelinks">
+    <a id="up_1" class="clicky${state !== 'open' ? ' nosee' : ''}" href="vote?id=1&how=up&auth=token1&goto=item%3Fid%3D1">up</a><a id="down_1" class="clicky${state !== 'open' ? ' nosee' : ''}" href="vote?id=1&how=down&auth=token1&goto=item%3Fid%3D1">down</a>
+    </td><td><span class="comhead">author <span id="unv_1">${state === 'down' ? ' | <a id="un_1" href="vote?id=1&how=un&auth=token1">undown</a>' : ''}</span></span></td></tr></table>`;
+  const storage = new Map();
+  async function open(state) {
+    const p = await lazyPage(); const w = p.dom.window; const requests = [];
+    Object.defineProperty(w, 'localStorage', {configurable: true, value: {getItem: k => storage.get(k) ?? null, setItem: (k, v) => storage.set(k, String(v))}});
+    w.IntersectionObserver = class {constructor(callback) {this.callback = callback;} observe(target) {this.callback([{target, isIntersecting: true}]);} unobserve() {}};
+    w.fetch = async url => { const u = new URL(url); if (u.pathname === '/vote') { requests.push(u.searchParams.get('how')); return {ok: true}; } return {ok: true, text: async () => markup(state)}; };
+    const request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+    w.HackerViews.lazyResult(request.token, [{id: 1, effect: 'visible', item: {id: 1, type: 'comment', by: 'author', text: 'Comment'}}]);
+    await new Promise(r => setTimeout(r, 20));
+    const [up, down] = p.doc.querySelectorAll('.hv-vote');
+    return {p, up, down, requests};
+  }
+  let {p, up, down, requests} = await open('locked');
+  assert.ok([up, down].every(b => b.classList.contains('hv-voted') && b.disabled), 'a vote never seen named shows on both arrows, and neither can change it');
+  assert.equal(up.getAttribute('aria-label'), 'Voted on Hacker News, which no longer says which way · Hacker News no longer lets this vote change');
+  up.click(); down.click(); await new Promise(r => setTimeout(r, 10));
+  assert.deepEqual(requests, [], 'nothing is sent');
+  p.dom.window.close();
+  ({p, up, down} = await open('down'));
+  assert.ok(down.classList.contains('hv-voted') && !down.disabled, 'while HN names the vote it can be undone');
+  p.dom.window.close();
+  ({p, up, down, requests} = await open('locked'));
+  assert.ok(down.classList.contains('hv-voted') && down.disabled && !up.classList.contains('hv-voted') && up.disabled, 'once locked, the direction seen shows');
+  assert.equal(down.getAttribute('aria-label'), 'Downvoted · Hacker News no longer lets this vote change');
+  assert.equal(up.getAttribute('aria-label'), 'Downvoted · Hacker News no longer lets this vote change');
+  p.dom.window.close();
+  ({p, up, down} = await open('open'));
+  assert.ok([up, down].every(b => !b.classList.contains('hv-voted') && !b.disabled), 'a vote undone on HN shows as gone');
+  p.dom.window.close();
+  ({p, up, down} = await open('locked'));
+  assert.ok([up, down].every(b => b.classList.contains('hv-voted')), 'and its direction is forgotten');
   p.dom.window.close();
 });
 
