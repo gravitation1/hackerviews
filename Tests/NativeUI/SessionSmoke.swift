@@ -64,6 +64,14 @@ actor Fetches {
         print("PASS submission state consumed by redirects, clicks, reload/back, completion and failure")
         print("PASS edit/delete submission redirects preserve fresh canonical content")
         print("PASS reply submission redirects preserve canonical content only for that navigation")
+        _ = navigation.preservesCanonicalNavigation(to: commentURL, type: .formSubmitted, isMainFrame: true)
+        precondition(navigation.preservesCanonicalNavigation(to: topicURL, type: .other, isMainFrame: true) && navigation.commentLanding, "a posted comment lands in the reader")
+        precondition(!navigation.preservesCanonicalNavigation(to: topicURL, type: .linkActivated, isMainFrame: true) && !navigation.commentLanding)
+        for path in ["xedit", "xdelete"] {
+            _ = navigation.preservesCanonicalNavigation(to: URL(string: "https://news.ycombinator.com/" + path)!, type: .formSubmitted, isMainFrame: true)
+            precondition(navigation.preservesCanonicalNavigation(to: topicURL, type: .other, isMainFrame: true) && !navigation.commentLanding, "an edit or deletion keeps HN's page")
+        }
+        print("PASS a posted comment lands in the reader; edits and deletions keep HN's page")
         let fetches = Fetches()
         let replies = HNService(directory: directory.appendingPathComponent("replies"), itemLoader: { id in
             await fetches.add(id)
@@ -84,6 +92,19 @@ actor Fetches {
         }
         while !expired { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
         print("PASS a post's landing discussion and comment are fetched fresh, so the reader shows the reply")
+        let deep = HNService(directory: directory.appendingPathComponent("deep"), itemLoader: { id in
+            HNItem(id: id, by: "author", parent: id == 1 ? nil : id - 1, type: id == 1 ? "story" : "comment", kids: [])
+        })
+        var traced = false
+        Task { @MainActor in
+            let path = await BrowserTab.ancestry(of: 5, in: 1, service: deep)
+            precondition(path == [1, 2, 3, 4], "the path to a replied comment runs root first, got \(String(describing: path))")
+            let elsewhere = await BrowserTab.ancestry(of: 5, in: 99, service: deep)
+            precondition(elsewhere == nil, "a comment outside the discussion has no path in it")
+            traced = true
+        }
+        while !traced { RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
+        print("PASS a posted reply's landing knows the path to the comment it answered")
         let first = BrowserWorkspace(store: store, defaults: defaults)
         first.start()
         let home = first.tabs[0]

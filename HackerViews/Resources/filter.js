@@ -1465,6 +1465,8 @@
   let localToken = 0;
   let localApplying = false;
   let lazyRestoreAnchor = null;
+  // A comment just posted: the comment it replied to, or the discussion.
+  let postLanding = null;
   let lazyRefreshQueue = null;
   let lazyRestoreY = 0;
   let lazyJump = null;
@@ -2005,6 +2007,22 @@
   }
   // Asks the API again for a comment drawn from HN's page; its answer, once
   // it has one, replaces what HN's page gave.
+  // Once the reader draws the account's reply under the comment it answered,
+  // the page goes to it, unless the reader has started scrolling by then.
+  function landOnPost() {
+    if(!postLanding || !signedInUser)return;
+    if(Date.now()>postLanding.until){postLanding=null;return;}
+    let reply=null;
+    for(const node of lazyNodes.values()) {
+      const item=node.entry?.item;
+      if(item?.type!=='comment' || item.by!==signedInUser || item.parent!==postLanding.parent || !(item.time>=postLanding.since))continue;
+      if(node.host.querySelector(':scope > .hv-own tr.comtr') && (!reply || node.id>reply.id))reply=node;
+    }
+    if(!reply)return;
+    postLanding=null;
+    lazyRestoreAnchor={id:reply.id,top:30,ancestors:[...reply.ancestors]};lazyRestoreY=0;localPaused=false;lazyPump();
+  }
+  for(const type of ['wheel','touchmove','keydown'])window.addEventListener(type,()=>{postLanding=null;},{passive:true});
   function scheduleOwnRecheck(node) {
     if (ownTimers.has(node.id)) return;
     ownTimers.set(node.id, setTimeout(() => {
@@ -2207,7 +2225,7 @@
         const parsed=readHeader(doc,target);
         if(parsed){if(parsed.links.length)headerModel.links=parsed.links;headerModel.identity=parsed.identity;headerModel.blackBar=parsed.blackBar;renderHeader();}
       }
-      rememberCanonicalItems(doc,target);rememberOwnComments(doc);rememberCommentForm(doc,target);
+      rememberCanonicalItems(doc,target);rememberOwnComments(doc);rememberCommentForm(doc,target);landOnPost();
       let rows=0,withActions=0;const unmatched=[];
       for(const row of doc.querySelectorAll('tr.athing[id]')) {
         const id=Number(row.id);if(!Number.isSafeInteger(id))continue;
@@ -2578,6 +2596,7 @@
       notice.append('Temporarily revealed · Hidden by '+(entry.label || 'your filters')+' · '); const hide=document.createElement('button');hide.textContent='Hide again';hide.onclick=()=>setRootRevealed(false);notice.append(hide);own.prepend(notice); }
     addControls();paintOP();applyCanonicalMetadata(node);annotateLinks(own);
     if (ownComments.size) placeOwnComments(node.id);
+    if (postLanding && item.parent===postLanding.parent && item.by && item.by===signedInUser) landOnPost();
   }
   const queuedResults = new Map();
   let resultFramePending = false;
@@ -2871,6 +2890,15 @@
       for(const id of anchor.collapsed || [])if(Number.isSafeInteger(id) && id>0)lazyCollapsed.add(id);
       if(Number.isSafeInteger(anchor.id) && anchor.id>0 && Array.isArray(anchor.ancestors))lazyRestoreAnchor=anchor;
     } catch(_) {}
+    // Landing from a post, the path down to the comment it replied to stays
+    // open, so the reply is not left inside a collapsed thread.
+    const posted=Number(document.body.dataset.hvPosted);
+    if(Number.isSafeInteger(posted) && posted>0) {
+      postLanding={parent:posted,since:Date.now()/1000-600,until:Date.now()+60000};
+      let opened=false;
+      for(const id of [...(lazyRestoreAnchor?.ancestors||[]),posted])if(lazyCollapsed.delete(id))opened=true;
+      if(opened)post({kind:'collapsedState',ids:[...lazyCollapsed]});
+    }
     if(typeof IntersectionObserver!=='undefined')lazyObserver=new IntersectionObserver(entries=>{
       for(const entry of entries)if(entry.isIntersecting){
         const group=lazyGroups.get(entry.target);

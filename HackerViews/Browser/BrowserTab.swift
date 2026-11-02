@@ -47,6 +47,13 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
     private var shellNavigation = false
     private var canonicalTopicURL: URL?
     private var pendingFormSubmission = false
+    /// The path of the form whose submission is under way, and whether the
+    /// navigation just preserved for it is a comment's landing.
+    private var submittedFormPath: String?
+    private(set) var commentLanding = false
+    /// The comment a post replied to, or the discussion it was made on. The
+    /// shell opens there and goes on to the account's reply once it is drawn.
+    private var postedParent: Int?
     private var networkWaiters: [Int: Task<Void, Never>] = [:]
     private var networkLeases = Set<Int>()
     private var lazyTasks: [Int: Task<Void, Never>] = [:]
@@ -266,10 +273,12 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
         state = .loading
         let reveal = consumeIntent(\.pendingReveal, for: id) ? " data-hv-reveal=\"1\"" : ""
         let jump = consumeIntent(\.pendingNewJump, for: id) ? " data-hv-jump-new=\"1\"" : ""
+        let posted = postedParent.map { " data-hv-posted=\"\($0)\"" } ?? ""
+        postedParent = nil
         webView.loadHTMLString("""
         <!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>Hacker News</title>
         <link rel="stylesheet" href="https://news.ycombinator.com/news.css"></head>
-        <body data-hv-topic="\(id)" data-hv-scroll="\(y)" data-hv-anchor="\(anchorData)" data-hv-visit="\(visitData)"\(reveal)\(jump)><main id="hv-topic">
+        <body data-hv-topic="\(id)" data-hv-scroll="\(y)" data-hv-anchor="\(anchorData)" data-hv-visit="\(visitData)"\(reveal)\(jump)\(posted)><main id="hv-topic">
         <header id="hv-header" class="hv-header"></header>
         <div id="hv-topic-root"></div></main></body></html>
         """, baseURL: target)
@@ -931,6 +940,7 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
     }
 
     func preservesCanonicalNavigation(to target: URL, type: WKNavigationType, isMainFrame: Bool) -> Bool {
+        commentLanding = false
         guard isMainFrame, Self.isHN(target) else { return false }
         if target == canonicalTopicURL {
             canonicalTopicURL = nil
@@ -943,19 +953,50 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
                 pendingFormSubmission = false
                 lazyURL = nil
                 expireReplies(at: target)
+                commentLanding = submittedFormPath == "/comment"
                 return true
             }
             pendingFormSubmission = true
+            submittedFormPath = target.path
             return false
         case .other:
             let keep = pendingFormSubmission && Self.topicID(target) != nil
             pendingFormSubmission = false
-            if keep { lazyURL = nil; expireReplies(at: target) }
+            if keep { lazyURL = nil; expireReplies(at: target); commentLanding = submittedFormPath == "/comment" }
             return keep
         default:
             pendingFormSubmission = false
             return false
         }
+    }
+
+    /// A posted comment comes back to the reader, not HN's page: at the comment
+    /// it replied to, along the path the reader loads first, and from there to
+    /// the reply itself, which the reader draws from HN's page until the API
+    /// carries it. Edits and deletions keep HN's page, whose text is current.
+    private func openCommentLanding(_ target: URL, topic: Int) {
+        let replied = target.fragment.flatMap { Int($0) }.flatMap { $0 > 0 && $0 != topic ? $0 : nil }
+        let epoch = navigationID
+        let service = service
+        Task { @MainActor [weak self] in
+            let ancestors = replied == nil ? nil : await Self.ancestry(of: replied!, in: topic, service: service)
+            guard let self, navigationID == epoch else { return }
+            if let replied, let ancestors { refreshAnchor = ["id": replied, "top": 30, "y": 0, "ancestors": ancestors] }
+            postedParent = ancestors == nil ? topic : replied
+            recordNavigation(target)
+            loadTopic(target)
+        }
+    }
+    /// The comments above `id` in the discussion `topic`, root first.
+    static func ancestry(of id: Int, in topic: Int, service: HNService) async -> [Int]? {
+        var above: [Int] = [], current = id
+        for _ in 0..<500 {
+            guard let parent = try? await service.item(current)?.parent else { return nil }
+            above.append(parent)
+            if parent == topic { return above.reversed() }
+            current = parent
+        }
+        return nil
     }
 
     /// A post comes back to the discussion it was made in, at the comment it
@@ -979,6 +1020,12 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
         if Self.isHN(target) {
             if preservesCanonicalNavigation(to: target, type: navigationAction.navigationType,
                                             isMainFrame: navigationAction.targetFrame?.isMainFrame == true) {
+                if commentLanding, let topic = Self.topicID(target) {
+                    commentLanding = false
+                    decisionHandler(.cancel)
+                    openCommentLanding(target, topic: topic)
+                    return
+                }
                 decisionHandler(.allow)
                 return
             }

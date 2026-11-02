@@ -512,13 +512,14 @@ test('a discussion over 1000 comments requests every item and renders progressiv
   p.dom.window.close();
 });
 
-async function lazyPage(anchor, {reveal = false, visit = null, jumpNew = false} = {}) {
+async function lazyPage(anchor, {reveal = false, visit = null, jumpNew = false, posted = 0} = {}) {
   const p=await page('<main id="hv-topic"><header id="hv-header" class="hv-header"></header><div id="hv-topic-root"></div></main>',{blocked:[],url:'https://news.ycombinator.com/item?id=1'});
   p.dom.window.Element.prototype.getClientRects=function(){return this.closest('[hidden]')?[]:[{}];};
   p.dom.window.Element.prototype.getBoundingClientRect=function(){return {top:0,bottom:100};};
   p.doc.body.dataset.hvTopic='1';
   if(reveal)p.doc.body.dataset.hvReveal='1';
   if(jumpNew)p.doc.body.dataset.hvJumpNew='1';
+  if(posted)p.doc.body.dataset.hvPosted=String(posted);
   if(visit)p.doc.body.dataset.hvVisit=Buffer.from(JSON.stringify(visit)).toString('base64');
   if(anchor) {p.doc.body.dataset.hvAnchor=Buffer.from(JSON.stringify(anchor)).toString('base64');p.doc.body.dataset.hvScroll=String(anchor.y);}
   p.dom.window.HackerViews.retry();
@@ -2017,6 +2018,35 @@ test('the account’s own comments are never new, whether HN names the account b
   await new Promise(r => setTimeout(r, 5));
   assert.ok(!row(4).classList.contains('hv-new'), 'and one drawn after HN named the account is never marked');
   assert.equal(text(), '1 new comment since your last visit', 'the count leaves out the account’s own');
+  p.dom.window.close();
+});
+
+test('a discussion opened from a posted reply goes to the comment replied to, opens its thread, and then to the reply', async () => {
+  const now = Math.floor(Date.now() / 1000);
+  const p = await lazyPage({id: 2, top: 30, y: 0, ancestors: [1]}, {posted: 2, visit: {viewedAt: now - 3600, leftAt: now - 3000, descendants: 1, collapsed: [2]}});
+  const api = p.dom.window.HackerViews;
+  p.dom.window.IntersectionObserver = class {constructor(callback){this.callback=callback;}observe(target){this.callback([{target,isIntersecting:true}]);}unobserve(){}};
+  // HN's page has the reply; the API's copy of comment 2 does not list it yet.
+  let release; const html = new Promise(resolve => { release = resolve; });
+  p.dom.window.fetch = async () => ({ok: true, text: async () => html});
+  const scrolls = [];
+  p.dom.window.scrollTo = (x, y) => scrolls.push(y);
+  const tops = {2: 200, 3: 500};
+  const rect = p.dom.window.Element.prototype.getBoundingClientRect;
+  p.dom.window.Element.prototype.getBoundingClientRect = function () { const top = tops[this.id]; return top === undefined ? rect.call(this) : {top, bottom: top + 40}; };
+  let request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  api.lazyResult(request.token, [{id: 1, effect: 'visible', item: {id: 1, type: 'story', by: 'op', title: 'Topic', descendants: 1, score: 1, kids: [2]}}]);
+  await new Promise(r => setTimeout(r, 5));
+  request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  api.lazyResult(request.token, [{id: 2, effect: 'visible', item: {id: 2, type: 'comment', by: 'bob', parent: 1, time: now - 4000, text: 'Asked', kids: []}}]);
+  await new Promise(r => setTimeout(r, 5));
+  assert.equal(scrolls.at(-1), 170, 'the comment replied to comes to the top, below the bar');
+  const toggle = p.doc.getElementById('2').querySelector('.hv-collapse');
+  assert.equal(toggle.getAttribute('aria-expanded'), 'true', 'its thread is open although it was collapsed last visit');
+  release(hnHeader(signedIn) + `<table>${row(2, 'bob')}${row(3, 'alice', 1)}</table>`);
+  await new Promise(r => setTimeout(r, 30));
+  assert.ok(p.doc.getElementById('3'), 'the reply is drawn from HN’s page');
+  assert.equal(scrolls.at(-1), 470, 'and the page goes on to it');
   p.dom.window.close();
 });
 
