@@ -1220,6 +1220,34 @@ test('hidden authenticated vote links are unavailable even without an undo link'
   p.dom.window.close();
 });
 
+test('a vote HN shows only by hiding both arrows stands, which way unknown, and the arrows’ token undoes it', async () => {
+  const p = await lazyPage(); const w = p.dom.window; const requests = []; let voted = true, refuse = true;
+  w.IntersectionObserver = class {constructor(callback) {this.callback = callback;} observe(target) {this.callback([{target, isIntersecting: true}]);} unobserve() {}};
+  w.fetch = async url => {
+    const u = new URL(url);
+    if (u.pathname === '/vote') { requests.push(u.searchParams.get('how') + ':' + u.searchParams.get('auth')); if (!refuse) voted = false; return {ok: true}; }
+    return {ok: true, text: async () => `<table><tr class="athing comtr" id="1"><td class="votelinks">
+      <a id="up_1" class="clicky${voted ? ' nosee' : ''}" href="vote?id=1&how=up&auth=token1&goto=item%3Fid%3D1">up</a><a id="down_1" class="clicky${voted ? ' nosee' : ''}" href="vote?id=1&how=down&auth=token1&goto=item%3Fid%3D1">down</a>
+      </td><td><span class="comhead">author <span id="unv_1"></span></span></td></tr></table>`};
+  };
+  const request = p.messages.filter(m => m.kind === 'lazyItems').at(-1);
+  w.HackerViews.lazyResult(request.token, [{id: 1, effect: 'visible', item: {id: 1, type: 'comment', by: 'author', text: 'Comment'}}]);
+  await new Promise(r => setTimeout(r, 20));
+  const [up, down] = p.doc.querySelectorAll('.hv-vote');
+  assert.ok([up, down].every(b => b.classList.contains('hv-voted') && !b.disabled), 'both arrows show the vote and can undo it');
+  assert.equal(up.getAttribute('aria-label'), 'Voted on Hacker News, which doesn’t say which way. Click to undo');
+  down.click(); await new Promise(r => setTimeout(r, 20));
+  assert.deepEqual(requests, ['un:token1'], 'either arrow undoes with the hidden arrows’ token');
+  assert.equal(up.getAttribute('aria-label'), 'Undo failed. Click to retry', 'a vote HN still shows afterwards was not undone');
+  refuse = false;
+  up.click(); await new Promise(r => setTimeout(r, 20));
+  assert.deepEqual(requests, ['un:token1', 'un:token1']);
+  assert.ok([up, down].every(b => !b.classList.contains('hv-voted') && !b.disabled), 'once undone, both arrows are offered');
+  up.click(); await new Promise(r => setTimeout(r, 20));
+  assert.equal(requests.at(-1), 'up:token1', 'and a new vote can be cast');
+  p.dom.window.close();
+});
+
 test('failed undo stays retryable and restored controls respect current eligibility',async()=>{
   const p=await lazyPage();let voted=true,fail=true,undoRequests=0;
   p.dom.window.IntersectionObserver=class {constructor(callback){this.callback=callback;}observe(target){this.callback([{target,isIntersecting:true}]);}unobserve(){}};

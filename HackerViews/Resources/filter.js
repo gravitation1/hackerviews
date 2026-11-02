@@ -2016,13 +2016,15 @@
     for(const {button,direction} of voteControls.get(id)||[]) {
       // Both arrows stay while a vote stands: the cast one in colour, the
       // other dimmed and ready to switch the vote. Nothing moves.
-      const cast=actions?.voted===direction, eligible=!!actions?.[direction], dead=!cast && !eligible;
+      const unknown=actions?.voted==='unknown';
+      const cast=actions?.voted===direction || unknown, eligible=!!actions?.[direction], dead=!cast && !eligible;
       button.hidden=false;
       button.classList.toggle('hv-voted',cast);
       button.classList.toggle('hv-ineligible',dead);
       button.setAttribute('aria-pressed',String(cast));
       const verb=direction==='up'?'Upvote':'Downvote', state=direction==='up'?'Upvoted':'Downvoted';
-      const label=cast ? (!actions.undo ? state : actions.undoFailed ? 'Undo failed. Click to retry' : state+'. Click to undo')
+      const label=cast ? (!actions.undo ? state : actions.undoFailed ? 'Undo failed. Click to retry'
+          : unknown ? 'Voted on Hacker News, which doesn’t say which way. Click to undo' : state+'. Click to undo')
         : dead ? (actions ? 'Can’t '+verb.toLowerCase()+' this' : verb)
         : actions?.voted ? 'Switch to '+verb.toLowerCase() : (button.dataset.hvRetry ? 'Retry vote' : verb);
       button.title=label;button.setAttribute('aria-label',label);
@@ -2061,7 +2063,25 @@
       const other=actions.voted==='up'?'down':'up';
       if(!actions[other] && (other==='up' || downvotesAllowed())) { const derived=new URL(actions.undo);derived.searchParams.set('how',other);actions[other]=derived.href; }
     }
+    // HN can leave the unvote link out, keeping only the hidden arrows. The
+    // vote stands, which way unknown, and the arrows' token undoes it.
+    if(!actions.voted && !actions.up && !actions.down) {
+      const arrows=[...row.querySelectorAll('.votelinks a[href]')].filter(a=>a.closest('tr.athing')===row);
+      const links=arrows.map(a=>new URL(a.getAttribute('href'),target)).filter(url=>url.origin===location.origin && url.pathname==='/vote' && url.searchParams.get('id')===String(id) && url.searchParams.get('auth'));
+      if(links.length && arrows.every(a=>a.classList.contains('nosee'))) { const undo=new URL(links[0]);undo.searchParams.set('how','un');actions.voted='unknown';actions.undo=undo.href; }
+    }
     return actions;
+  }
+  // The vote links of a row, described without their auth tokens.
+  function voteMarkup(doc,row) {
+    const link=a=>{
+      let query={};try{const url=new URL(a.getAttribute('href')||'',location.href);query=Object.fromEntries([...url.searchParams].map(([k,v])=>[k,k==='auth'?'…':k==='goto'?'':v]));url.pathname!=='/vote'&&(query.path=url.pathname);}catch(_){}
+      return {id:a.id,class:a.className,text:a.textContent.trim().slice(0,20),hidden:voteLinkHidden(a),query};
+    };
+    const id=row.id, by=row.querySelector('.hnuser')?.textContent||'';
+    const votes=[...row.querySelectorAll('.votelinks a')].map(link);
+    const undo=[...row.querySelectorAll('a[href*="how=un"], [id^="un"]')].map(a=>a.tagName==='A'?link(a):{id:a.id,tag:a.tagName,text:a.textContent.trim().slice(0,20)});
+    return {id,own:!!signedInUser && by===signedInUser,dead:/\[(dead|flagged)\]/.test(row.textContent),votes,undo,byID:!!doc.getElementById('un_'+id)};
   }
   function downvotesAllowed() { return parseInt(String(headerModel.identity?.karma||'').replace(/,/g,''),10)>=501; }
   async function undoVote(id, then) {
@@ -2081,7 +2101,8 @@
       if(page.ok) {
         const doc=new DOMParser().parseFromString(await page.text(),'text/html');
         const row=doc.querySelector('tr.athing[id="'+id+'"]');
-        if(row)voteActions.set(id,readVoteActions(doc,row,target));
+        // HN answers an undo it refuses as it answers one it makes; its page says which.
+        if(row){const actions=readVoteActions(doc,row,target);if(actions.voted)actions.undoFailed=true;voteActions.set(id,actions);}
       }
     } catch (_) {
       if(!cleared && voteActions.get(id)===previous)previous.undoFailed=true;
@@ -2115,17 +2136,19 @@
         if(parsed){if(parsed.links.length)headerModel.links=parsed.links;headerModel.identity=parsed.identity;headerModel.blackBar=parsed.blackBar;renderHeader();}
       }
       rememberCanonicalItems(doc,target);rememberOwnComments(doc);rememberCommentForm(doc,target);
-      let rows=0,withActions=0;
+      let rows=0,withActions=0;const unmatched=[];
       for(const row of doc.querySelectorAll('tr.athing[id]')) {
         const id=Number(row.id);if(!Number.isSafeInteger(id))continue;
         const actions=readVoteActions(doc,row,target);
         rows++;if(actions.up || actions.down || actions.voted)withActions++;
+        else if(unmatched.length<20)unmatched.push(voteMarkup(doc,row));
         voteActions.set(id,actions);updateVoteControls(id);
       }
       // What HN's page gave the arrows, for the trace: how many rows, how
       // many of them with a vote the account can cast or undo, and whether
-      // the page came back signed in.
-      trace('votes.result',{rows,actions:withActions,signedIn:!!signedInUser});
+      // the page came back signed in; for rows with none, the shape of the
+      // vote markup HN sent.
+      trace('votes.result',{rows,actions:withActions,signedIn:!!signedInUser,unmatched});
       votePages.add(target);
       const more=doc.querySelector('a.morelink[href]');
       const next=more?new URL(more.getAttribute('href'),target):null;
@@ -2164,7 +2187,7 @@
   }
   async function lazyVote(item, button, direction) {
     const current=voteActions.get(item.id);
-    if(current?.voted===direction)return undoVote(item.id);
+    if(current?.voted===direction || current?.voted==='unknown')return undoVote(item.id);
     // The other arrow while a vote stands: undo, then cast the other way.
     if(current?.voted)return undoVote(item.id,{item,button,direction});
     return castVote(item,button,direction);

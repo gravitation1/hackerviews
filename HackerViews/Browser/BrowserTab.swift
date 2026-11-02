@@ -573,8 +573,9 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
                         "layoutShifts", "layoutShiftScore", "pumpCalls", "pumpTotal", "pumpMax", "renderCalls", "renderTotal",
                         "renderMax", "delta", "wheelAge", "scrolling", "anchorCalls", "anchorTotal", "anchorMax",
                         "anchorSelectTotal", "anchorRowsMax", "anchorChecked", "anchorCheckedMax", "anchorScrollCalls", "anchorWaitMax",
-                        "rows", "actions", "signedIn"] {
+                        "rows", "actions", "signedIn", "unmatched"] {
                 if let value = body[key] as? NSNumber { fields[key] = value }
+                else if key == "unmatched", let value = body[key] as? [[String: Any]], value.count <= 20, JSONSerialization.isValidJSONObject(value) { fields[key] = value }
                 else if key == "reason", let value = body[key] as? String, ["viewport", "navigation", "restore", "refresh", "status", "page", "timeout", "network"].contains(value) { fields[key] = value }
             }
             ReaderTrace.event("web." + event, fields)
