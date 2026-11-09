@@ -1853,7 +1853,7 @@ test('a name under the pointer marks every comment by that person, and leaving i
   p.dom.window.close();
 });
 
-test('a bar names the comments above on the tinted comment’s path, the page lights the rest, and with nothing tinted it follows the top comment', async () => {
+test('a bar names the tinted comment’s whole path once part of it is above, the page lights it, and with nothing tinted it follows the top comment', async () => {
   const p = await deepThread();
   const row = id => p.doc.getElementById(String(id));
   const bar = () => p.doc.querySelector('.hv-chain');
@@ -1884,13 +1884,18 @@ test('a bar names the comments above on the tinted comment’s path, the page li
   move(row(3).closest('.hv-children'));
   assert.ok(row(3).classList.contains('hv-pointer'), 'reaching for the bar, or crossing a margin, keeps the tint');
   move(row(4).querySelector('.commtext'));
-  assert.deepEqual(names(), ['alice', 'bob'], 'a tinted comment in view ends the bar at its last ancestor above');
+  assert.deepEqual(names(), ['alice', 'bob', 'alice*'], 'a tinted comment still in view is named too, in its tint');
   assert.deepEqual([...p.doc.querySelectorAll('tr.hv-path')].map(r => r.id), ['2', '3', '4']);
+  tops[3] = 60; relayout();
+  assert.deepEqual(names(), ['alice', 'bob', 'alice*'], 'the bar runs the whole path, through the comments in view, to the tinted one');
+  tops[2] = 40; relayout();
+  assert.equal(bar().hidden, true, 'a path wholly in view needs no bar');
+  Object.assign(tops, {2: -200, 3: -80}); relayout();
   let scrolled = null;
   row(2).scrollIntoView = () => { scrolled = 2; };
   bar().querySelector('a').click();
   assert.equal(scrolled, 2, 'a name goes to its comment');
-  assert.deepEqual([...bar().querySelectorAll('a')].map(a => a.dataset.hvPreview), ['2', '3'], 'and previews it');
+  assert.deepEqual([...bar().querySelectorAll('a')].map(a => a.dataset.hvPreview), ['2', '3', '4'], 'and previews it');
   bar().querySelector('a').dispatchEvent(new p.dom.window.MouseEvent('mouseover', {bubbles: true}));
   assert.deepEqual([...p.doc.querySelectorAll('tr.hv-traced')].map(r => r.id), ['2', '4', '5'], 'and marks that person’s comments like the name itself');
   move(p.doc.querySelector('.fatitem .titleline'));

@@ -290,8 +290,8 @@
        tick from the gutter line toward it. */
     a.hnuser.hv-traced, a.hv-chain-name.hv-traced { text-decoration: underline; }
     .comtr.hv-traced td.hv-gutter::after { content: ''; position: absolute; left: 5px; top: 7px; width: 8px; height: 2px; background: var(--qhn-text); }
-    /* The tinted comment's path above the viewport. Jumps land
-       below the bar rather than under it. */
+    /* The tinted comment's path, shown once part of it is above the
+       viewport. Jumps land below the bar rather than under it. */
     .hv-chain { position: fixed; top: 0; left: 0; right: 0; z-index: 1000; box-sizing: border-box; height: 26px; padding: 0 16px;
       display: flex; align-items: center; gap: 6px; overflow: hidden; white-space: nowrap;
       font-family: -apple-system, BlinkMacSystemFont, sans-serif; font-size: 12px; color: var(--qhn-muted);
@@ -2638,11 +2638,12 @@
   },{passive:true});
   // The tinted comment's path to the root of its thread: on the page, each
   // rail on the path is lit down to the next comment on it, with an elbow
-  // into that comment's gutter line; along the top, a bar names the comments
-  // on the path whose headers have scrolled above it, root first, and the
-  // tinted comment itself, in its tint, once its own header has. Each name
-  // previews its comment and goes to it. With no comment tinted, the bar
-  // follows the comment at the top of the viewport and nothing is lit.
+  // into that comment's gutter line; along the top, once a header on the path
+  // has scrolled above it, a bar names the whole path, root first, ending in
+  // the tinted comment itself, in its tint. Each name previews its comment
+  // and goes to it. With no comment tinted, the bar follows the comment at
+  // the top of the viewport, naming the comments whose headers have scrolled
+  // above it, and nothing is lit.
   const chainHeight = 26, chainProbe = 30;
   let chainBar = null, chainSignature = null, chainFramePending = false, chainLayoutDirty = true, pathKey = null, pathMarks = [];
   function scheduleChain(layout = false) {
@@ -2708,16 +2709,17 @@
     if(key!==pathKey || chainLayoutDirty){pathKey=key;markPath(pointed?path:[]);}
     chainLayoutDirty=false;
     const above=path.filter(n=>{const head=chainHeader(n);return !!head && head.getBoundingClientRect().top<chainHeight;});
-    const current=pointed && above.at(-1)===node;
-    const signature=above.map(n=>{const mark=chainMark(n);return [n.id,mark.kind,mark.label,mark.color].join(':');}).join(',')+(current?'*':'');
+    const named=pointed && above.length?path:above;
+    const current=pointed && named.at(-1)===node;
+    const signature=named.map(n=>{const mark=chainMark(n);return [n.id,mark.kind,mark.label,mark.color].join(':');}).join(',')+(current?'*':'');
     if(signature===chainSignature)return;
     chainSignature=signature;
     if(!chainBar) {
-      chainBar=document.createElement('nav');chainBar.className='hv-chain';chainBar.setAttribute('aria-label','Comments above');
+      chainBar=document.createElement('nav');chainBar.className='hv-chain';chainBar.setAttribute('aria-label','Comment path');
       document.body.append(chainBar);
     }
-    chainBar.hidden=!above.length;
-    const links=above.map(chainLink);
+    chainBar.hidden=!named.length;
+    const links=named.map(chainLink);
     if(current)links.at(-1).classList.add('hv-chain-current');
     const fill=list=>chainBar.replaceChildren(...list.flatMap((item,i)=>i?[Object.assign(document.createElement('span'),{className:'hv-chain-sep',textContent:'›'}),item]:[item]));
     fill(links);
