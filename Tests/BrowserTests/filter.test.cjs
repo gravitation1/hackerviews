@@ -1853,7 +1853,7 @@ test('a name under the pointer marks every comment by that person, and leaving i
   p.dom.window.close();
 });
 
-test('a bar names the tinted comment’s whole path once part of it is above, the page lights it, and with nothing tinted it follows the top comment', async () => {
+test('a bar names the tinted comment’s whole path, the page lights it, and with nothing tinted it follows the top comment', async () => {
   const p = await deepThread();
   const row = id => p.doc.getElementById(String(id));
   const bar = () => p.doc.querySelector('.hv-chain');
@@ -1889,7 +1889,10 @@ test('a bar names the tinted comment’s whole path once part of it is above, th
   tops[3] = 60; relayout();
   assert.deepEqual(names(), ['alice', 'bob', 'alice*'], 'the bar runs the whole path, through the comments in view, to the tinted one');
   tops[2] = 40; relayout();
-  assert.equal(bar().hidden, true, 'a path wholly in view needs no bar');
+  assert.deepEqual(names(), ['alice', 'bob', 'alice*'], 'and a path wholly in view is named all the same');
+  move(row(5).querySelector('.commtext'));
+  assert.deepEqual(names(), ['alice*'], 'a tinted top-level comment is the whole of its path');
+  move(row(4).querySelector('.commtext'));
   Object.assign(tops, {2: -200, 3: -80}); relayout();
   let scrolled = null;
   row(2).scrollIntoView = () => { scrolled = 2; };

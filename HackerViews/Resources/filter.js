@@ -290,8 +290,8 @@
        tick from the gutter line toward it. */
     a.hnuser.hv-traced, a.hv-chain-name.hv-traced { text-decoration: underline; }
     .comtr.hv-traced td.hv-gutter::after { content: ''; position: absolute; left: 5px; top: 7px; width: 8px; height: 2px; background: var(--qhn-text); }
-    /* The tinted comment's path, shown once part of it is above the
-       viewport. Jumps land below the bar rather than under it. */
+    /* The tinted comment's path. Jumps land below the bar rather than
+       under it. */
     .hv-chain { position: fixed; top: 0; left: 0; right: 0; z-index: 1000; box-sizing: border-box; height: 26px; padding: 0 16px;
       display: flex; align-items: center; gap: 6px; overflow: hidden; white-space: nowrap;
       font-family: -apple-system, BlinkMacSystemFont, sans-serif; font-size: 12px; color: var(--qhn-muted);
@@ -2638,10 +2638,10 @@
   },{passive:true});
   // The tinted comment's path to the root of its thread: on the page, each
   // rail on the path is lit down to the next comment on it, with an elbow
-  // into that comment's gutter line; along the top, once a header on the path
-  // has scrolled above it, a bar names the whole path, root first, ending in
-  // the tinted comment itself, in its tint. Each name previews its comment
-  // and goes to it. With no comment tinted, the bar follows the comment at
+  // into that comment's gutter line; along the top, a bar names the whole
+  // path, root first, ending in the tinted comment itself, in its tint,
+  // wherever the path's comments sit on the page. Each name previews its
+  // comment and goes to it. With no comment tinted, the bar follows the comment at
   // the top of the viewport, naming the comments whose headers have scrolled
   // above it, and nothing is lit.
   const chainHeight = 26, chainProbe = 30;
@@ -2709,7 +2709,7 @@
     if(key!==pathKey || chainLayoutDirty){pathKey=key;markPath(pointed?path:[]);}
     chainLayoutDirty=false;
     const above=path.filter(n=>{const head=chainHeader(n);return !!head && head.getBoundingClientRect().top<chainHeight;});
-    const named=pointed && above.length?path:above;
+    const named=pointed?path:above;
     const current=pointed && named.at(-1)===node;
     const signature=named.map(n=>{const mark=chainMark(n);return [n.id,mark.kind,mark.label,mark.color].join(':');}).join(',')+(current?'*':'');
     if(signature===chainSignature)return;
