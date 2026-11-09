@@ -296,9 +296,11 @@
       display: flex; align-items: center; gap: 6px; overflow: hidden; white-space: nowrap;
       font-family: -apple-system, BlinkMacSystemFont, sans-serif; font-size: 12px; color: var(--qhn-muted);
       background: var(--qhn-bg); border-bottom: 1px solid var(--qhn-line); }
-    .hv-chain a.hv-chain-name, .hv-chain a.hv-chain-name:visited { flex: none; color: var(--qhn-text); font-weight: 600; text-decoration: none; }
+    /* Every name holds the room its tint takes, drawn out into the gaps
+       beside it, so the tint moving along the path shifts nothing. */
+    .hv-chain a.hv-chain-name, .hv-chain a.hv-chain-name:visited { flex: none; margin: 0 -5px; padding: 0 5px; border-radius: 4px; color: var(--qhn-text); font-weight: 600; text-decoration: none; }
     .hv-chain a.hv-chain-name:hover, .hv-chain a.hv-chain-name:focus-visible, .hv-chain a.hv-chain-name.hv-traced { text-decoration: underline; }
-    .hv-chain a.hv-chain-current { padding: 0 5px; border-radius: 4px; background: var(--qhn-hover); }
+    .hv-chain a.hv-chain-current { background: var(--qhn-hover); }
     .hv-chain-sep, .hv-chain-gap { flex: none; }
     body[data-hv-topic] .hv-node, body[data-hv-topic] tr.comtr { scroll-margin-top: 30px; }
     .hv-reader-actions a, .hv-reader-actions .qhn-record-text { color: var(--qhn-muted); text-decoration: none; }
